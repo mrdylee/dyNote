@@ -4,6 +4,7 @@ import { DEFAULT_FORCES } from "./graph-kernel.mjs";
 export function createSimulationLoop({ bytes, createKernel, send, schedule = (fn) => setTimeout(fn, 16), cancel = clearTimeout }) {
   let epoch = -1, kernel = null, timer = null, paused = false, dead = false;
   let alpha = 0, settings = { ...DEFAULT_FORCES }, buffers = [], inFlight = 0;
+  const pendingPins = new Map();
   const stop = () => { if (timer !== null) cancel(timer); timer = null; };
   const fail = (error) => { stop(); alpha = 0; send({ type: "error", epoch, message: error.message }); };
   const wake = () => {
@@ -25,13 +26,16 @@ export function createSimulationLoop({ bytes, createKernel, send, schedule = (fn
       if (message.type === "graph") {
         if (message.epoch <= epoch) return;
         epoch = message.epoch; stop(); kernel?.dispose(); kernel = null;
-        buffers = []; inFlight = 0; alpha = 0.3; paused = !!message.paused;
+        buffers = []; inFlight = 0; pendingPins.clear(); alpha = 0.3; paused = !!message.paused;
         settings = { ...DEFAULT_FORCES, ...message.settings };
+        if (!message.positions.length) { alpha = 0; return; }
         const installing = epoch;
         try {
           const next = await createKernel(await bytes, message);
           if (dead || installing !== epoch) { next.dispose(); return; }
           kernel = next;
+          for (const [index, [x, y]] of pendingPins) kernel.pin(index, x, y);
+          pendingPins.clear();
           buffers = [new ArrayBuffer(message.positions.byteLength), new ArrayBuffer(message.positions.byteLength)];
           wake();
         } catch (error) { if (!dead && installing === epoch) fail(error); }
@@ -41,8 +45,11 @@ export function createSimulationLoop({ bytes, createKernel, send, schedule = (fn
       try {
         switch (message.type) {
           case "settings": settings = { ...settings, ...message.settings }; alpha = 0.3; break;
-          case "pin": kernel?.pin(message.index, message.x, message.y); alpha = 0.3; break;
-          case "unpin": kernel?.unpin(message.index); alpha = 0.3; break;
+          case "pin":
+            if (kernel) kernel.pin(message.index, message.x, message.y);
+            else pendingPins.set(message.index, [message.x, message.y]);
+            alpha = 0.3; break;
+          case "unpin": pendingPins.delete(message.index); kernel?.unpin(message.index); alpha = 0.3; break;
           case "pause": paused = true; stop(); break;
           case "resume": paused = false; break;
           case "recycle":
@@ -52,6 +59,6 @@ export function createSimulationLoop({ bytes, createKernel, send, schedule = (fn
         wake();
       } catch (error) { fail(error); }
     },
-    destroy() { dead = true; stop(); kernel?.dispose(); kernel = null; buffers = []; },
+    destroy() { dead = true; stop(); kernel?.dispose(); kernel = null; buffers = []; pendingPins.clear(); },
   };
 }

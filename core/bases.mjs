@@ -6,7 +6,7 @@ import {
   evaluateToPlain,
 } from "obsidian-bases-expression";
 import { parseMetadata } from "./metadata.mjs";
-import { resolvePath } from "./links.mjs";
+import { createLinkIndex, resolvePath } from "./links.mjs";
 
 const record = (v) => v && typeof v === "object" && !Array.isArray(v);
 export function parseBase(source) {
@@ -135,21 +135,24 @@ export function evaluateBase(source, notes, viewIndex = 0, basePath = "") {
     ]),
   ];
   const rows = [];
+  const index = createLinkIndex(notes);
   const linksByPath = new Map(
     notes.map((n) => [
       n.path,
       (n.links ?? [])
-        .map((l) => resolvePath(l.target, n.path, notes, { kind: l.kind }))
+        .map((l) => resolvePath(l.target, n.path, notes, { kind: l.kind, index }))
         .filter((r) => r.status === "resolved")
         .map((r) => r.path),
     ]),
   );
+  const backlinksByPath = new Map(notes.map((n) => [n.path, []]));
+  for (const n of notes)
+    for (const target of new Set(linksByPath.get(n.path)))
+      backlinksByPath.get(target).push(n.path);
   for (const n of notes) {
     if (n.error) continue;
     const links = linksByPath.get(n.path);
-    const backlinks = notes
-      .filter((other) => linksByPath.get(other.path).includes(n.path))
-      .map((other) => other.path);
+    const backlinks = backlinksByPath.get(n.path);
     const context = createEvaluationContext({
       note: n.properties ?? {},
       file: {

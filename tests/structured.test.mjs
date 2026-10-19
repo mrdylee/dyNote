@@ -197,6 +197,9 @@ test("Canvas validates optional display values instead of crashing the renderer"
   const data = JSON.parse(canvas());
   data.nodes[0].color = { unsafe: true };
   assert.throws(() => parseCanvas(JSON.stringify(data)));
+  delete data.nodes[0].color;
+  data.nodes[0].subpath = { heading: "invalid" };
+  assert.throws(() => parseCanvas(JSON.stringify(data)), /subpath/);
 });
 test("Bases file properties reflect snapshot metadata and resolved backlinks", async () => {
   const { evaluateBase } = await load("bases");
@@ -236,6 +239,18 @@ test("unsupported Base settings are read-only, and display names must be strings
       "properties: {status: {displayName: [bad]}}\nviews: [{type: table}]\n",
     ),
   );
+});
+test("Bases backlinks resolve aliases and relative paths once per source and exclude ambiguous names", async () => {
+  const { evaluateBase } = await load("bases");
+  const notes = buildKnowledge([
+    { path: "A.md", content: "[[별칭]] [[folder/B]] [relative](folder/B.md) [[Duplicate]]" },
+    { path: "folder/B.md", content: "---\naliases: [별칭]\n---\n[B](B.md)" },
+    { path: "one/Duplicate.md", content: "" },
+    { path: "two/Duplicate.md", content: "" },
+  ]).notes;
+  const result = evaluateBase("views: [{type: table, order: [file.path, formula.incoming]}]\nformulas:\n  incoming: file.backlinks.length\n", notes);
+  assert.equal(result.rows.find((r) => r.path === "folder/B.md").values["formula.incoming"], 2);
+  assert.equal(result.rows.find((r) => r.path === "one/Duplicate.md").values["formula.incoming"], 0);
 });
 test("file metadata returned after edits matches actual UTF-8 bytes", async (t) => {
   const { store } = await fixture(t);

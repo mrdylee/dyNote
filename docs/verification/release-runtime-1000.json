@@ -1,0 +1,41 @@
+{
+  "count": 1000,
+  "packaged": false,
+  "viewport": {
+    "width": 1420,
+    "height": 940
+  },
+  "checks": [
+    "notes://app WASM Worker WebGL load",
+    "node and edge counts",
+    "idle: no Worker frames or scheduled renders",
+    "zoom button, wheel and background pan",
+    "one-note edit updates edge count",
+    "empty filter keeps its status and produces no Worker frames",
+    "node drag pins coordinates and release does not open document",
+    "node click opens note",
+    "local inbound/outbound counts",
+    "keyboard document picker",
+    "3 graph mount/unmount cycles",
+    "Bases evaluates the full vault within its Worker deadline and saves a property cell",
+    "Canvas edit persists; malformed file card reports an error without changing the file"
+  ],
+  "startup": {
+    "graphToFirstWorkerFrameMs": 145.40000009536743,
+    "graphToFirstRenderMs": 113.20000004768372,
+    "workerFrames": 152
+  },
+  "performance": {
+    "renderCallbacks": 186,
+    "renderCallbackP95Ms": 0.9000000953674316,
+    "scriptedKeyboardToRenderP95Ms": 8.399999856948853,
+    "jsHeapBytes": 25044164
+  },
+  "singleNoteEditAndRefreshMs": 252.39999985694885,
+  "workers": {
+    "created": 7,
+    "terminated": 7
+  },
+  "errors": [],
+  "note": "Real Electron custom scheme; scripted input-to-render callback excludes OS input/presentation latency. Render callback time excludes GPU completion. No matched original app FPS comparison."
+}

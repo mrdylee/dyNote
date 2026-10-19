@@ -1,0 +1,40 @@
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { extractFile, listPackage } from "@electron/asar";
+import assert from "node:assert/strict";
+
+const version = JSON.parse(await readFile("package.json", "utf8")).version;
+const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+async function files(directory) {
+  const result = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = `${directory}/${entry.name}`;
+    result.push(...(entry.isDirectory() ? await files(path) : [path]));
+  }
+  return result;
+}
+const sources = ["README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"];
+for (const directory of ["core", "electron", "dist", "licenses"])
+  sources.push(...await files(directory));
+const report = { version, packages: [], windowsRuntimeTested: false, distributionSigned: false, notarized: false };
+for (const [platform, relative] of [
+  ["darwin-arm64", "Dynote-darwin-arm64/Dynote.app/Contents/Resources/app.asar"],
+  ["win32-x64", "Dynote-win32-x64/resources/app.asar"],
+]) {
+  const archive = `release/v${version}/${relative}`;
+  const contents = listPackage(archive);
+  assert.ok(!contents.some((name) => name.endsWith(".node") || name.includes("graph-simulation.wasm")));
+  assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src)\//.test(name)));
+  for (const file of sources)
+    assert.deepEqual(extractFile(archive, file), await readFile(file), `${platform}: ${file}`);
+  const metadata = JSON.parse(extractFile(archive, "package.json"));
+  assert.equal(metadata.version, version);
+  assert.equal(metadata.productName, "Dynote");
+  const wasm = contents.find((name) => /^\/dist\/assets\/graph-.*\.wasm$/.test(name));
+  assert.ok(wasm);
+  assert.ok(contents.some((name) => /^\/dist\/assets\/graph.worker-.*\.js$/.test(name)));
+  report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extractFile(archive, wasm.slice(1))), nativeNodeAddonsIncluded: false });
+}
+assert.equal(report.packages[0].asarSha256, report.packages[1].asarSha256);
+await writeFile(`docs/verification/dynote-v${version}-release-package.json`, JSON.stringify(report, null, 2) + "\n");
+console.log(JSON.stringify(report, null, 2));

@@ -1,6 +1,6 @@
 # Graph engine implementation and validation
 
-2026-10-19 · Dynote 0.3.0 development branch `feat/canvas-bases`.
+2026-10-19 · Dynote 0.3.0. Final release fixes and checks: [release review](RELEASE-REVIEW-0.3.0.md).
 
 ## Delivered behavior
 
@@ -15,7 +15,7 @@ The fixed spiral SVG has been replaced with an independently written AssemblyScr
 
 ## Checks
 
-- `npm test`: **67 passed, 0 failed**. Added tests cover indexed Unicode/alias resolution, parse reuse, directed local selection, camera transforms, crossing-edge culling, pinning, short/long springs, overlaps, finite coordinates, malformed kernel inputs, bounded frames, cooling, stale async initialization and bundled-WASM path security.
+- `npm test`: **70 passed, 0 failed** after release review. Added tests cover indexed Unicode/alias resolution, parse reuse, directed local selection, camera transforms, crossing-edge culling, pinning, short/long springs, overlaps, finite coordinates, malformed kernel inputs, bounded frames, cooling, stale async initialization, early drag pin preservation, empty filters and bundled-WASM path security.
 - `npm run build`: succeeds, produces a local Worker and `graph-*.wasm`. Existing large-chunk warning remains.
 - Real Electron `notes://app/index.html`: 1,000 and 10,000 synthetic notes, 2 outgoing links each. Click, drag with stable pinned coordinates, drag release without navigation, keyboard picker, directional local counts, repeated mount/unmount, and idle checks passed without captured console/page errors. Each test created and terminated four Workers. Additional demo-vault checks passed for tag filtering, persisted settings, default reset and a switch to a second vault with separate settings. Wheel/button zoom and background pan passed in the final 10,000-note harness.
 - One edited synthetic note plus explicit refresh changes the edge count as expected. The durable harness generates its own temporary vault and does not edit a user's notes.
@@ -69,12 +69,12 @@ node scripts/verify-graph-runtime.mjs 10000
 
 Runtime artifacts go under ignored `output/playwright/`. Temporary test profiles/vaults are under the system temp directory. The graph engine is rebuilt before tests and builds; generated WASM is ignored by Git.
 
-Current local packages (not uploaded):
+Release package locations:
 
-- `release/graph-preview/Dynote-darwin-arm64/Dynote.app`
-- `release/graph-preview/Dynote-win32-x64/Dynote.exe` (keep the whole containing folder)
+- `release/v0.3.0/Dynote-darwin-arm64/Dynote.app`
+- `release/v0.3.0/Dynote-win32-x64/Dynote.exe` (keep the whole containing folder)
 
-Both ASAR archives contain `dist/assets/graph-CfR20aoU.wasm` and `graph.worker-B4itNLtt.js`, with WASM SHA-256 `ee88364630bb6d9fe828544e988e9e50531856bdfac6510d997a2278b483c468`. No original `graph-simulation.wasm` is included. No signing, installer, publishing or push was performed for this graph work.
+Both ASAR archives contain the independently compiled graph WASM and its bundled Worker. Final hashes and source comparisons are recorded in [release package verification](verification/dynote-v0.3.0-release-package.json). No original `graph-simulation.wasm` is included. Distribution signing, notarization and installers remain unavailable.
 
 ## Remaining functional differences
 

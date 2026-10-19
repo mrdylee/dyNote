@@ -54,6 +54,8 @@ export function parseCanvas(source) {
       throw new Error("텍스트 카드의 내용이 없습니다.");
     if (n.type === "file" && !localPath(n.file))
       throw new Error("Canvas 파일 경로는 보관함 안이어야 합니다.");
+    if (n.type === "file" && n.subpath !== undefined && typeof n.subpath !== "string")
+      throw new Error("Canvas subpath는 문자열이어야 합니다.");
     if (
       n.type === "group" &&
       n.background !== undefined &&

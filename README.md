@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.3.0의 Canvas·Bases 및 새 그래프 엔진은 현재 개발 브랜치에서 검증한 기능입니다. GitHub의 기존 v0.2.0 릴리스에는 포함되어 있지 않습니다.
+v0.3.0은 Canvas·Bases 기본 기능과 새 그래프 엔진을 포함하는 프리릴리스입니다. [릴리스 검토·수정 기록](docs/RELEASE-REVIEW-0.3.0.md)을 확인하세요.
 
 ## 실행
 
@@ -10,7 +10,7 @@ v0.3.0의 Canvas·Bases 및 새 그래프 엔진은 현재 개발 브랜치에�
 
 `release/v0.3.0/Dynote-darwin-arm64/Dynote.app`
 
-새 그래프 엔진의 로컬 시험 패키지는 `release/graph-preview/` 아래에 있습니다. [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
+[그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
 Windows 64비트용 실행 폴더는 `release/v0.3.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
@@ -29,7 +29,7 @@ npm run build
 npm start
 ```
 
-`npm run dev`는 화면 개발 서버입니다. 파일 접근 기능은 Electron 앱에서만 제공하므로 실제 사용은 `npm start`로 실행합니다.
+`npm run dev`는 그래프 WASM을 자동 생성한 뒤 화면 개발 서버를 시작합니다. 파일 접근 기능은 Electron 앱에서만 제공하므로 실제 사용은 `npm start`로 실행합니다.
 
 ## 제공 기능
 

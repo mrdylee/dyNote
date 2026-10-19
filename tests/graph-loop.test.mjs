@@ -52,3 +52,37 @@ test("an obsolete async initialization is disposed and cannot send frames", asyn
   loop.destroy(); pending[1](current); await second;
   assert.equal(current.disposed, true); assert.equal(jobs.size, 0); assert.deepEqual(sent, []);
 });
+
+test("an empty filter stops the previous graph without scheduling empty frames", async () => {
+  const h = harness(); await h.loop.receive(graph(1));
+  await h.loop.receive({ ...graph(2), positions: new Float32Array(), radii: new Float32Array() });
+  assert.equal(h.kernels[0].disposed, true);
+  assert.equal(h.jobs.size, 0);
+  await h.loop.receive({ type: "settings", epoch: 2, settings: { repel: 2000 } });
+  await h.loop.receive({ type: "resume", epoch: 2 });
+  assert.equal(h.jobs.size, 0);
+  assert.deepEqual(h.sent, []);
+  await h.loop.receive(graph(3));
+  h.tick(); assert.equal(h.sent[0].epoch, 3);
+});
+
+test("dragging before async kernel startup preserves the latest pin and release", async () => {
+  const pending = [];
+  const loop = createSimulationLoop({ bytes: new Uint8Array(), createKernel: () => new Promise((resolve) => pending.push(resolve)), send() {}, schedule: () => 1, cancel() {} });
+  const install = async (epoch) => {
+    const ready = loop.receive(graph(epoch)); await Promise.resolve();
+    const kernel = { pins: [], pin(...args) { this.pins.push(args); }, positions: () => new Float32Array([1, 2]), dispose() {} };
+    return { ready, kernel, resolve: () => pending.shift()(kernel) };
+  };
+  const first = await install(1);
+  await loop.receive({ type: "pin", epoch: 1, index: 0, x: 10, y: 20 });
+  await loop.receive({ type: "pin", epoch: 1, index: 0, x: 30, y: 40 });
+  first.resolve(); await first.ready;
+  assert.deepEqual(first.kernel.pins, [[0, 30, 40]]);
+  const second = await install(2);
+  await loop.receive({ type: "pin", epoch: 2, index: 0, x: 50, y: 60 });
+  await loop.receive({ type: "unpin", epoch: 2, index: 0 });
+  second.resolve(); await second.ready;
+  assert.deepEqual(second.kernel.pins, []);
+  loop.destroy();
+});

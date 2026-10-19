@@ -1,5 +1,5 @@
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
-import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 const count = Number(process.argv[2] ?? 1000);
@@ -15,6 +15,10 @@ for (let offset = 0; offset < count; offset += 100) {
   }));
 }
 await writeFile(profile + "/settings.json", JSON.stringify({ vaultRoot }));
+await writeFile(vaultRoot + "/Notes.base", "views: [{type: table, order: [file.name, note.status, formula.incoming], limit: 25}]\nformulas:\n  incoming: file.backlinks.length\n");
+await writeFile(vaultRoot + "/Board.canvas", JSON.stringify({ nodes: [{ id: "memo", type: "text", text: "Review fixture", x: 0, y: 0, width: 300, height: 200 }], edges: [] }));
+const invalidCanvas = JSON.stringify({ nodes: [{ id: "bad", type: "file", file: `${notePath(0)}.md`, subpath: { invalid: true }, x: 0, y: 0, width: 300, height: 200 }], edges: [] });
+await writeFile(vaultRoot + "/Invalid.canvas", invalidCanvas);
 const app = await electron.launch({ executablePath: process.argv[3] ?? process.cwd() + "/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron", args: process.argv[3] ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
 const errors = [], report = { count, packaged: !!process.argv[3], viewport: { width: 1420, height: 940 }, checks: [] };
 try {
@@ -22,14 +26,20 @@ try {
   page.setDefaultTimeout(12000);
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1420, 940));
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(1420, 940);
+    // Keep physical pointer activity on the shared desktop out of this fixture.
+    // Playwright still delivers the explicit test input through DevTools.
+    window.setIgnoreMouseEvents(true);
+  });
   await page.getByRole("button", { name: "그래프 보기", exact: true }).waitFor();
   await page.evaluate(() => {
     window.graphProbe = { frames: 0, renders: [], inputMs: [], points: [], workers: 0, terminated: 0, drawCalls: 0 };
     const NativeWorker = window.Worker;
     window.Worker = class extends NativeWorker {
       constructor(...args) { super(...args); window.graphProbe.workers++; this.addEventListener("message", ({ data }) => { if (data.type === "frame") { const p = window.graphProbe; p.frames++; p.points = Array.from(new Float32Array(data.buffer)); p.settled = data.settled; p.firstFrame ??= performance.now(); } }); }
-      terminate() { window.graphProbe.terminated++; return super.terminate(); }
+      terminate() { if (!this.probeTerminated) { this.probeTerminated = true; window.graphProbe.terminated++; } return super.terminate(); }
     };
     for (const api of [WebGLRenderingContext, WebGL2RenderingContext]) {
       for (const name of ["drawElements", "drawArrays"]) {
@@ -84,6 +94,14 @@ try {
   await page.getByRole("status").filter({ hasText: "배치 완료" }).waitFor();
   await page.getByRole("button", { name: "그래프 보기 초기화" }).click();
   await page.screenshot({ path: `output/playwright/graph-${count}.png` });
+  await page.getByRole("textbox", { name: "그래프 경로 필터" }).fill("no-matching-document");
+  await page.getByRole("status").filter({ hasText: "표시할 문서 없음" }).waitFor();
+  await page.waitForTimeout(100);
+  const emptyFrames = await page.evaluate(() => window.graphProbe.frames);
+  await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => window.graphProbe.frames), emptyFrames);
+  assert.equal(await page.getByRole("status").filter({ hasText: "표시할 문서 없음" }).count(), 1);
+  report.checks.push("empty filter keeps its status and produces no Worker frames");
   await page.getByRole("textbox", { name: "그래프 경로 필터" }).fill("Note-00044.md");
   await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("1개 문서 · 0개 연결"));
   await page.getByRole("status").filter({ hasText: "배치 완료" }).waitFor({ timeout: 10000 });
@@ -113,6 +131,22 @@ try {
     await page.locator(".graph-stage canvas").waitFor({ state: "detached" });
   }
   report.checks.push("local inbound/outbound counts", "keyboard document picker", "3 graph mount/unmount cycles");
+  await page.locator('.file-row[title="Notes.base"]').click();
+  await page.locator(".bases-view .structured-toolbar").getByText("25개 문서", { exact: true }).waitFor();
+  assert.equal(await page.locator(".bases-view [role=alert]").count(), 0);
+  const cell = page.getByRole("textbox", { name: `${notePath(0)}.md note.status`, exact: true });
+  await cell.fill("reviewed"); await cell.press("Enter");
+  await page.waitForTimeout(900);
+  assert.match(await readFile(`${vaultRoot}/${notePath(0)}.md`, "utf8"), /status: reviewed/);
+  report.checks.push("Bases evaluates the full vault within its Worker deadline and saves a property cell");
+  await page.locator('.file-row[title="Board.canvas"]').click();
+  await page.getByRole("textbox", { name: "메모 memo", exact: true }).fill("Canvas saved after release review");
+  await page.waitForTimeout(900);
+  assert.equal(JSON.parse(await readFile(vaultRoot + "/Board.canvas", "utf8")).nodes[0].text, "Canvas saved after release review");
+  await page.locator('.file-row[title="Invalid.canvas"]').click();
+  await page.getByRole("alert").filter({ hasText: "subpath" }).waitFor();
+  assert.equal(await readFile(vaultRoot + "/Invalid.canvas", "utf8"), invalidCanvas);
+  report.checks.push("Canvas edit persists; malformed file card reports an error without changing the file");
   report.workers = await page.evaluate(() => ({ created: window.graphProbe.workers, terminated: window.graphProbe.terminated }));
   assert.equal(report.workers.created, report.workers.terminated);
   assert.equal(errors.length, 0, errors.join("\n"));
@@ -120,4 +154,9 @@ try {
   report.note = "Real Electron custom scheme; scripted input-to-render callback excludes OS input/presentation latency. Render callback time excludes GPU completion. No matched original app FPS comparison.";
   console.log(JSON.stringify(report, null, 2));
   await writeFile(`output/playwright/graph-runtime-${count}${process.argv[3] ? "-packaged" : ""}.json`, JSON.stringify(report, null, 2));
+} catch (error) {
+  const page = await app.firstWindow();
+  await page.screenshot({ path: `output/playwright/graph-failure-${count}.png` }).catch(() => {});
+  console.error(JSON.stringify({ errors, workspace: await page.locator(".workspace").innerText().catch(() => "unavailable"), probe: await page.evaluate(() => ({ frames: window.graphProbe?.frames, workers: window.graphProbe?.workers, terminated: window.graphProbe?.terminated })).catch(() => null) }));
+  throw error;
 } finally { await app.close(); }

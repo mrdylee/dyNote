@@ -35,3 +35,9 @@ Other dependencies retain their licenses in their installed packages. Obsidian p
 - JSON Canvas 1.0, https://github.com/obsidianmd/jsoncanvas — MIT, Copyright (c) 2024 Obsidian.md. The public data format informed Dynote's independent format adapter. The Obsidian Canvas editor implementation is not included.
 
 The MIT permission and warranty terms reproduced above apply to the respective MIT works with their own copyright notices. No Obsidian plugin API compatibility or endorsement is implied.
+
+## Graph engine (v0.3.0)
+
+- PixiJS 8.22.0, https://github.com/pixijs/pixijs — MIT, Copyright (c) 2013-2023 Mathew Groves, Chad Engler. Its installed LICENSE is retained in the application package.
+- AssemblyScript 0.28.20, https://github.com/AssemblyScript/assemblyscript — Apache-2.0. The independently authored graph kernel is compiled with its standard library/runtime. The compiler's LICENSE and NOTICE are retained in `licenses/assemblyscript/`, including in desktop packages.
+- Obsidian's graph WASM, extracted JavaScript and visual assets are not included.
