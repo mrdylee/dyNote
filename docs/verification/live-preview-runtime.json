@@ -1,0 +1,28 @@
+{
+  "checks": [
+    "inline formatting, code exclusion, resolved local image loaded, no duplicate reading pane",
+    "selective syntax reveal; Korean text insertion; same editor, selection and undo across 3 source/live switches",
+    "checkbox transaction, autosave and undo preserve all other bytes",
+    "image click reveals source; wiki navigation; Markdown heading link honors frontmatter offsets",
+    "Cmd-Enter wiki link navigation and existing wiki autocomplete in Live Preview",
+    "synthetic composition lifecycle preserves Korean input and undo (not native IME proof)",
+    "raw Markdown copy; undo/redo; clipboard and drop image import; exact disk save and app reopen; no remote image requests",
+    "long document source/live switching preserves the visible text anchor"
+  ],
+  "errors": [],
+  "remoteRequests": [],
+  "platform": "darwin",
+  "date": "2026-10-19",
+  "baseline": "1f4994d34ca25425c984989a8f2dd361ae89bd84",
+  "environment": "Apple Silicon macOS, Electron 44.9.0 development build",
+  "unitTests": {
+    "passed": 80,
+    "failed": 0
+  },
+  "productionBuild": "passed; existing Vite chunk-size advisory",
+  "limits": [
+    "Native OS IME composition unverified",
+    "Windows runtime unverified",
+    "Published v0.3.0 packages unchanged"
+  ]
+}

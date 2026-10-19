@@ -49,6 +49,11 @@ test("backlinks and graph share the same resolved relationships", () => {
   );
 });
 
+test("heading navigation includes frontmatter line offsets", () => {
+  const note = buildKnowledge([{ path: "Offsets.md", content: "---\ntags: [test]\n---\n\n# Title\n\n## Details" }]).notes[0];
+  assert.deepEqual(note.headings.map((h) => h.line), [4, 6]);
+});
+
 test("search matches Korean content and ranks matching titles first", () => {
   const result = searchNotes(buildKnowledge(notes).notes, "시험");
   assert.equal(result[0].path, "area/Test.md");

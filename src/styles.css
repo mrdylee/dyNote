@@ -733,6 +733,29 @@ kbd {
   border-right: 1px solid var(--border);
   padding-right: 10px;
 }
+.cm-live-preview .cm-scroller {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  font-size: 15px;
+  color: #393340;
+  line-height: 1.85;
+}
+.cm-live-preview .cm-gutters { display: none; }
+.cm-live-preview .cm-content { padding: 20px 0 80px; }
+.cm-live-preview .cm-line { padding: 0 22px; }
+.cm-live-preview .cm-live-heading { font-weight: 700; line-height: 1.5; padding-top: 12px; padding-bottom: 8px; }
+.cm-live-heading > span:not(.cm-live-link):not(.cm-live-strike) { text-decoration: none; }
+.cm-live-preview .cm-live-h1 { font-size: 30px; }
+.cm-live-preview .cm-live-h2 { font-size: 25px; }
+.cm-live-preview .cm-live-h3 { font-size: 21px; }
+.cm-live-preview .cm-live-h4, .cm-live-preview .cm-live-h5, .cm-live-preview .cm-live-h6 { font-size: 17px; }
+.cm-live-strong { font-weight: 700; }
+.cm-live-emphasis { font-style: italic; }
+.cm-live-strike { text-decoration: line-through; }
+.cm-live-code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .9em; background: #f3eff8; border-radius: 4px; padding: 2px 3px; }
+.cm-live-link { color: #7955a8; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.cm-live-bullet { color: #947bb1; }
+.cm-live-checkbox { accent-color: #8e70bc; cursor: pointer; vertical-align: middle; margin: 0 3px 0 0; }
+.cm-live-image { display: inline-block; max-width: 100%; max-height: 420px; vertical-align: middle; object-fit: contain; border-radius: 7px; cursor: text; }
 .split .markdown-preview {
   width: 50%;
   padding: 12px 10px 20px 25px;

@@ -98,6 +98,7 @@ export function buildKnowledge(raw) {
         headings.push({
           level: Number(token.tag.slice(1)),
           text: tokens[i + 1]?.content ?? "",
+          line: (token.map?.[0] ?? 0) + meta.offset,
         });
     });
     const prose = tokens

@@ -165,6 +165,7 @@ export default function App() {
   const [tabs, setTabs] = useState([]);
   const [section, setSection] = useState("files");
   const [mode, setMode] = useState("read");
+  const [editorJump, setEditorJump] = useState(null);
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [status, setStatus] = useState("saved");
@@ -194,7 +195,7 @@ export default function App() {
   );
   const html = useMemo(
     () =>
-      note
+      note && (mode === "read" || mode === "split")
         ? DOMPurify.sanitize(
             renderMarkdown(note.content, model.notes, note.path, {
               vaultId: vault.id,
@@ -214,7 +215,7 @@ export default function App() {
             },
           )
         : "",
-    [note, model, vault],
+    [note, model, vault, mode],
   );
 
   const install = useCallback((snapshot) => {
@@ -287,6 +288,7 @@ export default function App() {
 
   const openNote = useCallback((path) => {
     setActive(path);
+    setEditorJump(null);
     setAttachment(null);
     setTabs((old) => (old.includes(path) ? old : [...old, path]));
     setSection((old) => (old === "graph" ? "files" : old));
@@ -508,6 +510,28 @@ export default function App() {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const followEditorLink = (target, kind) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
+      invoke(api.openExternal(target)).catch((err) => setError(err.message));
+      return;
+    }
+    const asset = resolveLink(target, active, vault.attachments ?? [], { kind });
+    if (asset.status === "resolved" && vault.attachments?.some((a) => a.path === asset.path)) {
+      openAttachment(asset.path);
+      return;
+    }
+    const resolved = resolveLink(target, active, [...model.notes, ...documents], { kind });
+    if (resolved.status === "resolved") {
+      if (resolved.path !== active) openNote(resolved.path);
+      setEditorJump({ path: resolved.path, fragment: target.split("#")[1] ?? "" });
+    } else if (resolved.status === "ambiguous") {
+      setError("같은 이름의 문서가 여러 개 있습니다. 링크에 폴더 경로를 적어 주세요.");
+    } else {
+      setNewName(target.split(/[\#^]/)[0]);
+      setModal("new");
     }
   };
 
@@ -893,6 +917,13 @@ export default function App() {
                     <BookOpen size={15} />
                   </IconButton>
                   <IconButton
+                    label="Live Preview"
+                    active={mode === "live"}
+                    onClick={() => setMode("live")}
+                  >
+                    <Sparkles size={15} />
+                  </IconButton>
+                  <IconButton
                     label="편집 보기"
                     active={mode === "edit"}
                     onClick={() => setMode("edit")}
@@ -992,10 +1023,15 @@ export default function App() {
                       notes={model.notes}
                       onChange={change}
                       onImportFiles={importFiles}
+                      live={mode === "live"}
+                      vaultId={vault.id}
+                      attachments={vault.attachments}
+                      onLink={followEditorLink}
+                      jump={editorJump}
                       readOnly={busy}
                     />
                   )}
-                  {mode !== "edit" && (
+                  {(mode === "read" || mode === "split") && (
                     <DiagramPreview
                       previewRef={preview}
                       onClick={followLink}
@@ -1107,6 +1143,10 @@ export default function App() {
                     key={i}
                     style={{ paddingLeft: 12 + Math.max(0, h.level - 1) * 12 }}
                     onClick={() => {
+                      if (mode === "live") {
+                        setEditorJump({ path: note.path, fragment: h.text });
+                        return;
+                      }
                       if (mode === "edit") setMode("read");
                       setTimeout(
                         () =>

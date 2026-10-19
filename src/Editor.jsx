@@ -13,7 +13,7 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   defaultHighlightStyle,
   syntaxHighlighting,
@@ -22,12 +22,18 @@ import {
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { suggestNotes } from "../core/knowledge.mjs";
+import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 
 export default function Editor({
   note,
   notes,
   onChange,
   onImportFiles,
+  live = false,
+  vaultId,
+  attachments,
+  onLink,
+  jump,
   readOnly = false,
 }) {
   const host = useRef(null);
@@ -35,8 +41,13 @@ export default function Editor({
   const callback = useRef(onChange);
   const syncing = useRef(false);
   const readonly = useRef(new Compartment());
-  const latest = useRef({ note, notes, onImportFiles });
-  latest.current = { note, notes, onImportFiles };
+  const rendering = useRef(new Compartment());
+  const latest = useRef(null);
+  latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink };
+  const liveExtensions = () => livePreview({
+    getContext: () => ({ path: latest.current.note.path, vaultId: latest.current.vaultId, attachments: latest.current.attachments }),
+    onLink: (target, kind) => latest.current.onLink?.(target, kind),
+  });
   callback.current = onChange;
   useEffect(() => {
     const view = new EditorView({
@@ -51,7 +62,8 @@ export default function Editor({
           highlightActiveLine(),
           highlightSelectionMatches(),
           bracketMatching(),
-          markdown(),
+          markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
+          rendering.current.of(live ? liveExtensions() : []),
           autocompletion({
             override: [
               (context) => {
@@ -153,6 +165,22 @@ export default function Editor({
   }, [readOnly]);
   useEffect(() => {
     const view = editor.current;
+    if (!view) return;
+    const area = host.current.closest(".document-area");
+    const bounds = area?.getBoundingClientRect();
+    const anchor = bounds && view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y: bounds.top + 24 }, false);
+    const top = anchor != null ? view.coordsAtPos(anchor)?.top : null;
+    view.dispatch({ effects: [rendering.current.reconfigure(live ? liveExtensions() : []), view.scrollSnapshot()] });
+    if (area && top != null) view.requestMeasure({
+      read: () => view.coordsAtPos(anchor)?.top,
+      write: (next) => { if (next != null) area.scrollTop += next - top; },
+    });
+  }, [live]);
+  useEffect(() => {
+    if (live) editor.current?.dispatch({ effects: refreshLivePreview.of(null) });
+  }, [attachments, vaultId]);
+  useEffect(() => {
+    const view = editor.current;
     if (view && view.state.doc.toString() !== note.content) {
       syncing.current = true;
       view.dispatch({
@@ -161,5 +189,17 @@ export default function Editor({
       syncing.current = false;
     }
   }, [note.path, note.content]);
+  useEffect(() => {
+    if (!jump || jump.path !== note.path) return;
+    let fragment;
+    try { fragment = decodeURIComponent(jump.fragment); } catch { return; }
+    const heading = note.headings?.find((h) => h.text === fragment || h.text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-") === fragment);
+    const view = editor.current;
+    if (view && heading) {
+      const line = view.state.doc.line(Math.min(view.state.doc.lines, heading.line + 1));
+      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.focus();
+    }
+  }, [jump, note.path]);
   return <div className="code-editor" ref={host} />;
 }

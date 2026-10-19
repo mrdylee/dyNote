@@ -1,5 +1,7 @@
 # Dynote v0.1 verification
 
+Current development feature: [Live Preview phase 1](LIVE-PREVIEW.md). It is separate from the published v0.3.0 artifacts described below.
+
 Latest release review: [v0.3.0 graph, Canvas and Bases](RELEASE-REVIEW-0.3.0.md). Sections below retain historical checks and preview hashes; the final release package report is [here](verification/dynote-v0.3.0-release-package.json).
 
 Date: 2026-10-19, Asia/Seoul. Host: Apple Silicon macOS.
