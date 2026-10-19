@@ -17,9 +17,9 @@
     "build": "npm run build:graph && vite build",
     "test": "node --test tests/*.test.mjs",
     "start": "electron .",
-    "package:mac": "npm run build && electron-packager . Dynote --platform=darwin --arch=arm64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
-    "package:win": "npm run build && electron-packager . Dynote --platform=win32 --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
-    "package:linux": "npm run build && electron-packager . Dynote --platform=linux --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
+    "package:mac": "npm run build && electron-packager . Dynote --platform=darwin --arch=arm64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|assembly|scripts|output|node_modules/@napi-rs)(/|$)\"",
+    "package:win": "npm run build && electron-packager . Dynote --platform=win32 --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|assembly|scripts|output|node_modules/@napi-rs)(/|$)\"",
+    "package:linux": "npm run build && electron-packager . Dynote --platform=linux --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|assembly|scripts|output|node_modules/@napi-rs)(/|$)\"",
     "build:graph": "node scripts/build-graph.mjs",
     "pretest": "npm run build:graph"
   },

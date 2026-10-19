@@ -95,3 +95,8 @@ Date: 2026-10-19, Asia/Seoul. Host: Apple Silicon macOS. Baseline review and imp
 - Both ZIP CRC checks passed; SHA-256 files are alongside the archives. Exact sizes/hashes are in [dynote-v0.3.0-package.json](verification/dynote-v0.3.0-package.json).
 
 **Windows runtime is untested.** No distribution signing, notarization, installer or auto-update was added. v0.3.0 has not been published to GitHub Releases; existing v0.2.0 downloads do not contain these features. Canvas/Bases format support is a documented subset; see [CANVAS-BASES.md](CANVAS-BASES.md). The existing document graph remains unchanged.
+
+
+## Independent graph engine follow-up (2026-10-19)
+
+The later graph implementation replaces the fixed layout described above. See [graph-validation.md](graph-validation.md) for current behavior, kernel/runtime measurements, security checks and local graph-preview packages. This does not change the previously published v0.2.0 assets.

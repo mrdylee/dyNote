@@ -49,3 +49,9 @@ test("explicit external links cannot invoke operating system handlers or executa
     assert.throws(() => safeExternalUrl(url));
   }
 });
+
+test("bundled WASM is allowed without widening vault or traversal access", () => {
+  assert.equal(assetPath("notes://app/assets/graph.wasm", "/safe/dist"), "/safe/dist/assets/graph.wasm");
+  for (const url of ["notes://vault/graph.wasm", "notes://app/%2e%2e%2fgraph.wasm", "notes://app/.hidden/graph.wasm", "notes://app/secret.dll"])
+    assert.throws(() => assetPath(url, "/safe/dist"));
+});

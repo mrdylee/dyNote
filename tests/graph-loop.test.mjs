@@ -39,3 +39,16 @@ test("cooling stops scheduling and resume does not reheat a settled graph", asyn
   await h.loop.receive({ type: "resume", epoch: 1 }); assert.equal(h.jobs.size, 0);
   await h.loop.receive({ type: "settings", epoch: 1, settings: { repel: 2000 } }); assert.equal(h.jobs.size, 1);
 });
+
+test("an obsolete async initialization is disposed and cannot send frames", async () => {
+  const pending = [], sent = [], jobs = new Map(); let id = 0;
+  const loop = createSimulationLoop({ bytes: new Uint8Array(), createKernel: () => new Promise((resolve) => pending.push(resolve)), send: (m) => sent.push(m), schedule: (fn) => { jobs.set(++id, fn); return id; }, cancel: (id) => jobs.delete(id) });
+  const first = loop.receive(graph(1)); await Promise.resolve();
+  const second = loop.receive(graph(2)); await Promise.resolve();
+  const obsolete = { dispose() { this.disposed = true; } };
+  pending[0](obsolete); await first;
+  assert.equal(obsolete.disposed, true); assert.equal(jobs.size, 0);
+  const current = { positions: () => new Float32Array([1, 2]), dispose() { this.disposed = true; } };
+  loop.destroy(); pending[1](current); await second;
+  assert.equal(current.disposed, true); assert.equal(jobs.size, 0); assert.deepEqual(sent, []);
+});
