@@ -61,9 +61,10 @@ test("renaming an alias target does not retain its previous backlink", () => {
 
 ## Task 2: 그래프 데이터 모델
 
-- [ ] `core/graph.mjs`에 `buildGraph(notes, edges)`와 `selectGraph(graph, { path, tag, active, local, depth })`를 정의한다. 결과는 `nodes`, 정수 `links`, ID→인덱스 `index`, `adjacency`다. 순서는 입력 노트 순서를 보존한다. 차수/인접 목록은 링크를 한 번 순회해 구성한다.
-- [ ] 필터 전 그래프에서 BFS로 로컬 범위를 결정한 뒤 현재 경로/태그 필터와 교집합을 취한다. 빠진 끝점을 가진 선은 출력하지 않는다. 방향 반대 링크는 데이터상 보존하고 인접 목록은 중복 없는 양방향 집합으로 만든다.
+- [ ] `core/graph.mjs`에 `buildGraph(notes, edges)`와 `selectGraph(graph, { path, tag, active, local, depth, incoming, outgoing, neighborLinks })`를 정의한다. 결과는 `nodes`, 정수 `links`, ID→인덱스 `index`, 양방향 `adjacency`, 방향별 `incomingAdjacency`/`outgoingAdjacency`다. 순서는 입력 노트 순서를 보존한다. 차수/인접 목록은 링크를 한 번 순회해 구성한다.
+- [ ] 필터 전 그래프에서 선택한 incoming/outgoing 방향으로 BFS를 진행해 로컬 범위를 결정한 뒤 현재 경로/태그 필터와 교집합을 취한다. 기본값은 incoming/outgoing 모두 true다. neighborLinks=false이면 선택한 BFS에서 방문한 노드 간의 탐색 연결만 표시하고, true이면 포함된 노드 사이의 나머지 연결도 표시한다. 이 규칙은 독립 구현의 명시적 정의이며 깊이 2 이상에서 원본과 별도 대조한다. 빠진 끝점을 가진 선은 출력하지 않는다. 방향 반대 링크는 데이터상 보존하고 인접 목록은 중복 없는 집합으로 만든다.
 - [ ] `tests/graph.test.mjs`에서 A→B→C와 고립 D를 사용해 깊이 1 결과 A/B, 깊이 2 결과 A/B/C, 경로 필터 B 결과 B와 빈 링크를 검증한다. 자기 링크·없는 끝점·중복 입력 처리도 명시한다.
+- [ ] B를 중심으로 incoming만 켜면 A/B, outgoing만 켜면 B/C가 나오는지 검사한다. 양쪽을 켜고 A→C를 추가한 자료에서 깊이 1의 neighborLinks=false는 중심과의 두 연결만, true는 A→C까지 출력해야 한다. 원본 1천 보관함의 중심 44 및 이웃 13/43/45/75도 회귀 자료로 사용한다.
 - [ ] `node --test tests/graph.test.mjs` 통과 후 `feat: build graph adjacency and local selection` 커밋.
 
 ## Task 3: 독립 WASM 코어의 성능 판정
@@ -91,7 +92,7 @@ test("renaming an alias target does not retain its previous backlink", () => {
 - [ ] 한 WebGL 캔버스와 흰 배경, 점/선 배치, 필요할 때만 라벨 생성을 구현한다. 카메라 좌표는 refs/렌더러에 두고 React 재렌더를 일으키지 않는다. 선택/hover 이웃 강조는 인접 목록에서 가져온다.
 - [ ] 화면 밖 요소 컬링을 적용하되 양 끝점이 밖이어도 화면과 교차하는 선은 보존한다. 점 생성은 프레임별로 나눠 초기 화면의 긴 정지를 줄인다. 위치·카메라·hover 변경이 없으면 RAF와 Pixi ticker를 중단한다.
 - [ ] 화면 좌표와 세계 좌표 변환을 단일 함수 쌍으로 만들고 왕복 테스트한다. 4 CSS 픽셀 이상 이동 시 드래그로 처리해 손을 놓을 때 문서가 열리지 않게 한다. pointercancel/lostpointercapture에서도 pin을 해제한다. 커서 중심 확대, 배경 이동, fit을 구현한다.
-- [ ] `src/Graph.jsx`의 SVG를 컨테이너로 교체한다. 기존 경로/태그/로컬/깊이·문서 열기를 새 모델에 연결한다. 힘 4종과 표시 3종 조절, 기본값 복원을 추가한다. 저장 키는 `dynote:graph:<vaultId>`이며 다른 저장소 설정이 섞이지 않도록 한다.
+- [ ] `src/Graph.jsx`의 SVG를 컨테이너로 교체한다. 기존 경로/태그/로컬/깊이·문서 열기를 새 모델에 연결한다. 로컬 모드에 incoming/outgoing/neighborLinks 토글을 연결한다. 힘 4종과 표시 3종 조절, 기본값 복원을 추가한다. 라벨은 확대율에 따라 투명도가 변하게 하고 hover/선택 문서는 우선 표시한다. 저장 키는 `dynote:graph:<vaultId>`이며 다른 저장소 설정이 섞이지 않도록 한다.
 - [ ] 키보드 화살표/+/− 이동·확대와 문서 선택 컨트롤을 검증한다. 컴포넌트 해제 시 Observer/이벤트/Worker/렌더러/RAF를 모두 정리하고 React StrictMode 재마운트에서도 이중 캔버스가 남지 않게 한다.
 - [ ] `feat: render interactive graph with GPU batching` 커밋.
 
@@ -106,4 +107,4 @@ test("renaming an alias target does not retain its previous backlink", () => {
 
 ## 별도 후속 구현 단위
 
-태그/첨부/미생성 점, 고립점 표시, 검색 색상 그룹, 화살표, 생성 시간 애니메이션, 원본 검색 문법·프런트매터 링크 의미는 데이터 의미와 UI를 함께 검증하는 별도 계획으로 진행한다. 성능 엔진 교체와 이 기능들의 호환 완료 상태를 구분한다.
+태그/첨부/미생성 점, 고립점 표시, 검색 색상 그룹, 화살표, 생성 시간 애니메이션, 원본 검색 문법·프런트매터 링크 의미, 문서 옆 로컬 그래프 패널은 데이터 의미와 UI를 함께 검증하는 별도 계획으로 진행한다. 성능 엔진 교체와 이 기능들의 호환 완료 상태를 구분한다.
