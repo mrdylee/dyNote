@@ -1624,8 +1624,14 @@ kbd {
 .file-row, .folder-row, .tab, .modal input, .modal select, .modal button {
   font-size: var(--ui-size, 13px);
 }
-.font-setting-row { display: grid; grid-template-columns: 1fr 85px; gap: 10px; margin: 15px 0; }
+.font-setting-row { display: grid; grid-template-columns: minmax(0, 1fr) 85px; align-items: start; gap: 10px; margin: 15px 0; }
 .font-setting-row label { display: grid; gap: 6px; }
+.font-family-picker { min-width: 0; }
+.font-picker summary { cursor: pointer; padding: 6px 0; color: #756083; }
+.font-picker select { display: block; width: 100%; height: 180px; margin-top: 8px; border: 1px solid #dcd0e8; border-radius: 7px; background: #fdfbff; color: #756083; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.font-picker option { padding: 6px 10px; }
+.font-picker select::-webkit-scrollbar { width: 10px; }
+.font-picker select::-webkit-scrollbar-thumb { background: #b4a4c1; border: 2px solid #fdfbff; border-radius: 5px; }
 .font-sample { grid-column: 1 / -1; padding: 12px; border: 1px solid var(--border); border-radius: 7px; overflow-wrap: anywhere; }
 .font-settings > label { display: flex; align-items: center; gap: 12px; }
 .font-settings > label input { flex: 1; }

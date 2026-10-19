@@ -11,6 +11,23 @@ function FontSize({ label, value, min, max, onChange }) {
     }} onBlur={() => setDraft(String(value))} />;
 }
 
+function FontFamily({ label, value, families, onChange }) {
+  const [query, setQuery] = useState("");
+  const matches = families.filter((family) => family.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  return <div className="font-family-picker">
+    <label>{label} 글꼴<input aria-label={`${label} 글꼴`} placeholder="시스템 기본 글꼴" value={value} onChange={(e) => onChange(e.target.value)} /></label>
+    {families.length > 0 && <details className="font-picker">
+      <summary aria-label={`${label} 글꼴 목록`}>설치 글꼴 목록</summary>
+      <input type="search" aria-label={`${label} 글꼴 검색`} placeholder="글꼴 이름 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <select size={6} aria-label={`${label} 설치 글꼴`} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">시스템 기본 글꼴</option>
+        {matches.map((family) => <option key={family} value={family}>{family}</option>)}
+      </select>
+      <p className="muted">{matches.length}개 글꼴 · 휠 또는 ↑↓ / Page Up·Down / Home·End로 이동</p>
+    </details>}
+  </div>;
+}
+
 export default function FontSettings({ value, onChange }) {
   const [families, setFamilies] = useState([]), [message, setMessage] = useState("");
   const update = (key, next) => onChange({ ...value, [key]: next });
@@ -27,9 +44,8 @@ export default function FontSettings({ value, onChange }) {
     <p>이 기기에 설치된 글꼴을 사용합니다. 다른 기기에 없는 글꼴은 기본 글꼴로 표시됩니다.</p>
     <button className="secondary-button" onClick={load}>설치 글꼴 불러오기</button>
     <p role="status" className="muted">{message}</p>
-    <datalist id="installed-fonts">{families.map((family) => <option key={family} value={family} />)}</datalist>
     {[["ui", "화면", 11, 20], ["body", "본문", 12, 32], ["code", "코드", 10, 24]].map(([key, label, min, max]) => <div className="font-setting-row" key={key}>
-      <label>{label} 글꼴<input aria-label={`${label} 글꼴`} list="installed-fonts" placeholder="시스템 기본 글꼴" value={value[`${key}Family`]} onChange={(e) => update(`${key}Family`, e.target.value)} /></label>
+      <FontFamily label={label} value={value[`${key}Family`]} families={families} onChange={(next) => update(`${key}Family`, next)} />
       <label>크기<FontSize label={label} min={min} max={max} value={value[`${key}Size`]} onChange={(next) => update(`${key}Size`, next)} /></label>
       <div className="font-sample" data-font-sample={key} style={{ fontFamily: styles[`--${key}-font`], fontSize: styles[`--${key}-size`], lineHeight: value.lineHeight }}>{key === "code" ? "const message = '한글 코드 123';" : "생각을 기록하는 공간 · Dynote Aa 123"}</div>
     </div>)}

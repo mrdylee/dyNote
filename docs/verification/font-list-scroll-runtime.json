@@ -1,0 +1,45 @@
+{
+  "scope": "Post-v0.4.0 local font list navigation fix; not published to GitHub Releases",
+  "unitTests": {
+    "passed": 99,
+    "failed": 0
+  },
+  "baseline": "Published v0.4.0 has no scrollable in-app font chooser; regression assertion fails",
+  "development": {
+    "checks": [
+      "Git address starts empty and the minute input defaults to 10; backup remains disconnected",
+      "font list supports wheel to the last entry, keyboard End/Home/PageDown, search, selection and default reset",
+      "installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown",
+      "repository entered in settings; initial push and actual one-minute automatic commit/push preserve saved Markdown",
+      "font preferences persist across app restart",
+      "arbitrary 17-minute interval can be typed, applied and restored after restart",
+      "Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work"
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "runtime": {
+      "packaged": false,
+      "platform": "darwin",
+      "arch": "arm64",
+      "electron": "44.9.0",
+      "version": "0.4.0"
+    },
+    "installedFontFamilies": 258
+  },
+  "packagedMac": {
+    "checks": [
+      "화면: keyboard open, ArrowDown, PageDown/Up, Home/End, wheel-to-last and selection at 1050x700",
+      "본문: keyboard open, ArrowDown, PageDown/Up, Home/End, wheel-to-last and selection at 1050x700",
+      "코드: keyboard open, ArrowDown, PageDown/Up, Home/End, wheel-to-last and selection at 1050x700"
+    ],
+    "errors": [],
+    "runtime": {
+      "packaged": true,
+      "version": "0.4.0",
+      "platform": "darwin",
+      "arch": "arm64"
+    }
+  },
+  "localMacApp": "output/dynote-font-scroll-20261019/Dynote-darwin-arm64/Dynote.app",
+  "windowsRuntimeTested": false
+}
