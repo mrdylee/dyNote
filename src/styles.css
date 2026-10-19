@@ -1058,8 +1058,7 @@ kbd {
   height: 100%;
   min-height: 580px;
   position: relative;
-  background-image: radial-gradient(#e9e3f0 0.8px, transparent 0.8px);
-  background-size: 22px 22px;
+  background: white;
   display: flex;
   flex-direction: column;
 }
@@ -1077,54 +1076,6 @@ kbd {
 .graph-heading p {
   font-size: 11px;
   color: #ac9bb9;
-}
-.graph-view svg {
-  width: 100%;
-  flex: 1;
-  min-height: 350px;
-  touch-action: none;
-}
-.graph-edge {
-  stroke: #e1d7ec;
-  stroke-width: 1.2;
-}
-.graph-edge.focused {
-  stroke: #c0abd8;
-  stroke-width: 1.8;
-}
-.graph-node {
-  cursor: pointer;
-  outline: none;
-}
-.graph-node .node-dot {
-  fill: #b39ace;
-  stroke: white;
-  stroke-width: 2;
-}
-.graph-node.selected .node-dot,
-.graph-node:hover .node-dot {
-  fill: #8c69bd;
-}
-.graph-node .node-halo {
-  fill: #f4effa;
-  opacity: 0.4;
-}
-.graph-node.selected .node-halo,
-.graph-node:hover .node-halo {
-  fill: #ece2f7;
-  opacity: 0.8;
-}
-.graph-node text {
-  font-size: 10px;
-  fill: #aa97bc;
-  font-family: inherit;
-}
-.graph-node.selected text,
-.graph-node:hover text {
-  fill: #85669f;
-}
-.graph-node.dimmed {
-  opacity: 0.45;
 }
 .graph-legend {
   display: flex;
@@ -1628,3 +1579,16 @@ kbd {
 .base-note-link { color: #5077af; text-align: left; background: none; border: none; font: inherit; }
 .base-config { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px; font-size: 12px; color: #6d7c90; }
 .base-config textarea { flex: 1; resize: none; border: 1px solid #e1e7ef; border-radius: 7px; padding: 14px; min-height: 200px; font: 13px/1.8 ui-monospace, monospace; color: #35455c; }
+
+.graph-stage { flex: 1; min-height: 260px; overflow: hidden; position: relative; }
+.graph-stage canvas { display: block; touch-action: none; outline-offset: -3px; }
+.graph-settings { pointer-events: auto; margin: 12px 0; font-size: 12px; color: #78628d; }
+.graph-settings summary { cursor: pointer; }
+.graph-settings > div { display: flex; flex-wrap: wrap; gap: 12px 20px; padding-top: 12px; }
+.graph-settings label { display: flex; align-items: center; gap: 8px; }
+.graph-settings input { width: 90px; accent-color: #9473ba; }
+.graph-settings output { min-width: 34px; }
+.graph-settings button { border: 1px solid #e9e0f1; border-radius: 5px; padding: 4px 10px; }
+.graph-document-picker { display: flex; gap: 8px; padding: 8px 25px 0; }
+.graph-document-picker input, .graph-document-picker select { border: 1px solid #e9e0f1; border-radius: 5px; padding: 6px; font-size: 12px; max-width: 260px; }
+.graph-error { color: #ac344c; padding: 12px 25px; font-size: 13px; }

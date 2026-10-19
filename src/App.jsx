@@ -933,6 +933,8 @@ export default function App() {
           <div className="document-area">
             {section === "graph" ? (
               <Graph
+                key={vault.id}
+                vaultId={vault.id}
                 notes={model.notes}
                 edges={model.edges}
                 active={active}
