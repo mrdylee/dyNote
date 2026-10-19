@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { history, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { JSDOM } from "jsdom";
-import { livePreview, livePreviewState, wikiSyntax, composition } from "../src/live-preview.mjs";
+import { livePreview, livePreviewState, wikiSyntax, composition, refreshLivePreview } from "../src/live-preview.mjs";
 
 const context = { path: "Home.md", vaultId: "vault", attachments: [{ path: "assets/a.png" }] };
 function state(doc, anchor = doc.length, extra = []) {
@@ -22,6 +23,50 @@ function ranges(s) {
   return result;
 }
 const hidden = (s) => ranges(s).filter((r) => r.to > r.from && !r.spec.class && !r.spec.attributes);
+
+test("selection updates match a fresh render for nested, distant and multiple ranges", () => {
+  // RangeSet.between does not promise traversal order across nested layers.
+  const snapshot = (s) => ranges(s).map((r) => JSON.stringify(r)).sort();
+  const doc = "# **Heading**\n\n**outer *inner*** and [**label**](Guide.md)\n\n- [ ] task\n\n![[assets/a.png]]\n\nHeading\n=======\n\n" + "plain\n".repeat(100) + "*last*\n\nend";
+  let s = state(doc, doc.length, [EditorState.allowMultipleSelections.of(true)]);
+  const selections = [
+    EditorSelection.cursor(doc.indexOf("inner") + 1),
+    EditorSelection.cursor(doc.indexOf("label") + 1),
+    EditorSelection.cursor(doc.indexOf("last") + 1),
+    EditorSelection.range(doc.indexOf("task"), doc.indexOf("=======")),
+    EditorSelection.range(0, doc.length),
+    EditorSelection.cursor(doc.length),
+    EditorSelection.create([EditorSelection.cursor(4), EditorSelection.cursor(doc.indexOf("last"))]),
+    EditorSelection.cursor(0),
+    ...[...new Set(ranges(s).flatMap(({ from, to }) => [from - 1, from, to, to + 1]))]
+      .filter((pos) => pos >= 0 && pos <= doc.length).map((pos) => EditorSelection.cursor(pos)),
+  ];
+  for (const selection of selections) {
+    s = s.update({ selection }).state;
+    assert.deepEqual(snapshot(s), snapshot(s.update({ effects: refreshLivePreview.of(null) }).state));
+  }
+  s = s.update({ changes: { from: 0, insert: "intro\n\n" } }).state;
+  s = s.update({ selection: { anchor: s.doc.length } }).state;
+  assert.deepEqual(snapshot(s), snapshot(s.update({ effects: refreshLivePreview.of(null) }).state));
+});
+
+test("large-document cursor movement costs substantially less than a full preview rebuild", () => {
+  const doc = Array.from({ length: 10000 }, (_, i) => `## Note ${i}\n\n**text** *italic* [[Guide|link]]\n\n`).join("");
+  let s = state(doc);
+  assert.ok(ensureSyntaxTree(s, doc.length, 10000));
+  s = s.update({ effects: refreshLivePreview.of(null) }).state;
+  function median(specs) {
+    const samples = specs.map((spec) => {
+      const start = performance.now();
+      s = s.update(spec).state;
+      return performance.now() - start;
+    }).sort((a, b) => a - b);
+    return samples[Math.floor(samples.length / 2)];
+  }
+  const rebuild = median(Array.from({ length: 5 }, () => ({ effects: refreshLivePreview.of(null) })));
+  const selection = median(Array.from({ length: 10 }, (_, i) => ({ selection: { anchor: Math.floor((doc.length - 1) * i / 10) } })));
+  assert.ok(selection < rebuild / 4, `selection ${selection.toFixed(2)} ms vs rebuild ${rebuild.toFixed(2)} ms`);
+});
 
 test("decorations preserve Markdown and reveal only the selected formatted span", () => {
   const doc = "# Title\n\n**bold** and *italic* ~~old~~ `code`\n\nend";

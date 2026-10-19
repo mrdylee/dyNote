@@ -1,18 +1,12 @@
+import { headingId } from "./headings.mjs";
+
 export function installMarkdownExtensions(
   md,
   { resolveLink, renderMarkdown, attachmentUrl },
 ) {
   const escape = md.utils.escapeHtml;
   md.renderer.rules.heading_open = (tokens, index, options, _env, renderer) => {
-    const title = tokens[index + 1]?.content ?? "";
-    tokens[index].attrSet(
-      "id",
-      title
-        .toLowerCase()
-        .trim()
-        .replace(/[^\p{L}\p{N}\s-]/gu, "")
-        .replace(/\s+/g, "-"),
-    );
+    tokens[index].attrSet("id", headingId(tokens[index + 1]?.content ?? ""));
     return renderer.renderToken(tokens, index, options);
   };
   const image = (target, label, env, kind = "markdown") => {

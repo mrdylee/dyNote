@@ -1,0 +1,266 @@
+{
+  "date": "2026-10-19",
+  "baseCommit": "61084bb6ba25144164c8d97870dd2b387dd8474a",
+  "platform": "macOS Apple Silicon development build",
+  "unitTests": {
+    "passed": 83,
+    "failed": 0,
+    "command": "npm test"
+  },
+  "productionBuild": {
+    "passed": true,
+    "command": "npm run build",
+    "advisory": "Existing Vite chunk-size warning"
+  },
+  "reviewRegressions": {
+    "checks": [
+      {
+        "name": "heading Formatted",
+        "passed": true
+      },
+      {
+        "name": "heading wiki",
+        "passed": true
+      },
+      {
+        "name": "heading Code",
+        "passed": true
+      },
+      {
+        "name": "heading Linked",
+        "passed": true
+      },
+      {
+        "name": "heading Encoded",
+        "passed": true
+      },
+      {
+        "name": "heading Slug",
+        "passed": true
+      },
+      {
+        "name": "heading Legacy",
+        "passed": true
+      },
+      {
+        "name": "CRLF.md: checkbox saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "CRLF.md: undo saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "CRLF.md: new lines keep file convention",
+        "passed": true
+      },
+      {
+        "name": "CRLF.md: prop synchronization retains cursor",
+        "passed": true
+      },
+      {
+        "name": "BOM-CRLF.md: checkbox saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "BOM-CRLF.md: undo saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "BOM-CRLF.md: new lines keep file convention",
+        "passed": true
+      },
+      {
+        "name": "BOM-CRLF.md: prop synchronization retains cursor",
+        "passed": true
+      },
+      {
+        "name": "LF.md: checkbox saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "LF.md: undo saves exact bytes",
+        "passed": true
+      },
+      {
+        "name": "LF.md: new lines keep file convention",
+        "passed": true
+      },
+      {
+        "name": "LF.md: prop synchronization retains cursor",
+        "passed": true
+      },
+      {
+        "name": "CRLF.md: reopen retains file convention",
+        "passed": true
+      },
+      {
+        "name": "BOM-CRLF.md: reopen retains file convention",
+        "passed": true
+      },
+      {
+        "name": "LF.md: reopen retains file convention",
+        "passed": true
+      }
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "platform": "darwin"
+  },
+  "selectionBenchmark": {
+    "command": "node scripts/benchmark-live-preview.mjs",
+    "before": {
+      "scope": "Selection-only CodeMirror transactions; excludes DOM rendering, vault indexing, and OS input",
+      "results": [
+        {
+          "count": 1000,
+          "chars": 46890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.007750000000001478,
+          "p95Ms": 0.05187499999999545
+        },
+        {
+          "count": 1000,
+          "chars": 46890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 2.835333999999989,
+          "p95Ms": 6.664417
+        },
+        {
+          "count": 10000,
+          "chars": 478890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.002334000000018932,
+          "p95Ms": 0.011750000000006366
+        },
+        {
+          "count": 10000,
+          "chars": 478890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 27.67733300000009,
+          "p95Ms": 46.55341699999997
+        },
+        {
+          "count": 30000,
+          "chars": 1458890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.0012910000000374566,
+          "p95Ms": 0.006292000000030384
+        },
+        {
+          "count": 30000,
+          "chars": 1458890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 92.49970799999983,
+          "p95Ms": 149.81912499999999
+        }
+      ]
+    },
+    "after": {
+      "scope": "20 selection-only CodeMirror transactions per case; excludes DOM rendering, vault indexing, typing, and OS input",
+      "results": [
+        {
+          "count": 1000,
+          "chars": 46890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.008500000000012164,
+          "p95Ms": 0.0436250000000058
+        },
+        {
+          "count": 1000,
+          "chars": 46890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 0.09262499999999818,
+          "p95Ms": 0.4596249999999884
+        },
+        {
+          "count": 10000,
+          "chars": 478890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.0014170000000035543,
+          "p95Ms": 0.009959000000009155
+        },
+        {
+          "count": 10000,
+          "chars": 478890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 0.08208299999995461,
+          "p95Ms": 0.18841599999996106
+        },
+        {
+          "count": 30000,
+          "chars": 1458890,
+          "live": false,
+          "fullyParsed": true,
+          "p50Ms": 0.0013330000000451037,
+          "p95Ms": 0.00787499999995589
+        },
+        {
+          "count": 30000,
+          "chars": 1458890,
+          "live": true,
+          "fullyParsed": true,
+          "p50Ms": 0.0945840000000544,
+          "p95Ms": 0.27541600000006383
+        }
+      ]
+    }
+  },
+  "chromiumComposition": {
+    "errors": [],
+    "stages": [
+      {
+        "text": "**bㅎefore** and *after*\n\nend",
+        "composing": true,
+        "bold": "**bㅎefore**"
+      },
+      {
+        "text": "**b하efore** and *after*\n\nend",
+        "composing": true,
+        "bold": "**b하efore**"
+      },
+      {
+        "text": "**b한efore** and *after*\n\nend",
+        "composing": true,
+        "bold": "**b한efore**"
+      },
+      {
+        "committed": "**b한글efore** and *after*\n\nend"
+      }
+    ],
+    "source": "Chromium Input.imeSetComposition; not native OS IME",
+    "undo": true
+  },
+  "limits": [
+    "Selection timings exclude DOM rendering, typing, vault indexing and OS input.",
+    "Document changes and parser/context refreshes still rebuild decorations.",
+    "Uniform LF, CRLF and BOM+CRLF verified; mixed line endings normalize to the first convention.",
+    "Chromium composition is not native OS IME validation; Windows was not executed.",
+    "Local source and development build only; no new package or GitHub release."
+  ],
+  "existingRuntime": {
+    "checks": [
+      "inline formatting, code exclusion, resolved local image loaded, no duplicate reading pane",
+      "selective syntax reveal; Korean text insertion; same editor, selection and undo across 3 source/live switches",
+      "checkbox transaction, autosave and undo preserve all other bytes",
+      "image click reveals source; wiki navigation; Markdown heading link honors frontmatter offsets",
+      "Cmd-Enter wiki link navigation and existing wiki autocomplete in Live Preview",
+      "synthetic composition lifecycle preserves Korean input and undo (not native IME proof)",
+      "raw Markdown copy; undo/redo; clipboard and drop image import; exact disk save and app reopen; no remote image requests",
+      "long document source/live switching preserves the visible text anchor"
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "platform": "darwin"
+  }
+}

@@ -5,6 +5,7 @@ import { createLinkIndex, resolvePath, scanLinks } from "./links.mjs";
 import { SearchIndex } from "./searchIndex.mjs";
 import { parseMetadata } from "./metadata.mjs";
 import { installMarkdownExtensions } from "./markdown-extensions.mjs";
+import { headingText, headingId } from "./headings.mjs";
 export { parseMetadata, updateMetadata, toggleTask } from "./metadata.mjs";
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: false })
@@ -94,12 +95,16 @@ export function buildKnowledge(raw) {
     const tokens = md.parse(meta.body, {});
     const headings = [];
     tokens.forEach((token, i) => {
-      if (token.type === "heading_open")
+      if (token.type === "heading_open") {
+        const plainText = headingText(tokens[i + 1]);
         headings.push({
           level: Number(token.tag.slice(1)),
           text: tokens[i + 1]?.content ?? "",
+          plainText,
+          id: headingId(tokens[i + 1]?.content ?? ""),
           line: (token.map?.[0] ?? 0) + meta.offset,
         });
+      }
     });
     const prose = tokens
       .flatMap((t) => t.children ?? [])

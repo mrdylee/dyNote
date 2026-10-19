@@ -54,6 +54,18 @@ test("heading navigation includes frontmatter line offsets", () => {
   assert.deepEqual(note.headings.map((h) => h.line), [4, 6]);
 });
 
+test("headings expose visible inline text without changing existing rendered IDs", () => {
+  const content = "---\ntags: [test]\n---\n\n## **Procedure**\n\n## `Code` &amp; *details*\n\n## [Visible](Other.md) [[Guide|안내]]\n\n## ![Image alt](a.png)";
+  const note = buildKnowledge([{ path: "Formatted.md", content }]).notes[0];
+  assert.deepEqual(note.headings.map((h) => h.plainText), ["Procedure", "Code & details", "Visible 안내", "Image alt"]);
+  assert.deepEqual(note.headings.map((h) => h.id), ["procedure", "code-amp-details", "visibleothermd-guide안내", "image-altapng"]);
+  assert.equal(note.headings[0].text, "**Procedure**");
+  assert.equal(note.headings[0].line, 4);
+  const dom = new JSDOM(renderMarkdown(content, [note], note.path));
+  assert.deepEqual([...dom.window.document.querySelectorAll("h2")].map((h) => h.id), note.headings.map((h) => h.id));
+  dom.window.close();
+});
+
 test("search matches Korean content and ranks matching titles first", () => {
   const result = searchNotes(buildKnowledge(notes).notes, "시험");
   assert.equal(result[0].path, "area/Test.md");

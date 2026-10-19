@@ -1,4 +1,4 @@
-import { Facet, StateEffect, StateField } from "@codemirror/state";
+import { Facet, RangeSet, RangeValue, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import MarkdownIt from "markdown-it";
@@ -100,34 +100,43 @@ class ImagePreview extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+class RevealRegion extends RangeValue {
+  constructor(replacements) { super(); this.replacements = replacements; }
+}
+
 function decorate(state) {
-  const ranges = [], options = state.facet(config), context = options.getContext?.() ?? {};
+  const ranges = [], reveals = [], options = state.facet(config), context = options.getContext?.() ?? {};
   const source = state.doc.toString();
   const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(source)?.[0].length ?? 0;
-  const hide = (from, to, widget) => { if (to > from) ranges.push(Decoration.replace({ widget }).range(from, to)); };
   const mark = (from, to, name, attributes) => { if (to > from) ranges.push(Decoration.mark({ class: `cm-live-${name}`, attributes }).range(from, to)); };
   syntaxTree(state).iterate({ enter(ref) {
     const node = ref.node, { name, from, to } = node;
     if (to <= frontmatter || literal.has(name)) return false;
     if (name === "Blockquote" && /^>\s*\[!/.test(state.sliceDoc(from, to))) return false;
-    const active = selected(state, from, to);
+    const replacements = [];
+    const hide = (from, to, widget) => { if (to > from) replacements.push(Decoration.replace({ widget }).range(from, to)); };
+    const finish = (skipChildren = false) => {
+      if (replacements.length) {
+        reveals.push(new RevealRegion(replacements).range(from, to));
+        if (!selected(state, from, to)) ranges.push(...replacements);
+      }
+      if (skipChildren) return false;
+    };
     if (formatting[name]) {
       mark(from, to, formatting[name]);
-      if (!active) for (let child = node.firstChild; child; child = child.nextSibling) {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
         if (/^(?:Emphasis|Strikethrough|Code)Mark$/.test(child.name)) hide(child.from, child.to);
       }
-      if (name === "InlineCode") return false;
+      if (name === "InlineCode") return finish(true);
     } else if (/^(?:ATX|Setext)Heading[1-6]$/.test(name)) {
       ranges.push(Decoration.line({ class: `cm-live-heading cm-live-h${name.at(-1)}` }).range(state.doc.lineAt(from).from));
-      if (!active) {
-        const marker = node.getChild("HeaderMark");
-        if (marker) hide(marker.from, marker.to + (state.sliceDoc(marker.to, marker.to + 1) === " " ? 1 : 0));
-        const closing = node.getChildren("HeaderMark")[1];
-        if (closing) hide(closing.from, closing.to);
-      }
-    } else if (name === "ListMark" && !active && /^[-+*]$/.test(state.sliceDoc(from, to))) {
+      const marker = node.getChild("HeaderMark");
+      if (marker) hide(marker.from, marker.to + (state.sliceDoc(marker.to, marker.to + 1) === " " ? 1 : 0));
+      const closing = node.getChildren("HeaderMark")[1];
+      if (closing) hide(closing.from, closing.to);
+    } else if (name === "ListMark" && /^[-+*]$/.test(state.sliceDoc(from, to))) {
       hide(from, to, node.parent.getChild("Task") ? undefined : new Bullet());
-    } else if (name === "TaskMarker" && !active) {
+    } else if (name === "TaskMarker") {
       hide(from, to, new Checkbox(/x/i.test(state.sliceDoc(from, to)), state.readOnly));
     } else if (["Link", "Image", "WikiLink", "WikiEmbed"].includes(name)) {
       const link = linkInfo(state, node);
@@ -135,27 +144,64 @@ function decorate(state) {
       if (name === "Image" || name === "WikiEmbed") {
         const url = /\.(?:png|jpe?g|gif|webp)(?:[#?]|$)/i.test(link.target)
           ? attachmentUrl(link.target, context.path, context.attachments ?? [], context.vaultId, link.kind) : null;
-        if (url && !active) hide(from, to, new ImagePreview(url, state.sliceDoc(link.from, link.to)));
-        return false;
+        if (url) hide(from, to, new ImagePreview(url, state.sliceDoc(link.from, link.to)));
+        return finish(true);
       }
       mark(link.from, link.to, "link", { "data-live-target": link.target, "data-live-kind": link.kind, title: "⌘/Ctrl+클릭으로 링크 열기 · 커서에서 ⌘/Ctrl+Enter" });
-      if (!active) { hide(from, link.from); hide(link.to, to); }
+      hide(from, link.from); hide(link.to, to);
     }
+    return finish();
   }});
-  return Decoration.set(ranges, true);
+  return { decorations: Decoration.set(ranges, true), reveals: RangeSet.of(reveals, true) };
+}
+
+function updateSelection(value, before, after) {
+  const seen = new Set(), removed = new Set(), add = [], intervals = [];
+  // The index includes hidden and currently revealed syntax. Query both ends of
+  // a move, including ancestors, without walking the document between them.
+  for (const selection of [...before.selection.ranges, ...after.selection.ranges]) {
+    let from = selection.from, to = selection.to, filter = false;
+    value.reveals.between(from, to, (start, end, region) => {
+      if (seen.has(region)) return;
+      seen.add(region);
+      const active = selected(after, start, end);
+      if (active === selected(before, start, end)) return;
+      if (!active) { add.push(...region.replacements); return; }
+      for (const range of region.replacements) {
+        removed.add(range.value);
+        from = Math.min(from, range.from); to = Math.max(to, range.to);
+        filter = true;
+      }
+    });
+    if (filter) intervals.push({ from, to });
+  }
+  if (!removed.size && !add.length) return value;
+  const merged = [];
+  for (const interval of intervals.sort((a, b) => a.from - b.from)) {
+    const last = merged.at(-1);
+    if (last && interval.from <= last.to) last.to = Math.max(last.to, interval.to);
+    else merged.push(interval);
+  }
+  let decorations = value.decorations;
+  for (const { from, to } of merged) decorations = decorations.update({
+    filterFrom: from, filterTo: to, filter: (_from, _to, decoration) => !removed.has(decoration),
+  });
+  if (add.length) decorations = decorations.update({ add, sort: true });
+  return { ...value, decorations };
 }
 
 export const livePreviewState = StateField.define({
-  create: (state) => ({ decorations: decorate(state), composing: false }),
+  create: (state) => ({ ...decorate(state), composing: false }),
   update(value, tr) {
     let composing = value.composing, refresh = false;
     for (const effect of tr.effects) {
       if (effect.is(composition)) { composing = effect.value; refresh = true; }
       if (effect.is(refreshLivePreview)) refresh = true;
     }
-    if (composing) return { composing, decorations: value.decorations.map(tr.changes) };
-    return refresh || tr.docChanged || tr.selection || syntaxTree(tr.startState) !== syntaxTree(tr.state) || tr.startState.readOnly !== tr.state.readOnly
-      ? { composing, decorations: decorate(tr.state) } : value;
+    if (composing) return { ...value, composing, decorations: value.decorations.map(tr.changes) };
+    if (refresh || tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state) || tr.startState.readOnly !== tr.state.readOnly)
+      return { ...decorate(tr.state), composing };
+    return tr.selection ? updateSelection(value, tr.startState, tr.state) : value;
   },
   provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
 });

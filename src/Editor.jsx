@@ -22,6 +22,7 @@ import {
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { suggestNotes } from "../core/knowledge.mjs";
+import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 
 export default function Editor({
@@ -39,6 +40,10 @@ export default function Editor({
   const host = useRef(null);
   const editor = useRef(null);
   const callback = useRef(onChange);
+  const lineBreak = useRef("\n");
+  // CodeMirror keeps normalized offsets internally; disk content retains the
+  // file's line endings, including when all existing newlines are deleted.
+  lineBreak.current = note.content.match(/\r\n|\r|\n/)?.[0] ?? lineBreak.current;
   const syncing = useRef(false);
   const readonly = useRef(new Compartment());
   const rendering = useRef(new Compartment());
@@ -125,7 +130,7 @@ export default function Editor({
           }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !syncing.current)
-              callback.current(update.state.doc.toString());
+              callback.current(update.state.doc.sliceString(0, update.state.doc.length, lineBreak.current));
           }),
         ],
       }),
@@ -181,7 +186,7 @@ export default function Editor({
   }, [attachments, vaultId]);
   useEffect(() => {
     const view = editor.current;
-    if (view && view.state.doc.toString() !== note.content) {
+    if (view && view.state.doc.sliceString(0, view.state.doc.length, lineBreak.current) !== note.content) {
       syncing.current = true;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: note.content },
@@ -193,7 +198,7 @@ export default function Editor({
     if (!jump || jump.path !== note.path) return;
     let fragment;
     try { fragment = decodeURIComponent(jump.fragment); } catch { return; }
-    const heading = note.headings?.find((h) => h.text === fragment || h.text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-") === fragment);
+    const heading = note.headings?.find((h) => h.text === fragment || h.plainText === fragment || h.id === fragment || headingId(h.plainText) === fragment);
     const view = editor.current;
     if (view && heading) {
       const line = view.state.doc.line(Math.min(view.state.doc.lines, heading.line + 1));
