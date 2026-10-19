@@ -90,3 +90,30 @@ test("a wikilink alias inside a table does not split the cell or lose backlinks"
     ["Guide"],
   );
 });
+
+test("unchanged parsing is reused while metadata and alias resolution stay fresh", () => {
+  const a = { path: "A.md", content: "[[별칭]]", mtime: 1 };
+  const b = { path: "B.md", content: "---\naliases: [별칭]\n---\nB" };
+  const first = buildKnowledge([a, b]);
+  const renamed = buildKnowledge([{ ...a, mtime: 2 }, { ...b, path: "C.md" }]);
+  assert.equal(renamed.notes[0].links, first.notes[0].links);
+  assert.equal(renamed.notes[0].mtime, 2);
+  assert.deepEqual(renamed.edges, [{ source: "A.md", target: "C.md" }]);
+  const changed = buildKnowledge([a, { ...b, content: "---\naliases: [다름]\n---\nB" }]);
+  assert.deepEqual(changed.edges, []);
+  assert.deepEqual(buildKnowledge([a]).edges, []);
+  assert.deepEqual(buildKnowledge([{ ...a, content: "새 저장소" }]).notes[0].links, []);
+});
+
+test("indexed resolution preserves relative priority, Unicode and ambiguous aliases", async () => {
+  const { createLinkIndex } = await import("../core/links.mjs");
+  const files = [
+    { path: "가.md", aliases: ["첫별칭"] },
+    { path: "folder/가.md", aliases: ["공통"] },
+    { path: "other/B.md", aliases: ["공통", "B"] },
+  ];
+  const index = createLinkIndex(files);
+  for (const kind of ["wiki", "markdown"])
+    for (const target of ["가", "../가", "가", "첫별칭", "공통", "B", "none", "../../no", "%xx"])
+      assert.deepEqual(resolveLink(target, "folder/A.md", files, { kind, index }), resolveLink(target, "folder/A.md", files, { kind }));
+});

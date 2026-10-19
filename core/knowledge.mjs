@@ -1,7 +1,7 @@
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
 import { katex } from "@mdit/plugin-katex";
-import { resolvePath, scanLinks } from "./links.mjs";
+import { createLinkIndex, resolvePath, scanLinks } from "./links.mjs";
 import { SearchIndex } from "./searchIndex.mjs";
 import { parseMetadata } from "./metadata.mjs";
 import { installMarkdownExtensions } from "./markdown-extensions.mjs";
@@ -82,8 +82,14 @@ export function attachmentUrl(
     : null;
 }
 
+const parsedNotes = new Map();
 export function buildKnowledge(raw) {
+  const present = new Set(raw.map((n) => n.path));
+  for (const path of parsedNotes.keys())
+    if (!present.has(path)) parsedNotes.delete(path);
   const notes = raw.map((note) => {
+    const cached = parsedNotes.get(note.path);
+    if (cached?.content === note.content) return { ...note, ...cached.parsed };
     const meta = parseMetadata(note.content);
     const tokens = md.parse(meta.body, {});
     const headings = [];
@@ -113,8 +119,7 @@ export function buildKnowledge(raw) {
         ),
       ]),
     ];
-    return {
-      ...note,
+    const parsed = {
       ...meta,
       properties: meta.properties,
       aliases:
@@ -128,9 +133,14 @@ export function buildKnowledge(raw) {
         note.path.split("/").at(-1).replace(/\.md$/i, ""),
       headings,
       tags,
-      links: extractLinks(note.content),
+      links: scanLinks(meta.body).map(
+        ({ target, label, kind, embed }) => ({ target, label, kind, embed }),
+      ),
     };
+    parsedNotes.set(note.path, { content: note.content, parsed });
+    return { ...note, ...parsed };
   });
+  const index = createLinkIndex(notes);
   const backlinks = Object.fromEntries(notes.map((n) => [n.path, []]));
   const edges = [];
   const seen = new Set();
@@ -138,6 +148,7 @@ export function buildKnowledge(raw) {
     for (const link of note.links) {
       const target = resolveLink(link.target, note.path, notes, {
         kind: link.kind,
+        index,
       });
       const key = note.path + "\0" + target.path;
       if (

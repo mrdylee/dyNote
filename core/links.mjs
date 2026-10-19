@@ -11,7 +11,21 @@ export function normalizePath(value) {
   }
   return out.join("/");
 }
-export function resolvePath(target, from, files, { kind = "wiki" } = {}) {
+export function createLinkIndex(files) {
+  const paths = new Map(), names = new Map(), aliases = new Map();
+  const add = (map, key, file) => {
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(file);
+  };
+  for (const file of files) {
+    add(paths, fold(file.path), file);
+    add(names, fold(file.path.split("/").at(-1)), file);
+    for (const alias of file.aliases ?? [])
+      add(aliases, fold(alias.replace(/\.md$/i, "")), file);
+  }
+  return { paths, names, aliases };
+}
+export function resolvePath(target, from, files, { kind = "wiki", index } = {}) {
   let clean;
   try {
     clean = decodeURIComponent(target.split(/[#^]/)[0]).trim();
@@ -31,7 +45,9 @@ export function resolvePath(target, from, files, { kind = "wiki" } = {}) {
       : [clean, folder + clean];
   for (const candidate of candidates.map(normalizePath)) {
     if (!candidate) continue;
-    const found = files.filter((n) => fold(n.path) === fold(candidate));
+    const found = index
+      ? [...(index.paths.get(fold(candidate)) ?? [])]
+      : files.filter((n) => fold(n.path) === fold(candidate));
     if (found.length)
       return {
         status: found.length === 1 ? "resolved" : "ambiguous",
@@ -39,7 +55,9 @@ export function resolvePath(target, from, files, { kind = "wiki" } = {}) {
       };
   }
   if (clean.includes("/")) return { status: "missing", path: null };
-  const matches = files.filter(
+  const matches = index
+    ? [...new Set([...(index.names.get(fold(clean)) ?? []), ...(index.aliases.get(fold(clean.replace(/\.md$/i, ""))) ?? [])])]
+    : files.filter(
     (n) =>
       fold(n.path.split("/").at(-1)) === fold(clean) ||
       (n.aliases ?? []).some(
