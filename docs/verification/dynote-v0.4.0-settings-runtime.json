@@ -1,0 +1,20 @@
+{
+  "checks": [
+    "Git address starts empty and the minute input defaults to 10; backup remains disconnected",
+    "installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown",
+    "repository entered in settings; initial push and actual one-minute automatic commit/push preserve saved Markdown",
+    "font preferences persist across app restart",
+    "arbitrary 17-minute interval can be typed, applied and restored after restart",
+    "Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work"
+  ],
+  "errors": [],
+  "remoteRequests": [],
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.9.0",
+    "version": "0.4.0"
+  },
+  "installedFontFamilies": 258
+}

@@ -24,9 +24,10 @@ const fixtures = [
 ].map(([name, eol, bom]) => ({ name, eol, content: bom + ["# Windows", "", "- [ ] task", "", "end", ""].join(eol) }));
 for (const { name, content } of fixtures) await writeFile(`${vaultRoot}/${name}`, content);
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
-const launch = () => electron.launch({ executablePath: `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
+const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
 const report = { checks: [], errors: [], remoteRequests: [], platform: process.platform };
 let app = await launch(), page;
+report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, electron: process.versions.electron, version: app.getVersion() }));
 const setup = async () => {
   page = await app.firstWindow();
   page.setDefaultTimeout(10000);

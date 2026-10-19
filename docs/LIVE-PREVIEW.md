@@ -1,6 +1,6 @@
 # Live Preview phase 1
 
-Status: local development source on `feat/live-preview`, based on `1f4994d`. The existing v0.3.0 release and packages do not contain this feature.
+Status: included in the v0.4.0 release. Earlier v0.3.0 packages do not contain this feature.
 
 ## Use
 
@@ -48,6 +48,7 @@ Commands:
 npm test
 npm run build
 # Use an installed Playwright module; the repository does not add a runtime dependency.
+# Optionally set DYNOTE_EXECUTABLE to an absolute packaged-app executable path.
 DYNOTE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/verify-live-preview-runtime.mjs
 DYNOTE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/verify-live-preview-review.mjs
 node scripts/benchmark-live-preview.mjs
@@ -55,4 +56,4 @@ node scripts/benchmark-live-preview.mjs
 
 The runtime harness creates an isolated profile and synthetic vault. It checks actual Electron rendering, selective syntax reveal, local image decoding, Korean text insertion, source/live selection and undo/redo, Markdown copy, checkbox autosave, image source editing, wiki links, heading offsets, synthetic composition lifecycle, clipboard/drop imports, exact disk content after reopening, and long-document scroll anchoring. It asserts no page/console errors and no HTTP(S) requests. Screenshot and machine-readable report are written to `output/playwright/live-preview.png` and `output/playwright/live-preview-runtime.json`.
 
-Evidence applies to an Apple Silicon macOS development build. Chromium IME composition was also exercised with `Input.imeSetComposition` through ㅎ → 하 → 한, committing 한글 and undoing it inside bold text. This and the synthetic composition checks do not establish native OS IME behavior. Windows execution and a new packaged release are not part of this verification.
+Evidence applies to an Apple Silicon macOS development build. Chromium IME composition was also exercised with `Input.imeSetComposition` through ㅎ → 하 → 한, committing 한글 and undoing it inside bold text. This and the synthetic composition checks do not establish native OS IME behavior. Windows execution is not part of this verification. The later v0.4.0 packaged macOS checks are recorded separately in [release verification](RELEASE-REVIEW-0.4.0.md).

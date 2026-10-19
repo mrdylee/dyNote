@@ -13,9 +13,10 @@ await writeFile(`${vaultRoot}/Guide.md`, "---\ntags: [fixture]\n---\n\n# Guide\n
 await writeFile(`${vaultRoot}/Long.md`, Array.from({ length: 120 }, (_, i) => `### Section ${i}\n\n**내용 ${i}** · *한글* · [[Guide]]\n\n`).join(""));
 await writeFile(`${vaultRoot}/assets/pixel.png`, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAPAAAABICAYAAADIzHiKAAAA/ElEQVR4nO3TOQ2AQAAAwVOMCDQhhxoH1ODhEp5Npph+mx3Hfl5A0/g6AJhnYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwqYGXpcNeICBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGGvDAz8g4EhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAi7AdxvIjaEtAftAAAAAElFTkSuQmCC", "base64"));
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
-const launch = () => electron.launch({ executablePath: `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
+const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
 const errors = [], remoteRequests = [], report = { checks: [], vaultRoot, profile };
 let app = await launch();
+report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, electron: process.versions.electron, version: app.getVersion() }));
 let page;
 // CodeMirror's current installed DOM bridge is used only by this harness to
 // inspect state and place deterministic selections. User actions use real input.

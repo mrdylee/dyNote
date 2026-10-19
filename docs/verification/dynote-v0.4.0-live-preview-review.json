@@ -1,0 +1,102 @@
+{
+  "checks": [
+    {
+      "name": "heading Formatted",
+      "passed": true
+    },
+    {
+      "name": "heading wiki",
+      "passed": true
+    },
+    {
+      "name": "heading Code",
+      "passed": true
+    },
+    {
+      "name": "heading Linked",
+      "passed": true
+    },
+    {
+      "name": "heading Encoded",
+      "passed": true
+    },
+    {
+      "name": "heading Slug",
+      "passed": true
+    },
+    {
+      "name": "heading Legacy",
+      "passed": true
+    },
+    {
+      "name": "CRLF.md: checkbox saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "CRLF.md: undo saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "CRLF.md: new lines keep file convention",
+      "passed": true
+    },
+    {
+      "name": "CRLF.md: prop synchronization retains cursor",
+      "passed": true
+    },
+    {
+      "name": "BOM-CRLF.md: checkbox saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "BOM-CRLF.md: undo saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "BOM-CRLF.md: new lines keep file convention",
+      "passed": true
+    },
+    {
+      "name": "BOM-CRLF.md: prop synchronization retains cursor",
+      "passed": true
+    },
+    {
+      "name": "LF.md: checkbox saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "LF.md: undo saves exact bytes",
+      "passed": true
+    },
+    {
+      "name": "LF.md: new lines keep file convention",
+      "passed": true
+    },
+    {
+      "name": "LF.md: prop synchronization retains cursor",
+      "passed": true
+    },
+    {
+      "name": "CRLF.md: reopen retains file convention",
+      "passed": true
+    },
+    {
+      "name": "BOM-CRLF.md: reopen retains file convention",
+      "passed": true
+    },
+    {
+      "name": "LF.md: reopen retains file convention",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "remoteRequests": [],
+  "platform": "darwin",
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.9.0",
+    "version": "0.4.0"
+  }
+}

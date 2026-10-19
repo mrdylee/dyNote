@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "inline formatting, code exclusion, resolved local image loaded, no duplicate reading pane",
+    "selective syntax reveal; Korean text insertion; same editor, selection and undo across 3 source/live switches",
+    "checkbox transaction, autosave and undo preserve all other bytes",
+    "image click reveals source; wiki navigation; Markdown heading link honors frontmatter offsets",
+    "Cmd-Enter wiki link navigation and existing wiki autocomplete in Live Preview",
+    "synthetic composition lifecycle preserves Korean input and undo (not native IME proof)",
+    "raw Markdown copy; undo/redo; clipboard and drop image import; exact disk save and app reopen; no remote image requests",
+    "long document source/live switching preserves the visible text anchor"
+  ],
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.9.0",
+    "version": "0.4.0"
+  },
+  "errors": [],
+  "remoteRequests": [],
+  "platform": "darwin"
+}

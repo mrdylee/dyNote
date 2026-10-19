@@ -2,19 +2,17 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.3.0은 Canvas·Bases 기본 기능과 새 그래프 엔진을 포함하는 프리릴리스입니다. [릴리스 검토·수정 기록](docs/RELEASE-REVIEW-0.3.0.md)을 확인하세요.
-
-현재 개발 소스에는 [Live Preview 1단계](docs/LIVE-PREVIEW.md)가 추가되어 있습니다. 기존 v0.3.0 다운로드에는 포함되지 않으며, 아래 개발 실행 명령으로 확인할 수 있습니다.
+v0.4.0은 [Live Preview 1단계](docs/LIVE-PREVIEW.md), 설치 글꼴 선택, 기본 10분 간격의 Git 자동 저장을 추가한 프리릴리스입니다. 기존 그래프·Canvas·Bases 기본 기능을 포함합니다. [릴리스 변경사항](docs/RELEASE-NOTES-0.4.0.md)과 [검증 기록](docs/RELEASE-REVIEW-0.4.0.md)을 확인하세요.
 
 ## 실행
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.3.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.4.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.3.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.4.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 

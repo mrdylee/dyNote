@@ -1,6 +1,6 @@
 # 글꼴 및 Git 자동 저장
 
-왼쪽 아래 톱니바퀴 **글꼴 및 Git 설정**을 엽니다. 이 기능은 현재 개발 소스와 로컬 Mac 개발 빌드에 있으며 기존 배포 ZIP은 갱신하지 않았습니다.
+왼쪽 아래 톱니바퀴 **글꼴 및 Git 설정**을 엽니다. 이 기능은 v0.4.0부터 Mac·Windows 배포 ZIP에 포함됩니다.
 
 ## 설치 글꼴
 
@@ -51,4 +51,4 @@ Git을 설치하고 해당 저장소에 접근할 수 있는 SSH 키 또는 Git 
 
 같은 날 사용자 요청에 따라 기본값을 10분으로 바꾸고 분 단위 직접 입력을 추가했습니다. 테스트 99개와 빌드가 통과했고, 새 Mac 패키지에서 주소 미입력·기본값 10분, 잘못된 간격의 적용 차단, 실제 1분 자동 업로드, 직접 입력한 17분의 재실행 후 유지까지 확인했습니다. [분 단위 설정 검증](verification/git-minute-settings-runtime.json)
 
-최신 로컬 실행 파일: `output/dynote-git-minutes-20261019/Dynote-darwin-arm64/Dynote.app`. 개발 빌드의 버전 표시는 0.3.0을 유지합니다. GitHub 릴리스와 기존 설치본은 자동으로 교체되지 않습니다.
+v0.4.0 패키지 경로: `release/v0.4.0/Dynote-darwin-arm64/Dynote.app`, `release/v0.4.0/Dynote-win32-x64/Dynote.exe`. 기존 설치본은 자동으로 교체되지 않으므로 새 ZIP을 내려받아 실행하세요. [릴리스 패키지 검증](RELEASE-REVIEW-0.4.0.md)

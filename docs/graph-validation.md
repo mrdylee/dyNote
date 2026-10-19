@@ -69,7 +69,7 @@ node scripts/verify-graph-runtime.mjs 10000
 
 Runtime artifacts go under ignored `output/playwright/`. Temporary test profiles/vaults are under the system temp directory. The graph engine is rebuilt before tests and builds; generated WASM is ignored by Git.
 
-Release package locations:
+Historical v0.3.0 verification package locations (current downloads: [v0.4.0](RELEASE-NOTES-0.4.0.md)):
 
 - `release/v0.3.0/Dynote-darwin-arm64/Dynote.app`
 - `release/v0.3.0/Dynote-win32-x64/Dynote.exe` (keep the whole containing folder)
@@ -78,6 +78,6 @@ Both ASAR archives contain the independently compiled graph WASM and its bundled
 
 ## Remaining functional differences
 
-Tag/attachment/unresolved-link nodes, orphan visibility toggle, search color groups, direction arrows, creation-time animation, the full Obsidian search language/frontmatter-link semantics, and a local graph pane beside a note are separate follow-up work. Mobile, Sync/Publish and Live Preview remain outside the agreed scope.
+Tag/attachment/unresolved-link nodes, orphan visibility toggle, search color groups, direction arrows, creation-time animation, the full Obsidian search language/frontmatter-link semantics, and a local graph pane beside a note are separate follow-up work. Mobile and Sync/Publish remain outside the agreed scope. Live Preview was added separately in v0.4.0; see [its support scope](LIVE-PREVIEW.md).
 
 Implementation references: [Pixi Application API](https://pixijs.com/8.x/guides/components/application), [AssemblyScript compiler options](https://www.assemblyscript.org/compiler.html). Original runtime observations remain in [obsidian-graph-runtime-review.md](obsidian-graph-runtime-review.md).
