@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-19",
+  "productName": "Dynote",
+  "version": "0.1.0",
+  "host": "Apple Silicon macOS",
+  "userDataPathRetained": "Open Notes",
+  "sharedTests": {
+    "passed": 21,
+    "failed": 0
+  },
+  "fullDependencyAudit": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "macRuntimeObservation": {
+    "windowTitle": "Dynote",
+    "applicationMenu": "Dynote",
+    "header": "Dynote",
+    "freshWelcomeName": "Dynote",
+    "syntheticNotes": 8,
+    "isolatedUserData": true
+  },
+  "windowsRuntimeTested": false,
+  "codeSigned": false,
+  "packages": [
+    {
+      "platform": "mac",
+      "asar": "release/Dynote-darwin-arm64/Dynote.app/Contents/Resources/app.asar",
+      "sha256": "c897339d8fc399c3c17547824b3bf297f7bc21ddc415d099c398136bad20d869",
+      "comparedFiles": [
+        "electron/main.mjs",
+        "electron/preload.cjs",
+        "core/vault.mjs",
+        "core/security.mjs",
+        "core/demo.mjs",
+        "dist/index.html"
+      ],
+      "packageMetadataMatchesAfterOfficialSanitization": true
+    },
+    {
+      "platform": "windows",
+      "asar": "release/Dynote-win32-x64/resources/app.asar",
+      "sha256": "c897339d8fc399c3c17547824b3bf297f7bc21ddc415d099c398136bad20d869",
+      "comparedFiles": [
+        "electron/main.mjs",
+        "electron/preload.cjs",
+        "core/vault.mjs",
+        "core/security.mjs",
+        "core/demo.mjs",
+        "dist/index.html"
+      ],
+      "packageMetadataMatchesAfterOfficialSanitization": true
+    }
+  ],
+  "archives": [
+    {
+      "archive": "release/Dynote-0.1.0-mac-arm64.zip",
+      "bytes": 134262863,
+      "sha256": "21dce24fe3ea70440fc16f7ce508ccd73446bfd061d3c7c3d6d40bce574c267f",
+      "files": 1422,
+      "zipIntegrity": "passed"
+    },
+    {
+      "archive": "release/Dynote-0.1.0-windows-x64.zip",
+      "bytes": 165259508,
+      "sha256": "e65ae75aa4cd7fdf033588bf47b95ea9de61a4c13a7a24b4a27cdfa7c9574866",
+      "files": 73,
+      "zipIntegrity": "passed",
+      "runtimeFilesByteMatchedToElectronDistribution": 71,
+      "electronDistributionSha256": "88e08039d0ef359bab9f674e8051fa103bd8628ea7c5a5e1daaa610a8a0c6931"
+    }
+  ]
+}

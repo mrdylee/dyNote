@@ -17,7 +17,8 @@ import { demoNotes } from "../core/demo.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
-app.setName("Open Notes");
+app.setName("Dynote");
+// Keep the original storage location so existing vault settings and recovery copies remain available.
 app.setPath("userData", path.join(app.getPath("appData"), "Open Notes"));
 protocol.registerSchemesAsPrivileged([
   {
@@ -125,7 +126,7 @@ app
       height: 940,
       minWidth: 1050,
       minHeight: 700,
-      title: "Open Notes",
+      title: "Dynote",
       backgroundColor: "#ffffff",
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       ...(process.platform === "darwin"

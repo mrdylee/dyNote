@@ -375,7 +375,7 @@ export default function App() {
         <div className="brand-mark">
           <BookOpen size={25} />
         </div>
-        <h1>Open Notes</h1>
+        <h1>Dynote</h1>
         <p>{error || "생각을 연결할 준비를 하고 있어요…"}</p>
       </div>
     );
@@ -387,7 +387,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="titlebar">
-        <span>Open Notes</span>
+        <span>Dynote</span>
         <div>
           <span className="local-dot" />내 기기에 저장되는 지식 공간
         </div>
@@ -971,7 +971,7 @@ export default function App() {
             복구 사본 폴더 열기
           </button>
           <div className="about-footer">
-            Open Notes 0.1.0 · 독립적으로 제작한 노트 앱
+            Dynote 0.1.0 · 독립적으로 제작한 노트 앱
           </div>
         </Modal>
       )}

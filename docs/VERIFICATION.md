@@ -1,6 +1,8 @@
-# Open Notes v0.1 verification
+# Dynote v0.1 verification
 
 Date: 2026-10-19, Asia/Seoul. Host: Apple Silicon macOS.
+
+The original baseline below was verified under the Open Notes name. The final section records the Dynote rename and refreshed packages; earlier hashes identify the original packages.
 
 ## Automated checks
 
@@ -38,7 +40,7 @@ The packaged ASAR was analyzed statically with REA, selecting `electron/main.mjs
 - Observed: one BrowserWindow construction, six explicit web-preference assignments, one context-bridge API and a sender-validation syntax observation; three selected files parsed without failures.
 - Coverage remains partial. The loop-registering IPC code includes dynamic channel expressions that REA did not resolve; bundled dependencies and renderer sources were not part of this selected analysis. The observation is not a runtime policy proof or a comparison proving equivalence to Obsidian.
 
-The inspected ASAR contains no verification document or this report because `docs/` is excluded from packaging. Source code, lockfile and these reports remain in the local repository. Nothing was uploaded to a remote repository or release service.
+The inspected ASAR contains no verification document or this report because `docs/` is excluded from packaging. Source code, lockfile and these reports remained local at that original inspection stage. The later initial source publication uses the Dynote name; executable packages are not included in Git.
 
 ## Windows x64 package
 
@@ -47,3 +49,18 @@ On 2026-10-19, `npm run package:win` completed on macOS and generated `release/O
 `file` identified the executable as a PE32+ Windows GUI x86-64 executable. The packaged main/preload/filesystem/security sources and built HTML were compared byte-for-byte against the checkout. Required Electron runtime files were present, and the shared 21-test suite passed on macOS. The package's identity and limitations are recorded in `verification/windows-package.json`.
 
 The Windows deliverable is a ZIP of the complete runtime folder, not an installer or an EXE-only download. See [Windows instructions](WINDOWS.md). Actual Windows execution and code signing remain unverified/not performed, respectively.
+
+## Dynote rename and refreshed packages
+
+On 2026-10-19 the application display name, native menu/window, HTML title, package metadata, fresh demo welcome text and packaging commands were changed to **Dynote**. The internal `Open Notes` user-data path and existing environment override were retained so existing settings and recovery copies remain discoverable. Existing user documents were not rewritten for branding.
+
+- Shared automated tests: **21 passed, 0 failed** after the rename.
+- Production build and both `package:mac` and `package:win`: succeeded. The existing bundle-size advisory remains non-fatal.
+- Full Dynote dependency audit: **0 known vulnerabilities** at verification time.
+- Packaged application source files match the checkout byte-for-byte. Packaged `package.json` matches the official packager's sanitization, which intentionally removes development-only fields.
+- On macOS, the actual packaged window, native application menu, HTML content and new synthetic welcome note displayed **Dynote**. This check used an isolated temporary app-data directory with eight synthetic notes.
+- Windows `Dynote.exe` is a PE32+ GUI x86-64 executable. The other 71 runtime files match the cached official Electron 44.9.0 Windows distribution byte-for-byte. The 73-file portable ZIP passed its CRC check. Windows execution remains untested, and packages remain unsigned.
+- Local deliverables: `release/Dynote-darwin-arm64/Dynote.app`, `release/Dynote-0.1.0-mac-arm64.zip`, and `release/Dynote-0.1.0-windows-x64.zip`. ZIP checksums and source/package verification details are recorded in [dynote-package.json](verification/dynote-package.json).
+- The upstream reference suite also passed its existing **116 tests**. This does not resolve the source-level risks or establish feature equivalence; see [the upstream review](UPSTREAM-REVIEW.md).
+
+Initial publication scope is source code, lockfile, tests and documentation in `mrdylee/dyNote`. Release folders, generated ZIPs, dependencies and private note data are excluded from Git. No new image/PDF, Live Preview or Git-sync implementation is claimed by this rename/publication change.

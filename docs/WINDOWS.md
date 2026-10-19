@@ -1,17 +1,19 @@
-# Windows용 Open Notes 0.1.0
+# Windows용 Dynote 0.1.0
 
 대상: Windows x64. 이 파일은 설치 프로그램이 아닌 독립 실행 앱 폴더입니다.
 
 ## 실행 방법
 
-1. `Open-Notes-0.1.0-windows-x64.zip`을 Windows PC로 복사합니다.
+1. `Dynote-0.1.0-windows-x64.zip`을 Windows PC로 복사합니다.
 2. ZIP을 마우스 오른쪽 버튼으로 클릭해 **압축 풀기**를 선택합니다.
-3. 압축을 푼 `Open Notes-win32-x64` 폴더 안에서 **Open Notes.exe**를 실행합니다.
+3. 압축을 푼 `Dynote-win32-x64` 폴더 안에서 **Dynote.exe**를 실행합니다.
 4. 앱이 열리면 왼쪽 보관함 이름 옆 화살표에서 **다른 폴더 열기**를 선택합니다.
 
 `index.html`은 실행 파일이 아닙니다. EXE 파일만 따로 복사하지 마세요. 같은 폴더의 `resources`, DLL 및 나머지 파일이 함께 필요합니다. 이 패키지에는 Electron 실행 환경이 들어 있어 사용자가 Node.js나 npm을 설치할 필요가 없습니다.
 
 ## 저장 위치와 단축키
+
+이름 변경 전 설정과 복구 사본을 유지하기 위해 내부 데이터 폴더 이름은 `Open Notes`를 계속 사용합니다.
 
 - 문서: 사용자가 선택한 Markdown 폴더
 - 초기 예제: `%APPDATA%\Open Notes\처음 만나는 노트`

@@ -1,20 +1,24 @@
-# Open Notes
+# Dynote
 
-REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 기존 `JingHao-Leon/open-obsidian`의 코드를 사용하지 않았습니다.
+REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes이며, 현재 구현에는 `JingHao-Leon/open-obsidian`의 코드를 사용하지 않았습니다.
 
 ## 실행
 
-이 작업 환경에서 검증한 Apple Silicon Mac 앱:
+패키징 결과의 Apple Silicon Mac 앱:
 
-`release/Open Notes-darwin-arm64/Open Notes.app`
+`release/Dynote-darwin-arm64/Dynote.app`
 
-Windows 64비트용 실행 폴더는 `release/Open Notes-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Open Notes.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징했으며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+
+GitHub 저장소에는 소스와 문서가 들어 있습니다. `release/` 실행 파일과 ZIP은 Git에 포함하지 않으며, 아래 명령으로 로컬에서 생성합니다.
 
 앱을 열면 가상의 예제 문서가 나타납니다. 왼쪽 보관함 이름 옆 화살표로 **다른 폴더 열기**를 선택할 수 있습니다. 처음에는 실제 보관함의 복사본으로 확인하는 것을 권합니다.
 
 개발 환경에서는 Node.js 22.12 이상과 npm을 준비합니다.
 
 ```sh
+git clone https://github.com/mrdylee/dyNote.git
+cd dyNote
 npm ci
 npm test
 npm run build
@@ -40,6 +44,8 @@ npm start
 원본 형식은 일반 UTF-8 Markdown입니다. 다른 앱의 숨김 설정 디렉터리와 첨부파일은 수정하지 않습니다. UTF-8 이외 인코딩과 8MB 초과 파일은 경고와 함께 제외합니다.
 
 변경 전 복구 사본은 선택한 보관함 밖의 앱 데이터 폴더에 저장됩니다. 왼쪽 아래 방패 버튼 → **복구 사본 폴더 열기**로 찾을 수 있습니다.
+
+기존 사용자의 설정·예제·복구 사본을 이어 쓰기 위해 내부 앱 데이터 폴더 이름은 `Open Notes`로 유지합니다. 앱의 표시 이름과 패키지 이름은 Dynote입니다.
 
 - macOS: `~/Library/Application Support/Open Notes/recovery/`
 - Windows: `%APPDATA%/Open Notes/recovery/`
@@ -72,3 +78,9 @@ npm run package:linux
 REA의 관찰 범위와 한계: [REA 분석 기록](docs/REA-EVIDENCE.md). Electron의 [보안 지침](https://www.electronjs.org/docs/latest/tutorial/security)과 [컨텍스트 격리 지침](https://www.electronjs.org/docs/latest/tutorial/context-isolation)을 참고했습니다.
 
 이 프로젝트는 Obsidian과 별개로 제작한 실험 앱이며, Obsidian의 소스·스타일·로고·번들 자산을 배포하지 않습니다.
+
+## 다음 개발 범위
+
+이미지·PDF, 파일 이름 변경·이동·삭제와 링크 갱신, 링크 자동완성, 편집 영역 안의 Live Preview 등 데스크톱 기능을 다음 개발 대상으로 정했습니다. 아직 v0.1에 구현한 기능은 아닙니다. 모바일 연동과 Obsidian Sync/Publish 연동은 제외합니다.
+
+노트 동기화는 사용자가 선택한 별도 노트 Git 저장소를 활용하는 방향입니다. 현재 앱 안에 Git 동기화 기능은 없습니다. 앱 소스 저장소에 개인 노트를 함께 올리지 않습니다. 참고 구현의 채택 여부와 Git 충돌·첨부파일 처리 조건은 [추가 기능 검토](docs/UPSTREAM-REVIEW.md)에 정리했습니다.
