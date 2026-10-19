@@ -12,19 +12,28 @@
     "build": "vite build",
     "test": "node --test tests/*.test.mjs",
     "start": "electron .",
-    "package:mac": "npm run build && electron-builder --mac dir",
-    "dist:mac": "npm run build && electron-builder --mac dmg",
-    "dist:win": "npm run build && electron-builder --win nsis",
-    "dist:linux": "npm run build && electron-builder --linux AppImage"
+    "package:mac": "npm run build && electron-packager . \"Open Notes\" --platform=darwin --arch=arm64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release)(/|$)\"",
+    "package:win": "npm run build && electron-packager . \"Open Notes\" --platform=win32 --arch=x64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release)(/|$)\"",
+    "package:linux": "npm run build && electron-packager . \"Open Notes\" --platform=linux --arch=x64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release)(/|$)\""
   },
-  "build": {
-    "appId": "local.opennotes.desktop",
-    "productName": "Open Notes",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "electron/**", "core/**", "package.json"],
-    "asar": true,
-    "mac": { "category": "public.app-category.productivity", "identity": null },
-    "win": { "target": "nsis" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
+    "dompurify": "3.4.17",
+    "lucide-react": "1.59.0",
+    "markdown-it": "15.0.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.9.0",
+    "jsdom": "29.1.1",
+    "vite": "8.3.4"
   }
 }

@@ -1,0 +1,19 @@
+const { contextBridge, ipcRenderer } = require("electron");
+const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
+contextBridge.exposeInMainWorld(
+  "notes",
+  Object.freeze({
+    snapshot: () => call("snapshot"),
+    pickVault: () => call("pick-vault"),
+    createNote: (args) => call("create", args),
+    saveNote: (args) => call("save", args),
+    showRecovery: () => call("recovery"),
+    openExternal: (url) => call("external", url),
+    confirmClose: () => ipcRenderer.send("notes:close-ready"),
+    onBeforeClose: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:before-close", listener);
+      return () => ipcRenderer.removeListener("notes:before-close", listener);
+    },
+  }),
+);
