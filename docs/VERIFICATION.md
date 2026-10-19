@@ -39,3 +39,11 @@ The packaged ASAR was analyzed statically with REA, selecting `electron/main.mjs
 - Coverage remains partial. The loop-registering IPC code includes dynamic channel expressions that REA did not resolve; bundled dependencies and renderer sources were not part of this selected analysis. The observation is not a runtime policy proof or a comparison proving equivalence to Obsidian.
 
 The inspected ASAR contains no verification document or this report because `docs/` is excluded from packaging. Source code, lockfile and these reports remain in the local repository. Nothing was uploaded to a remote repository or release service.
+
+## Windows x64 package
+
+On 2026-10-19, `npm run package:win` completed on macOS and generated `release/Open Notes-win32-x64/Open Notes.exe` with its supporting runtime files. Windows uses the standard native title bar; macOS retains the existing inset title bar.
+
+`file` identified the executable as a PE32+ Windows GUI x86-64 executable. The packaged main/preload/filesystem/security sources and built HTML were compared byte-for-byte against the checkout. Required Electron runtime files were present, and the shared 21-test suite passed on macOS. The package's identity and limitations are recorded in `verification/windows-package.json`.
+
+The Windows deliverable is a ZIP of the complete runtime folder, not an installer or an EXE-only download. See [Windows instructions](WINDOWS.md). Actual Windows execution and code signing remain unverified/not performed, respectively.

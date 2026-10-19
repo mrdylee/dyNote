@@ -1,0 +1,15 @@
+{
+  "platform": "win32",
+  "architecture": "x64",
+  "electron": "44.9.0",
+  "packagedSourceMatchesCheckout": true,
+  "requiredRuntimeFilesPresent": true,
+  "asarSha256": "66c93e8699c656f103621b31a243e5549eb4d434d603a2d8914d57d96a68ea43",
+  "sharedTests": {
+    "passed": 21,
+    "failed": 0,
+    "host": "macOS"
+  },
+  "windowsRuntimeTested": false,
+  "codeSigned": false
+}

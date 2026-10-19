@@ -127,8 +127,10 @@ app
       minHeight: 700,
       title: "Open Notes",
       backgroundColor: "#ffffff",
-      titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 18, y: 19 },
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+      ...(process.platform === "darwin"
+        ? { trafficLightPosition: { x: 18, y: 19 } }
+        : {}),
       webPreferences: {
         preload: path.join(here, "preload.cjs"),
         contextIsolation: true,

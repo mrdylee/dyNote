@@ -8,6 +8,8 @@ REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바
 
 `release/Open Notes-darwin-arm64/Open Notes.app`
 
+Windows 64비트용 실행 폴더는 `release/Open Notes-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Open Notes.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징했으며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+
 앱을 열면 가상의 예제 문서가 나타납니다. 왼쪽 보관함 이름 옆 화살표로 **다른 폴더 열기**를 선택할 수 있습니다. 처음에는 실제 보관함의 복사본으로 확인하는 것을 권합니다.
 
 개발 환경에서는 Node.js 22.12 이상과 npm을 준비합니다.
@@ -61,7 +63,7 @@ npm run package:win
 npm run package:linux
 ```
 
-공식 Electron Packager를 사용해 `release/`에 독립 실행 앱 디렉터리를 만듭니다. **Windows/Linux 명령은 제공하되 해당 운영체제에서 실행 검증하지 않았습니다.** 설치 마법사나 자동 업데이트는 없습니다. macOS 결과물은 개발용으로 서명·공증하지 않았으며, 배포하려면 별도의 서명·공증이 필요합니다.
+공식 Electron Packager를 사용해 `release/`에 독립 실행 앱 디렉터리를 만듭니다. **Mac 앱과 Windows x64 실행 폴더를 생성했으며, 실행 검증은 macOS에서만 완료했습니다.** Linux는 패키징 명령만 제공합니다. 설치 마법사나 자동 업데이트는 없습니다. 결과물은 개발용으로 코드 서명하지 않았으며, macOS 공증도 진행하지 않았습니다.
 
 ## 검증과 분석 근거
 
