@@ -1,0 +1,98 @@
+{
+  "createdAt": "2026-10-19T11:44:31.218Z",
+  "node": "v22.22.2",
+  "cpu": "Apple M4 Pro",
+  "scope": "Kernel only: 10 warmup + 30 measured steps, 3 runs; same spiral coordinates/links as research baseline, independent force semantics, no renderer or Worker",
+  "results": [
+    {
+      "pattern": "spiral",
+      "nodes": 1000,
+      "edges": 2000,
+      "samples": 90,
+      "medianMs": 0.5722500000000039,
+      "p95Ms": 0.6514580000000052,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "spiral",
+      "nodes": 1000,
+      "edges": 8000,
+      "samples": 90,
+      "medianMs": 0.5869579999999956,
+      "p95Ms": 0.6964579999999927,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "spiral",
+      "nodes": 5000,
+      "edges": 10000,
+      "samples": 90,
+      "medianMs": 2.5723330000000146,
+      "p95Ms": 2.7346660000000043,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "spiral",
+      "nodes": 5000,
+      "edges": 40000,
+      "samples": 90,
+      "medianMs": 2.6838330000000497,
+      "p95Ms": 2.8557499999999436,
+      "memoryBytes": 2097152,
+      "finite": true
+    },
+    {
+      "pattern": "spiral",
+      "nodes": 10000,
+      "edges": 20000,
+      "samples": 90,
+      "medianMs": 4.890749999999912,
+      "p95Ms": 5.137083999999959,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "spiral",
+      "nodes": 10000,
+      "edges": 80000,
+      "samples": 90,
+      "medianMs": 5.145624999999882,
+      "p95Ms": 5.282042000000047,
+      "memoryBytes": 2097152,
+      "finite": true
+    },
+    {
+      "pattern": "clustered",
+      "nodes": 10000,
+      "edges": 20000,
+      "samples": 90,
+      "medianMs": 6.007832999999664,
+      "p95Ms": 6.244167000000289,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "hub",
+      "nodes": 10000,
+      "edges": 20000,
+      "samples": 90,
+      "medianMs": 4.597500000000309,
+      "p95Ms": 4.8741250000002765,
+      "memoryBytes": 1048576,
+      "finite": true
+    },
+    {
+      "pattern": "isolated",
+      "nodes": 10000,
+      "edges": 0,
+      "samples": 90,
+      "medianMs": 4.54175000000032,
+      "p95Ms": 4.70208300000013,
+      "memoryBytes": 1048576,
+      "finite": true
+    }
+  ]
+}
