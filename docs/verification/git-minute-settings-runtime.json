@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-19",
+  "baseCommit": "ccabbec",
+  "requirement": "Editable whole-minute Git backup interval, default 10 minutes; repository entered later.",
+  "unitTests": {
+    "command": "npm test",
+    "passed": 99,
+    "failed": 0
+  },
+  "productionBuild": {
+    "command": "npm run build",
+    "passed": true,
+    "advisory": "Existing Vite chunk-size warning"
+  },
+  "settingsRuntime": {
+    "checks": [
+      "Git address starts empty and the minute input defaults to 10; backup remains disconnected",
+      "installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown",
+      "repository entered in settings; initial push and actual one-minute automatic commit/push preserve saved Markdown",
+      "font preferences persist across app restart",
+      "arbitrary 17-minute interval can be typed, applied and restored after restart",
+      "Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work"
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "runtime": {
+      "packaged": true,
+      "platform": "darwin",
+      "arch": "arm64",
+      "electron": "44.9.0",
+      "version": "0.3.0"
+    },
+    "installedFontFamilies": 258
+  },
+  "localArtifact": "output/dynote-git-minutes-20261019/Dynote-darwin-arm64/Dynote.app",
+  "limits": [
+    "Synthetic local bare remote only; no real note repository was connected.",
+    "macOS arm64 packaged runtime only; Windows execution and real GitHub authentication were not tested.",
+    "Local development package keeps version 0.3.0; no GitHub release publication."
+  ]
+}

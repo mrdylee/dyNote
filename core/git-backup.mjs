@@ -20,7 +20,8 @@ export function validateGitConfig(input) {
   const authorName = input?.authorName ?? "", authorEmail = input?.authorEmail ?? "";
   if (![authorName, authorEmail].every((v) => typeof v === "string" && v.length < 250 && !/[\x00-\x1f\x7f<>]/.test(v)) || (authorEmail && !/^[^\s@]+@[^\s@]+$/.test(authorEmail)))
     throw new Error("커밋 작성자 이름과 이메일을 확인해 주세요.");
-  return { remote, branch, authorName, authorEmail, interval: [30, 300, 900].includes(input.interval) ? input.interval : 300, push: input.push !== false };
+  const interval = Number.isInteger(input.interval) && input.interval >= 60 && input.interval <= 86400 && input.interval % 60 === 0 ? input.interval : 600;
+  return { remote, branch, authorName, authorEmail, interval, push: input.push !== false };
 }
 
 export function runGit(root, args, { input, env = process.env, allow = [0] } = {}) {

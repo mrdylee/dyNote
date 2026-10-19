@@ -29,6 +29,10 @@ const setup = async () => {
 try {
   await setup();
   await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
+  assert.equal(await page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true }).inputValue(), "10");
+  assert.equal(await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).inputValue(), "");
+  assert.equal(await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).isDisabled(), true);
+  report.checks.push("Git address starts empty and the minute input defaults to 10; backup remains disconnected");
   await page.getByRole("button", { name: "설치 글꼴 불러오기", exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll("#installed-fonts option").length > 1);
   const names = await page.locator("#installed-fonts option").evaluateAll((els) => els.map((el) => el.value));
@@ -62,7 +66,12 @@ try {
   await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).fill(remote);
   await page.getByRole("textbox", { name: "Git 커밋 이름", exact: true }).fill("Runtime Test");
   await page.getByRole("textbox", { name: "Git 커밋 이메일", exact: true }).fill("runtime@example.invalid");
-  await page.getByRole("combobox", { name: "Git 자동 저장 간격", exact: true }).selectOption("30");
+  const interval = page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true });
+  for (const invalid of ["", "0", "1.5", "1441"]) {
+    await interval.fill(invalid);
+    assert.equal(await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).isDisabled(), true);
+  }
+  await interval.fill("1");
   await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".git-status")?.textContent === "Git 원격 저장 완료");
   assert.equal(git("--git-dir", bare, "show", "main:Home.md"), original);
@@ -74,19 +83,30 @@ try {
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), edited);
   assert.match(await page.locator(".git-status").innerText(), /대기/);
   let uploaded = false;
-  for (let i = 0; i < 45; i++) {
+  for (let i = 0; i < 75; i++) {
     if (git("--git-dir", bare, "show", "main:Home.md") === edited) { uploaded = true; break; }
     await page.waitForTimeout(1000);
   }
-  assert.equal(uploaded, true, "30-second automatic backup must reach the bare remote");
-  report.checks.push("repository entered in settings; initial push and actual 30-second automatic commit/push preserve saved Markdown");
+  assert.equal(uploaded, true, "one-minute automatic backup must reach the bare remote");
+  report.checks.push("repository entered in settings; initial push and actual one-minute automatic commit/push preserve saved Markdown");
+  await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
+  await interval.fill(""); await interval.pressSequentially("17");
+  assert.equal(await interval.inputValue(), "17");
+  await page.getByRole("button", { name: "Git 설정 적용", exact: true }).click();
+  await page.waitForFunction(() => {
+    const button = document.querySelector(".settings-actions .primary-button");
+    return button && !button.disabled && document.querySelector(".git-status")?.textContent === "Git 원격 저장 완료";
+  });
+  assert.equal(Object.values(JSON.parse(await readFile(`${profile}/git-backup.json`, "utf8")))[0].interval, 1020);
+  await page.screenshot({ path: "output/playwright/git-minute-settings.png" });
   await app.close(); app = await launch(); await setup();
   assert.equal(await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontSize), "19px");
   assert.ok((await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontFamily)).includes(bodyFont));
   report.checks.push("font preferences persist across app restart");
   await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[aria-label="Git 저장소 주소"]')?.value === "https://backup.test/runtime.git");
-  assert.equal(await page.getByRole("combobox", { name: "Git 자동 저장 간격", exact: true }).inputValue(), "30");
+  assert.equal(await page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true }).inputValue(), "17");
+  report.checks.push("arbitrary 17-minute interval can be typed, applied and restored after restart");
   await rename(bare, bare + ".offline");
   await page.getByRole("button", { name: "지금 Git 저장", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".git-status")?.classList.contains("error"));

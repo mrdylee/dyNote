@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { GitBackup, runGit, validateGitConfig } from "../core/git-backup.mjs";
 
 const remote = "https://backup.test/notes.git";
-const config = { remote, branch: "main", interval: 300, authorName: "Dynote Test", authorEmail: "test@example.invalid" };
+const config = { remote, branch: "main", interval: 420, authorName: "Dynote Test", authorEmail: "test@example.invalid" };
 async function fixture() {
   const dir = await mkdtemp(path.join(tmpdir(), "dynote-git-test-"));
   const root = path.join(dir, "vault"), bare = path.join(dir, "remote.git"), cfg = path.join(dir, "gitconfig");
@@ -23,13 +23,20 @@ async function fixture() {
 }
 
 test("Git inputs accept HTTPS/SSH and reject credentials, commands and invalid branches", () => {
-  assert.equal(validateGitConfig(config).interval, 300);
+  assert.equal(validateGitConfig(config).interval, 420);
   for (const url of ["git@github.com:owner/notes.git", "ssh://git@example.com:2222/owner/notes.git"])
     assert.equal(validateGitConfig({ ...config, remote: url }).remote, url);
   for (const url of ["--upload-pack=bad", "ext::sh bad", "file:///tmp/repo", "https://user:secret@example.com/repo", "https://example.com/repo?token=secret", "git@host:path\n--bad"])
     assert.throws(() => validateGitConfig({ ...config, remote: url }));
   for (const branch of ["-main", "a..b", "HEAD", "a b", "a.lock", "x@{y}", 123])
     assert.throws(() => validateGitConfig({ ...config, branch }), /브랜치/);
+});
+
+test("Git intervals default to ten minutes and preserve configurable whole-minute values", () => {
+  for (const interval of [undefined, null, 0, -60, 30, 90, 86460, "600", Infinity])
+    assert.equal(validateGitConfig({ ...config, interval }).interval, 600);
+  for (const minutes of [1, 5, 7, 10, 17, 1440])
+    assert.equal(validateGitConfig({ ...config, interval: minutes * 60 }).interval, minutes * 60);
 });
 
 test("Git processes ignore inherited repository redirects and leave the other repository untouched", async () => {
@@ -138,13 +145,14 @@ test("controller persists per-vault settings and timers commit changes only whil
   await controller.open({ id: "one", root: f.root });
   await controller.connect("one", config);
   assert.equal(controller.status().phase, "synced");
-  assert.equal(scheduled.at(-1).ms, 300000);
+  assert.equal(scheduled.at(-1).ms, 420000);
   await writeFile(path.join(f.root, "Home.md"), "automatic tick");
   await scheduled.at(-1).callback();
   assert.equal(f.git(f.bare, "show", "main:Home.md"), "automatic tick");
   const restarted = new GitController(options);
   await restarted.open({ id: "one", root: f.root });
   assert.equal(restarted.status().config.remote, remote);
+  assert.equal(restarted.status().config.interval, 420);
   assert.equal(restarted.status().enabled, true);
   await restarted.disconnect("one");
   assert.equal(restarted.status().enabled, false);

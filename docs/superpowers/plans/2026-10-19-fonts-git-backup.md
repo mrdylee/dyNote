@@ -29,3 +29,9 @@
 - [x] Add/run `scripts/verify-settings-runtime.mjs`: enumerate actual local fonts; save/reopen; exercise Git settings and automatic saved-note upload to the synthetic remote; verify disconnect and local save independence.
 - [x] Run the existing Live Preview runtime harness. Inspect screenshots and the final diff; fix any reproduced regression.
 - [x] Document configuration, authentication, automatic backup limits and measured verification in `docs/FONTS-GIT.md`; commit locally and report current publication status accurately.
+
+## 5. User clarification: editable minutes, default 10
+- [x] Replace preset intervals with a whole-minute number input; default to 10 and keep the URL empty until the user connects a repository.
+- [x] Add tests for defaulting, custom intervals, timer conversion and persisted settings.
+- [x] Run full tests/build and verify the packaged app: empty URL/default 10, invalid input, actual one-minute upload, arbitrary 17-minute setting and restart persistence.
+- [x] Update user documentation, verification evidence and local commit; leave actual note remotes unconfigured.

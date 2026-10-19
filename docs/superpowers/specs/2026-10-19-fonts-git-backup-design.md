@@ -8,7 +8,7 @@ Add a settings dialog with three font-family inputs backed by a searchable insta
 
 ## Git
 
-Use the installed Git executable and existing SSH/credential-helper login. Accept HTTPS and SSH repository addresses, branch, optional commit identity, and a 30-second/5-minute/15-minute schedule. Default is 5 minutes. Credentials are never stored in Dynote settings. Git configuration is per vault in app data, separate from the user's documents and existing vault selection file.
+Use the installed Git executable and existing SSH/credential-helper login. Accept HTTPS and SSH repository addresses, branch, optional commit identity, and a directly editable whole-minute schedule (1–1440 minutes). The user clarified that the default must be 10 minutes and the repository address will be entered later. Existing stored whole-minute settings remain intact; unsupported legacy intervals fall back to 10 minutes. Credentials are never stored in Dynote settings. Git configuration is per vault in app data, separate from the user's documents and existing vault selection file.
 
 Support connecting the current folder to a remote and cloning an existing branch into a user-selected empty folder. The vault must be the repository root, not a subfolder of an ancestor repository or a linked worktree. Do not change the user's branch, origin, global Git configuration or existing staged work. Only supported, non-hidden note/Canvas/Base/image/PDF paths are automatically committed. Ignore other files and symlinks. Disable repository hooks for app-initiated Git operations.
 
