@@ -96,6 +96,15 @@ test("wiki and Markdown links retain editable labels and safe metadata", () => {
   assert.deepEqual(hidden(s).map((r) => r.text), ["[[Guide|", "]]", "[", '](Guide.md "title")']);
 });
 
+test("fenced and indented code lines receive the code font without hiding source", () => {
+  const doc = "```js\nconst x = 1;\n```\n\n    const y = 2;\n\nend";
+  const s = state(doc);
+  const code = ranges(s).filter((r) => r.spec.class === "cm-live-code-block");
+  assert.deepEqual(code.map((r) => s.doc.lineAt(r.from).text), ["```js", "const x = 1;", "```", "    const y = 2;"]);
+  assert.equal(hidden(s).length, 0);
+  assert.equal(s.doc.toString(), doc);
+});
+
 test("BOM frontmatter stays literal and empty wiki aliases display their target", () => {
   const s = state('\uFEFF---\ntitle: "**raw**"\n---\n\n[[Guide| ]]\n\nend');
   assert.equal(hidden(s).some((r) => r.text === "**"), false);

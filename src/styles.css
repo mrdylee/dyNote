@@ -1,13 +1,11 @@
 :root {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI",
-    sans-serif;
+  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif);
   color: #32343e;
   background: #fff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  font-size: 13px;
+  font-size: var(--ui-size, 13px);
   --purple: #7963cb;
   --muted: #9698a5;
   --border: #eeedf2;
@@ -590,10 +588,8 @@ kbd {
   border-radius: 0 5px 5px 0;
 }
 .markdown-preview code {
-  font:
-    10.5px "SFMono-Regular",
-    Consolas,
-    monospace;
+  font-family: var(--code-font, "SFMono-Regular", Consolas, monospace);
+  font-size: var(--code-size, 12px);
   color: #967db9;
   border: 1px solid #eee8f5;
   background: #f7f4fb;
@@ -686,15 +682,15 @@ kbd {
 }
 .cm-editor {
   height: 100%;
-  font-size: 12px;
+  font-size: var(--code-size, 12px);
   color: #685c75;
   outline: none !important;
 }
 .cm-editor.cm-focused {
   outline: none;
 }
-.cm-scroller {
-  font-family: "SFMono-Regular", Consolas, "Apple SD Gothic Neo", monospace;
+.cm-editor .cm-scroller {
+  font-family: var(--code-font, "SFMono-Regular", Consolas, "Apple SD Gothic Neo", monospace);
   line-height: 1.95;
   overflow: auto;
   min-height: 100%;
@@ -734,10 +730,10 @@ kbd {
   padding-right: 10px;
 }
 .cm-live-preview .cm-scroller {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
-  font-size: 15px;
+  font-family: var(--body-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif);
+  font-size: var(--body-size, 15px);
   color: #393340;
-  line-height: 1.85;
+  line-height: var(--body-line-height, 1.85);
 }
 .cm-live-preview .cm-gutters { display: none; }
 .cm-live-preview .cm-content { padding: 20px 0 80px; }
@@ -751,7 +747,8 @@ kbd {
 .cm-live-strong { font-weight: 700; }
 .cm-live-emphasis { font-style: italic; }
 .cm-live-strike { text-decoration: line-through; }
-.cm-live-code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .9em; background: #f3eff8; border-radius: 4px; padding: 2px 3px; }
+.cm-live-code { font-family: var(--code-font, "SFMono-Regular", Consolas, monospace); font-size: var(--code-size, 12px); background: #f3eff8; border-radius: 4px; padding: 2px 3px; }
+.cm-live-code-block { font-family: var(--code-font, "SFMono-Regular", Consolas, monospace); font-size: var(--code-size, 12px); }
 .cm-live-link { color: #7955a8; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .cm-live-bullet { color: #947bb1; }
 .cm-live-checkbox { accent-color: #8e70bc; cursor: pointer; vertical-align: middle; margin: 0 3px 0 0; }
@@ -1615,3 +1612,28 @@ kbd {
 .graph-document-picker { display: flex; gap: 8px; padding: 8px 25px 0; }
 .graph-document-picker input, .graph-document-picker select { border: 1px solid #e9e0f1; border-radius: 5px; padding: 6px; font-size: 12px; max-width: 260px; }
 .graph-error { color: #ac344c; padding: 12px 25px; font-size: 13px; }
+
+/* User font choices apply to presentation only, never to Markdown content. */
+.modal.settings-modal { max-height: calc(100vh - 48px); overflow-y: auto; padding: 24px; }
+.settings-modal .modal-heading { padding: 0; }
+.markdown-preview, .canvas-card textarea {
+  font-family: var(--body-font, inherit);
+  font-size: var(--body-size, 15px);
+  line-height: var(--body-line-height, 1.85);
+}
+.file-row, .folder-row, .tab, .modal input, .modal select, .modal button {
+  font-size: var(--ui-size, 13px);
+}
+.font-setting-row { display: grid; grid-template-columns: 1fr 85px; gap: 10px; margin: 15px 0; }
+.font-setting-row label { display: grid; gap: 6px; }
+.font-sample { grid-column: 1 / -1; padding: 12px; border: 1px solid var(--border); border-radius: 7px; overflow-wrap: anywhere; }
+.font-settings > label { display: flex; align-items: center; gap: 12px; }
+.font-settings > label input { flex: 1; }
+.settings-section { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 18px; }
+.settings-section label { display: grid; gap: 6px; margin: 12px 0; }
+.settings-section select { padding: 9px; background: white; border: 1px solid var(--border); border-radius: 6px; }
+.settings-section .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.settings-section .settings-message { overflow-wrap: anywhere; line-height: 1.6; }
+.git-status { cursor: pointer; font: inherit; color: #7963a3; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-status.error { color: #b24a5c; }
+.git-identity { grid-template-columns: 1fr 1fr; }

@@ -4,6 +4,7 @@ import "pixi.js/unsafe-eval";
 import { screenToWorld, zoomAt, segmentVisible } from "../core/graph-camera.mjs";
 
 export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, onCamera = () => {} }) {
+  let labelFont = getComputedStyle(container).fontFamily;
   const app = new Application();
   await app.init({ width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight), preference: "webgl", background: 0xffffff, antialias: true, resolution: Math.min(devicePixelRatio, 2), autoDensity: true, autoStart: false, sharedTicker: false, gcActive: false });
   app.stop();
@@ -90,7 +91,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     }
     const createUntil = Math.min(wanted.length, texts.length + 8);
     while (texts.length < createUntil) {
-      const text = new Text({ text: "", style: { fontFamily: "-apple-system, sans-serif", fontSize: 12, fill: 0x6b557f }, resolution: Math.min(devicePixelRatio, 2) });
+      const text = new Text({ text: "", style: { fontFamily: labelFont, fontSize: 12, fill: 0x6b557f }, resolution: Math.min(devicePixelRatio, 2) });
       text.anchor.set(0.5, 0); labels.addChild(text); texts.push(text);
     }
     for (let i = 0; i < texts.length; i++) {
@@ -186,6 +187,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     setPositions(next) { if (next.length === positions.length) { positions.set(next); if (autoFit) fit(); else invalidate(); } },
     setActive(id) { active = id; invalidate(); },
     setDisplay(next) { display = { ...display, ...next }; invalidate(); },
+    setFont(next) { labelFont = next; texts.forEach((text) => { text.style.fontFamily = next; }); invalidate(); },
     fit, zoom,
     destroy() {
       if (destroyed) return;

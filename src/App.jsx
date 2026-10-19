@@ -19,6 +19,7 @@ import {
   PencilLine,
   Plus,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
   SplitSquareHorizontal,
@@ -43,6 +44,9 @@ import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
+import FontSettings from "./FontSettings.jsx";
+import GitSettings from "./GitSettings.jsx";
+import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
 
 const api = window.notes;
@@ -131,7 +135,7 @@ function FileTree({ notes, active, onOpen }) {
   return <div className="file-tree">{render(tree)}</div>;
 }
 
-function Modal({ title, children, onClose, wide = false }) {
+function Modal({ title, children, onClose, wide = false, className = "" }) {
   return (
     <div
       className="modal-backdrop"
@@ -140,7 +144,7 @@ function Modal({ title, children, onClose, wide = false }) {
       }}
     >
       <section
-        className={`modal ${wide ? "wide" : ""}`}
+        className={`modal ${wide ? "wide" : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -158,7 +162,16 @@ function Modal({ title, children, onClose, wide = false }) {
 }
 
 export default function App() {
+  const [fonts, setFonts] = useState(() => {
+    try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
+  });
+  useEffect(() => {
+    for (const [key, value] of Object.entries(fontVariables(fonts))) document.documentElement.style.setProperty(key, value);
+    try { localStorage.setItem("dynote.fonts", JSON.stringify(fonts)); } catch { /* Preferences still apply for this session. */ }
+  }, [fonts]);
   const [vault, setVault] = useState(null);
+  const currentVault = useRef(null);
+  currentVault.current = vault?.id;
   const [raw, setRaw] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [active, setActive] = useState(null);
@@ -178,6 +191,17 @@ export default function App() {
   const [fileTarget, setFileTarget] = useState(null);
   const [propertiesDraft, setPropertiesDraft] = useState("");
   const [lastTrash, setLastTrash] = useState(null);
+  const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 연결 안 됨", enabled: false, config: null });
+  const acceptGitStatus = (value) => { if (value.vaultId === currentVault.current) setGitStatus(value); };
+  useEffect(() => {
+    if (!vault) return;
+    let mounted = true;
+    const update = (value) => { if (mounted && value.vaultId === vault.id) setGitStatus(value); };
+    setGitStatus({ phase: "off", message: "Git 설정 확인 중…", enabled: false, config: null });
+    const unsubscribe = api.onGitStatus(update);
+    invoke(api.gitStatus({ vaultId: vault.id })).then(update).catch((error) => { if (mounted) setGitStatus({ phase: "error", message: error.message, enabled: false, config: null }); });
+    return () => { mounted = false; unsubscribe(); };
+  }, [vault?.id]);
   const revisions = useRef(new Map());
   const queue = useRef(null);
   const timer = useRef(null);
@@ -667,6 +691,7 @@ export default function App() {
             </IconButton>
           </div>
           <div className="rail-bottom">
+            <IconButton label="글꼴 및 Git 설정" onClick={() => setModal("settings")}><Settings size={20} /></IconButton>
             <IconButton
               label="저장과 복구 안내"
               onClick={() => setModal("about")}
@@ -965,6 +990,7 @@ export default function App() {
             {section === "graph" ? (
               <Graph
                 key={vault.id}
+                fontFamily={fontVariables(fonts)["--ui-font"]}
                 vaultId={vault.id}
                 notes={model.notes}
                 edges={model.edges}
@@ -1019,6 +1045,7 @@ export default function App() {
                   {mode !== "read" && (
                     <Editor
                       key={note.path}
+                      fontSettings={fonts}
                       note={note}
                       notes={model.notes}
                       onChange={change}
@@ -1088,6 +1115,7 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
+            <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => setModal("settings")}>{gitStatus.message}</button>
             <div>
               <span>{(note?.content.length ?? structured?.content.length ?? 0).toLocaleString()}자</span>
               <span>{structured?.kind ?? "Markdown"}</span>
@@ -1465,8 +1493,8 @@ export default function App() {
           </p>
           <p>
             로컬 이미지·PDF를 지원합니다. 외부 이미지와 플러그인은 실행하지
-            않습니다. 노트는 별도 Git 저장소로 관리하고, Git에서 가져온 뒤 문서
-            새로고침을 사용하세요.
+            않습니다. 설정에서 노트 전용 Git 저장소를 연결하면 로컬 저장 후
+            자동으로 커밋·업로드합니다. 다른 기기의 변경을 가져온 뒤에는 문서를 새로고침하세요.
           </p>
           <button
             className="secondary-button"
@@ -1480,6 +1508,20 @@ export default function App() {
           <div className="about-footer">
             Dynote {version} · 독립적으로 제작한 노트 앱
           </div>
+        </Modal>
+      )}
+      {modal === "settings" && (
+        <Modal title="글꼴 및 Git 설정" wide className="settings-modal" onClose={() => setModal(null)}>
+          <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />
+          <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
+            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
+            onClone={async (config) => {
+              await flush(); setBusy(true);
+              try { const snapshot = await invoke(api.cloneGit({ vaultId: vault.id, config })); if (snapshot) { install(snapshot); setModal(null); } }
+              finally { setBusy(false); }
+            }}
+            onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: vault.id }))); }}
+            onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: vault.id })))} />
         </Modal>
       )}
       {modal === "reload" && (

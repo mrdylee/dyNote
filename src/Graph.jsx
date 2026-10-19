@@ -20,7 +20,7 @@ function readSettings(key) {
     return result;
   } catch { return { ...defaults }; }
 }
-export default function Graph({ notes, edges, active, onOpen, vaultId }) {
+export default function Graph({ notes, edges, active, onOpen, vaultId, fontFamily }) {
   const key = `dynote:graph:${vaultId}`;
   const [settings, setSettings] = useState(() => readSettings(key));
   const [path, setPath] = useState(""), [tag, setTag] = useState("");
@@ -76,6 +76,7 @@ export default function Graph({ notes, edges, active, onOpen, vaultId }) {
   useEffect(() => { if (ready) send("settings", { settings: { center, repel, link, distance } }); }, [center, repel, link, distance, ready]);
   useEffect(() => { engine.current?.setDisplay({ nodeSize, lineWidth, labels }); }, [nodeSize, lineWidth, labels, ready]);
   useEffect(() => { engine.current?.setActive(active); }, [active, ready, selected]);
+  useEffect(() => { if (fontFamily) engine.current?.setFont(fontFamily); }, [fontFamily, ready]);
   return (
     <div className="graph-view">
       <div className="graph-heading">

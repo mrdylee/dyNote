@@ -36,6 +36,7 @@ export default function Editor({
   onLink,
   jump,
   readOnly = false,
+  fontSettings,
 }) {
   const host = useRef(null);
   const editor = useRef(null);
@@ -168,6 +169,7 @@ export default function Editor({
       effects: readonly.current.reconfigure(EditorState.readOnly.of(readOnly)),
     });
   }, [readOnly]);
+  useEffect(() => { editor.current?.requestMeasure(); }, [fontSettings]);
   useEffect(() => {
     const view = editor.current;
     if (!view) return;

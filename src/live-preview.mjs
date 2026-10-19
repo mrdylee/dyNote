@@ -111,7 +111,14 @@ function decorate(state) {
   const mark = (from, to, name, attributes) => { if (to > from) ranges.push(Decoration.mark({ class: `cm-live-${name}`, attributes }).range(from, to)); };
   syntaxTree(state).iterate({ enter(ref) {
     const node = ref.node, { name, from, to } = node;
-    if (to <= frontmatter || literal.has(name)) return false;
+    if (to <= frontmatter) return false;
+    if (name === "FencedCode" || name === "CodeBlock") {
+      const last = state.doc.lineAt(Math.max(from, to - 1)).number;
+      for (let line = state.doc.lineAt(from).number; line <= last; line++)
+        ranges.push(Decoration.line({ class: "cm-live-code-block" }).range(state.doc.line(line).from));
+      return false;
+    }
+    if (literal.has(name)) return false;
     if (name === "Blockquote" && /^>\s*\[!/.test(state.sliceDoc(from, to))) return false;
     const replacements = [];
     const hide = (from, to, widget) => { if (to > from) replacements.push(Decoration.replace({ widget }).range(from, to)); };

@@ -17,6 +17,16 @@ contextBridge.exposeInMainWorld(
     restoreTrash: (args) => call("restore-trash", args),
     showRecovery: () => call("recovery"),
     openExternal: (url) => call("external", url),
+    gitStatus: (args) => call("git-status", args),
+    connectGit: (args) => call("git-connect", args),
+    cloneGit: (args) => call("git-clone", args),
+    syncGit: (args) => call("git-sync", args),
+    disconnectGit: (args) => call("git-disconnect", args),
+    onGitStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on("notes:git-status", listener);
+      return () => ipcRenderer.removeListener("notes:git-status", listener);
+    },
     confirmClose: () => ipcRenderer.send("notes:close-ready"),
     onBeforeClose: (callback) => {
       const listener = () => callback();

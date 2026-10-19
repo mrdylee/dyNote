@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-19",
+  "baseCommit": "e9aad01",
+  "unitTests": {
+    "command": "npm test",
+    "passed": 98,
+    "failed": 0
+  },
+  "productionBuild": {
+    "command": "npm run build",
+    "passed": true,
+    "advisory": "Existing Vite chunk-size warning"
+  },
+  "settingsRuntime": {
+    "checks": [
+      "installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown",
+      "repository entered in settings; initial push and actual 30-second automatic commit/push preserve saved Markdown",
+      "font preferences persist across app restart",
+      "Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work"
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "runtime": {
+      "packaged": true,
+      "platform": "darwin",
+      "arch": "arm64",
+      "electron": "44.9.0",
+      "version": "0.3.0"
+    },
+    "installedFontFamilies": 258
+  },
+  "livePreviewRegression": {
+    "checks": [
+      "inline formatting, code exclusion, resolved local image loaded, no duplicate reading pane",
+      "selective syntax reveal; Korean text insertion; same editor, selection and undo across 3 source/live switches",
+      "checkbox transaction, autosave and undo preserve all other bytes",
+      "image click reveals source; wiki navigation; Markdown heading link honors frontmatter offsets",
+      "Cmd-Enter wiki link navigation and existing wiki autocomplete in Live Preview",
+      "synthetic composition lifecycle preserves Korean input and undo (not native IME proof)",
+      "raw Markdown copy; undo/redo; clipboard and drop image import; exact disk save and app reopen; no remote image requests",
+      "long document source/live switching preserves the visible text anchor"
+    ],
+    "errors": [],
+    "remoteRequests": [],
+    "platform": "darwin"
+  },
+  "runtimeRegressionsFixed": [
+    "Settings dialog viewport overflow",
+    "CodeMirror default font overriding source font",
+    "Multi-digit font size typing"
+  ],
+  "gitRegressionsCovered": [
+    "Unsupported paths and symlinks",
+    "Existing staged work",
+    "Tracked note replaced by a directory",
+    "Inherited repository environment redirects",
+    "Offline retry without duplicate commits",
+    "Remote divergence without data replacement",
+    "Overlapping timer ticks and edits during upload",
+    "Hooks and interactive commit signing"
+  ],
+  "localArtifact": "output/dynote-fonts-git-20261019/Dynote-darwin-arm64/Dynote.app",
+  "limits": [
+    "Synthetic local bare remotes via isolated Git URL rewrites; no real GitHub authentication or note upload.",
+    "macOS arm64 runtime only; no native Windows validation.",
+    "App-open backup with no automatic pull or conflict resolution.",
+    "Local development package retains version 0.3.0; existing release ZIPs and GitHub publication unchanged."
+  ]
+}

@@ -12,8 +12,10 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault } from "../core/vault.mjs";
-import { assetPath, safeExternalUrl, trustedFrame } from "../core/security.mjs";
+import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission } from "../core/security.mjs";
 import { demoNotes } from "../core/demo.mjs";
+import { GitController } from "./git-controller.mjs";
+import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -39,6 +41,7 @@ let closeReady = false;
 let closePending = false;
 let recovery;
 let settings;
+let gitBackup;
 
 function validateSender(event) {
   if (
@@ -88,6 +91,11 @@ app
     settings = path.join(app.getPath("userData"), "settings.json");
     await mkdir(app.getPath("userData"), { recursive: true });
     vault = await initialVault();
+    gitBackup = new GitController({
+      settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
+      onStatus: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status); },
+    });
+    await gitBackup.open(vault);
     protocol.handle("notes", async (request) => {
       try {
         const url = new URL(request.url);
@@ -124,9 +132,10 @@ app
       }
     });
     session.defaultSession.setPermissionRequestHandler(
-      (_contents, _permission, callback) => callback(false),
+      (contents, permission, callback, details) => callback(contents === window?.webContents && allowFontPermission(permission, details.requestingUrl, details.isMainFrame)),
     );
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) =>
+      contents === window?.webContents && ["notes://app", "notes://app/"].includes(origin) && allowFontPermission(permission, details.requestingUrl, details.isMainFrame));
     session.defaultSession.webRequest.onBeforeRequest(
       {
         urls: [
@@ -215,6 +224,27 @@ app
           { mode: 0o600 },
         );
         vault = selected;
+        await gitBackup.open(vault);
+        return snapshot;
+      },
+      "git-status": (args) => { checkVault(args); return gitBackup.status(); },
+      "git-connect": (args) => { checkVault(args); return gitBackup.connect(vault.id, args.config); },
+      "git-sync": (args) => { checkVault(args); return gitBackup.sync(vault.id); },
+      "git-disconnect": (args) => { checkVault(args); return gitBackup.disconnect(vault.id); },
+      "git-clone": async (args) => {
+        checkVault(args);
+        const config = validateGitConfig(args.config);
+        const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
+        if (result.canceled) return null;
+        checkVault(args);
+        await GitBackup.clone(result.filePaths[0], config);
+        const selected = await Vault.open(result.filePaths[0], recovery);
+        const snapshot = await selected.snapshot();
+        await writeFile(settings, JSON.stringify({ vaultRoot: selected.root }), { mode: 0o600 });
+        vault = selected;
+        await gitBackup.open(vault);
+        try { await gitBackup.connect(vault.id, config); }
+        catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
         return snapshot;
       },
       create: (args) => {
@@ -295,7 +325,10 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         try {
           validateSender(event);
-          return { ok: true, value: await action(args) };
+          const id = vault?.id;
+          const value = await action(args);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash"].includes(name)) gitBackup.markDirty(id);
+          return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };
         }
@@ -328,4 +361,4 @@ app
     app.exit(1);
   });
 
-app.on("window-all-closed", () => app.quit());
+app.on("window-all-closed", () => { gitBackup?.close(); app.quit(); });

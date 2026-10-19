@@ -21,6 +21,10 @@ export function trustedFrame(url, isMainFrame) {
   return isMainFrame && url === "notes://app/index.html";
 }
 
+export function allowFontPermission(permission, url, isMainFrame) {
+  return permission === "local-fonts" && trustedFrame(url, isMainFrame);
+}
+
 export function safeExternalUrl(input) {
   if (typeof input !== "string" || /[\x00-\x20]/.test(input))
     throw new Error("허용되지 않는 외부 주소입니다.");
