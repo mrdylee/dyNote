@@ -90,10 +90,27 @@ app
     vault = await initialVault();
     protocol.handle("notes", async (request) => {
       try {
+        const url = new URL(request.url);
+        if (url.host === "vault") {
+          const parts = decodeURIComponent(url.pathname).slice(1).split("/");
+          if (parts.shift() !== vault.id)
+            return new Response("Forbidden", { status: 403 });
+          const asset = await vault.readAttachment(parts.join("/"));
+          if (!asset.mime.startsWith("image/"))
+            return new Response("Forbidden", { status: 403 });
+          return new Response(asset.bytes, {
+            headers: {
+              "Content-Type": asset.mime,
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            },
+          });
+        }
         const file = assetPath(request.url, dist);
         const mime = {
           ".html": "text/html; charset=utf-8",
           ".js": "text/javascript",
+          ".mjs": "text/javascript",
           ".css": "text/css",
           ".svg": "image/svg+xml",
           ".woff2": "font/woff2",
@@ -206,6 +223,59 @@ app
       save: (args) => {
         checkVault(args);
         return vault.save(args.path, args.content, args.revision);
+      },
+      "import-attachment": (args) => {
+        checkVault(args);
+        return vault.importAttachment(args.name, args.bytes);
+      },
+      "read-attachment": (args) => {
+        checkVault(args);
+        return vault.readAttachment(args.path);
+      },
+      "choose-attachments": async (args) => {
+        checkVault(args);
+        const result = await dialog.showOpenDialog(window, {
+          properties: ["openFile", "multiSelections"],
+          filters: [
+            {
+              name: "이미지·PDF",
+              extensions: ["png", "jpg", "jpeg", "gif", "webp", "pdf"],
+            },
+          ],
+        });
+        checkVault(args);
+        const imported = [];
+        if (!result.canceled)
+          for (const file of result.filePaths) {
+            const handle = await import("node:fs/promises").then((fs) =>
+              fs.open(file, "r"),
+            );
+            try {
+              if ((await handle.stat()).size > 25 * 1024 * 1024)
+                throw new Error("첨부파일은 25MB 이하여야 합니다.");
+              imported.push(
+                await vault.importAttachment(
+                  path.basename(file),
+                  await handle.readFile(),
+                ),
+              );
+            } finally {
+              await handle.close();
+            }
+          }
+        return imported;
+      },
+      "move-file": (args) => {
+        checkVault(args);
+        return vault.moveFile(args.from, args.to, args.revision);
+      },
+      "trash-file": (args) => {
+        checkVault(args);
+        return vault.trashFile(args.path, args.revision);
+      },
+      "restore-trash": (args) => {
+        checkVault(args);
+        return vault.restoreTrash(args.id);
       },
       recovery: async () => {
         await mkdir(vault.recoveryRoot, { recursive: true });

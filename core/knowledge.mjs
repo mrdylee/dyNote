@@ -1,7 +1,15 @@
 import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
+import { katex } from "@mdit/plugin-katex";
+import { resolvePath, scanLinks } from "./links.mjs";
+import { SearchIndex } from "./searchIndex.mjs";
+import { parseMetadata } from "./metadata.mjs";
+import { installMarkdownExtensions } from "./markdown-extensions.mjs";
+export { parseMetadata, updateMetadata, toggleTask } from "./metadata.mjs";
 
-const md = new MarkdownIt({ html: false, breaks: true, linkify: false });
-const escape = md.utils.escapeHtml;
+const md = new MarkdownIt({ html: false, breaks: true, linkify: false })
+  .use(footnote)
+  .use(katex, { trust: false, throwOnError: false, output: "html" });
 
 // The table block parser runs before inline rules; protect wikilink alias pipes first.
 md.core.ruler.before("block", "wiki_table_pipes", (state) => {
@@ -39,92 +47,45 @@ md.inline.ruler.before("link", "wikilink", (state, silent) => {
   return true;
 });
 
-md.renderer.rules.wikilink = (tokens, index, _options, env) => {
-  const { target, label } = tokens[index].meta;
-  const resolved = resolveLink(target, env.from ?? "", env.notes ?? []);
-  return `<a href="#" class="wiki-link${resolved.status === "resolved" ? "" : " unresolved"}" data-note="${escape(target)}" title="${escape(target)}">${escape(label)}</a>`;
-};
-md.renderer.rules.image = (tokens, index) =>
-  `<span class="image-placeholder">이미지 · ${escape(tokens[index].content || "첨부파일")} <small>불러오기 차단됨</small></span>`;
-const defaultLink =
-  md.renderer.rules.link_open ??
-  ((tokens, index, options, _env, renderer) =>
-    renderer.renderToken(tokens, index, options));
-md.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
-  const token = tokens[index];
-  const href = token.attrGet("href") ?? "";
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("//"))
-    token.attrSet("data-note", href);
-  else token.attrSet("data-external", "true");
-  token.attrSet("rel", "noopener noreferrer");
-  return defaultLink(tokens, index, options, env, renderer);
-};
-
-function inlineTokens(source) {
-  return md.parse(source, {}).flatMap((token) => token.children ?? []);
-}
-
+export const resolveLink = resolvePath;
 export function extractLinks(source) {
-  return inlineTokens(source)
-    .filter((token) => token.type === "wikilink")
-    .map((token) => ({ ...token.meta }));
-}
-
-function normalize(value) {
-  const parts = [];
-  for (const part of value.replaceAll("\\", "/").split("/")) {
-    if (part === "..") {
-      if (!parts.length) return null;
-      parts.pop();
-    } else if (part && part !== ".") parts.push(part);
-  }
-  return parts.join("/");
-}
-
-export function resolveLink(target, from, notes) {
-  let clean;
-  try {
-    clean = decodeURIComponent(target).split(/[\#^]/)[0].trim();
-  } catch {
-    return { status: "missing", path: null };
-  }
-  if (!clean) return { status: "resolved", path: from };
-  if (clean.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(clean))
-    return { status: "missing", path: null };
-  if (!/\.md$/i.test(clean)) clean += ".md";
-  const folder = from.includes("/")
-    ? from.slice(0, from.lastIndexOf("/") + 1)
-    : "";
-  for (const candidate of [normalize(folder + clean), normalize(clean)]) {
-    if (!candidate) continue;
-    const found = notes.filter(
-      (n) =>
-        n.path.normalize("NFC").toLowerCase() ===
-        candidate.normalize("NFC").toLowerCase(),
-    );
-    if (found.length === 1) return { status: "resolved", path: found[0].path };
-    if (found.length > 1) return { status: "ambiguous", path: null };
-  }
-  if (clean.includes("/")) return { status: "missing", path: null };
-  const matches = notes.filter(
-    (n) =>
-      n.path.split("/").at(-1).normalize("NFC").toLowerCase() ===
-      clean.normalize("NFC").toLowerCase(),
+  return scanLinks(parseMetadata(source).body).map(
+    ({ target, label, kind, embed }) => ({ target, label, kind, embed }),
   );
-  return {
-    status:
-      matches.length === 1
-        ? "resolved"
-        : matches.length > 1
-          ? "ambiguous"
-          : "missing",
-    path: matches.length === 1 ? matches[0].path : null,
-  };
+}
+export function suggestNotes(notes, query) {
+  const q = query.normalize("NFC").toLowerCase();
+  return notes
+    .filter((n) =>
+      [n.title, n.path, ...(n.aliases ?? [])].some((v) =>
+        String(v).normalize("NFC").toLowerCase().includes(q),
+      ),
+    )
+    .slice(0, 20)
+    .map((n) => ({
+      label: n.title ?? n.path,
+      detail: n.path,
+      insert: n.path.replace(/\.md$/i, ""),
+    }));
+}
+export function attachmentUrl(
+  target,
+  from,
+  attachments,
+  vaultId,
+  kind = "markdown",
+) {
+  if (!vaultId) return null;
+  const r = resolvePath(target, from, attachments, { kind });
+  return r.status === "resolved"
+    ? `notes://vault/${encodeURIComponent(vaultId)}/${r.path.split("/").map(encodeURIComponent).join("/")}`
+    : null;
 }
 
 export function buildKnowledge(raw) {
   const notes = raw.map((note) => {
-    const tokens = md.parse(note.content, {});
+    const meta = parseMetadata(note.content);
+    const tokens = md.parse(meta.body, {});
     const headings = [];
     tokens.forEach((token, i) => {
       if (token.type === "heading_open")
@@ -138,13 +99,30 @@ export function buildKnowledge(raw) {
       .filter((t) => t.type === "text")
       .map((t) => t.content)
       .join(" ");
+    const propertyTags =
+      typeof meta.properties.tags === "string"
+        ? meta.properties.tags.split(/[, ]+/)
+        : Array.isArray(meta.properties.tags)
+          ? meta.properties.tags.filter((t) => typeof t === "string")
+          : [];
     const tags = [
-      ...new Set(
-        [...prose.matchAll(/(?:^|\s)#([\p{L}\p{N}_/-]+)/gu)].map((m) => m[1]),
-      ),
+      ...new Set([
+        ...propertyTags,
+        ...[...prose.matchAll(/(?:^|\s)#([\p{L}\p{N}_/-]+)/gu)].map(
+          (m) => m[1],
+        ),
+      ]),
     ];
     return {
       ...note,
+      ...meta,
+      properties: meta.properties,
+      aliases:
+        typeof meta.properties.aliases === "string"
+          ? [meta.properties.aliases]
+          : Array.isArray(meta.properties.aliases)
+            ? meta.properties.aliases.filter((a) => typeof a === "string")
+            : [],
       title:
         headings.find((h) => h.level === 1)?.text ||
         note.path.split("/").at(-1).replace(/\.md$/i, ""),
@@ -158,7 +136,9 @@ export function buildKnowledge(raw) {
   const seen = new Set();
   for (const note of notes)
     for (const link of note.links) {
-      const target = resolveLink(link.target, note.path, notes);
+      const target = resolveLink(link.target, note.path, notes, {
+        kind: link.kind,
+      });
       const key = note.path + "\0" + target.path;
       if (
         target.status !== "resolved" ||
@@ -173,31 +153,46 @@ export function buildKnowledge(raw) {
   return { notes, edges, backlinks };
 }
 
+const searchIndex = new SearchIndex();
+const indexed = new Map();
 export function searchNotes(notes, query) {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return notes;
-  return notes
-    .map((note) => {
-      const title = (note.title ?? note.path).toLocaleLowerCase();
-      const body = note.content.toLocaleLowerCase();
-      const score = terms.every((t) =>
-        `${title}\n${body}\n${note.path.toLocaleLowerCase()}`.includes(t),
-      )
-        ? terms.reduce((n, t) => n + (title.includes(t) ? 10 : 1), 0)
-        : 0;
-      const position = Math.max(0, body.indexOf(terms[0]) - 32);
-      return {
-        ...note,
-        score,
-        snippet: note.content
-          .slice(position, position + 110)
-          .replaceAll("\n", " "),
-      };
-    })
-    .filter((n) => n.score > 0)
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path, "ko"));
+  if (!query.trim()) return notes;
+  const present = new Set(notes.map((n) => n.path));
+  for (const key of indexed.keys())
+    if (!present.has(key)) {
+      searchIndex.remove(key);
+      indexed.delete(key);
+    }
+  for (const n of notes) {
+    const signature = [n.content, n.title, (n.tags ?? []).join("\0")];
+    const previous = indexed.get(n.path);
+    if (!previous || signature.some((v, i) => v !== previous[i])) {
+      searchIndex.add({
+        id: n.path,
+        path: n.path,
+        title: n.title ?? n.path,
+        text: n.content,
+        tags: n.tags ?? [],
+        mtime: 0,
+      });
+      indexed.set(n.path, signature);
+    }
+  }
+  const byPath = new Map(notes.map((n) => [n.path, n]));
+  return searchIndex.search(query, { limit: 1000 }).map((hit) => ({
+    ...byPath.get(hit.path),
+    score: hit.score,
+    snippet: hit.snippet,
+  }));
 }
-
-export function renderMarkdown(source, notes = [], from = "") {
-  return md.render(source, { notes, from });
+export function renderMarkdown(source, notes = [], from = "", options = {}) {
+  const meta = parseMetadata(source);
+  return md.render(meta.body, {
+    ...options,
+    from,
+    notes,
+    bodyOffset: meta.offset,
+    visited: options.visited ?? [from],
+  });
 }
+installMarkdownExtensions(md, { resolveLink, renderMarkdown, attachmentUrl });

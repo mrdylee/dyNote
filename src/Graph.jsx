@@ -1,7 +1,37 @@
 import { useMemo, useRef, useState } from "react";
 import { Minus, Plus, Scan } from "lucide-react";
 
-export default function Graph({ notes, edges, active, onOpen }) {
+export default function Graph({
+  notes: allNotes,
+  edges: allEdges,
+  active,
+  onOpen,
+}) {
+  const [pathFilter, setPathFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [local, setLocal] = useState(false);
+  const [depth, setDepth] = useState(1);
+  const neighborhood = new Set([active]);
+  if (local)
+    for (let i = 0; i < depth; i++) {
+      const previous = new Set(neighborhood);
+      for (const edge of allEdges)
+        if (previous.has(edge.source) || previous.has(edge.target)) {
+          neighborhood.add(edge.source);
+          neighborhood.add(edge.target);
+        }
+    }
+  const notes = allNotes.filter(
+    (n) =>
+      n.path.toLowerCase().includes(pathFilter.toLowerCase()) &&
+      (!tagFilter || n.tags?.includes(tagFilter)) &&
+      (!local || neighborhood.has(n.path)),
+  );
+  const included = new Set(notes.map((n) => n.path));
+  const edges = allEdges.filter(
+    (e) => included.has(e.source) && included.has(e.target),
+  );
+  const tags = [...new Set(allNotes.flatMap((n) => n.tags ?? []))].sort();
   const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
   const drag = useRef(null);
   const [hover, setHover] = useState(null);
@@ -39,6 +69,48 @@ export default function Graph({ notes, edges, active, onOpen }) {
         <span className="eyebrow">CONNECTED THOUGHTS</span>
         <h1>생각의 연결을 살펴보세요</h1>
         <p>점을 선택해 문서를 열고, 연결된 맥락을 따라가 보세요.</p>
+        <div className="graph-filters">
+          <input
+            aria-label="그래프 경로 필터"
+            placeholder="문서·폴더 경로"
+            value={pathFilter}
+            onChange={(e) => setPathFilter(e.target.value)}
+          />
+          <select
+            aria-label="그래프 태그 필터"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+          >
+            <option value="">모든 태그</option>
+            {tags.map((tag) => (
+              <option key={tag} value={tag}>
+                #{tag}
+              </option>
+            ))}
+          </select>
+          <label>
+            <input
+              type="checkbox"
+              checked={local}
+              onChange={(e) => setLocal(e.target.checked)}
+            />
+            현재 문서 주변
+          </label>
+          {local && (
+            <label>
+              연결 깊이{" "}
+              <select
+                aria-label="로컬 그래프 깊이"
+                value={depth}
+                onChange={(e) => setDepth(Number(e.target.value))}
+              >
+                {[1, 2, 3, 4].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       </div>
       <svg
         aria-label="문서 연결 그래프"

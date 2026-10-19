@@ -8,7 +8,7 @@ export function assetPath(input, root) {
     url.host !== "app" ||
     /[\\\0]/.test(decoded) ||
     decoded.split("/").some((p) => p.startsWith(".")) ||
-    !/\.(?:html|js|css|svg|woff2)$/.test(decoded)
+    !/\.(?:html|m?js|css|svg|woff2)$/.test(decoded)
   )
     throw new Error("Forbidden asset");
   const file = path.resolve(root, "." + decoded);

@@ -29,10 +29,17 @@ import {
   renderMarkdown,
   resolveLink,
   searchNotes,
+  parseMetadata,
+  updateMetadata,
+  toggleTask,
+  attachmentUrl,
 } from "../core/knowledge.mjs";
 import { SaveQueue } from "./saveQueue.mjs";
 import Editor from "./Editor.jsx";
 import Graph from "./Graph.jsx";
+import PdfViewer from "./PdfViewer.jsx";
+import DiagramPreview from "./DiagramPreview.jsx";
+import "katex/dist/katex.min.css";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -58,12 +65,12 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
 
 function FileTree({ notes, active, onOpen }) {
   const [closed, setClosed] = useState(new Set());
-  const tree = {};
+  const tree = Object.create(null);
   for (const note of notes) {
     let cursor = tree;
     const parts = note.path.split("/");
     for (const part of parts.slice(0, -1))
-      cursor = (cursor[part] ??= { children: {} }).children;
+      cursor = (cursor[part] ??= { children: Object.create(null) }).children;
     cursor[parts.at(-1)] = { note };
   }
   const render = (level, prefix = "", depth = 0) =>
@@ -161,6 +168,11 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
+  const [attachment, setAttachment] = useState(null);
+  const [fileTarget, setFileTarget] = useState(null);
+  const [propertiesDraft, setPropertiesDraft] = useState("");
+  const [lastTrash, setLastTrash] = useState(null);
+  const revisions = useRef(new Map());
   const queue = useRef(null);
   const timer = useRef(null);
   const preview = useRef(null);
@@ -178,28 +190,35 @@ export default function App() {
     () =>
       note
         ? DOMPurify.sanitize(
-            renderMarkdown(note.content, model.notes, note.path),
+            renderMarkdown(note.content, model.notes, note.path, {
+              vaultId: vault.id,
+              attachments: vault.attachments ?? [],
+            }),
             {
-              FORBID_TAGS: [
-                "img",
-                "iframe",
-                "style",
-                "form",
-                "input",
-                "svg",
-                "math",
+              FORBID_TAGS: ["iframe", "style", "form", "svg", "math"],
+              ADD_ATTR: [
+                "data-note",
+                "data-external",
+                "data-anchor",
+                "data-attachment",
+                "data-task-line",
+                "data-embed",
               ],
-              ADD_ATTR: ["data-note", "data-external"],
+              ADD_URI_SAFE_ATTR: ["src"],
             },
           )
         : "",
-    [note, model],
+    [note, model, vault],
   );
 
   const install = useCallback((snapshot) => {
     clearTimeout(timer.current);
     setVault(snapshot);
     setRaw(snapshot.notes);
+    revisions.current = new Map(
+      snapshot.notes.map((n) => [n.path, n.revision]),
+    );
+    setAttachment(null);
     const initial =
       snapshot.notes.find((n) => n.path === "시작하기.md")?.path ??
       snapshot.notes[0]?.path ??
@@ -211,12 +230,14 @@ export default function App() {
     queue.current = new SaveQueue(
       (path, content, revision) =>
         invoke(api.saveNote({ vaultId: snapshot.id, path, content, revision })),
-      (saved) =>
+      (saved) => {
+        revisions.current.set(saved.path, saved.revision);
         setRaw((current) =>
           current.map((n) =>
             n.path === saved.path ? { ...n, revision: saved.revision } : n,
           ),
-        ),
+        );
+      },
     );
   }, []);
 
@@ -257,6 +278,7 @@ export default function App() {
 
   const openNote = useCallback((path) => {
     setActive(path);
+    setAttachment(null);
     setTabs((old) => (old.includes(path) ? old : [...old, path]));
     setSection((old) => (old === "graph" ? "files" : old));
     setModal(null);
@@ -294,6 +316,7 @@ export default function App() {
         ? newName.trim()
         : newName.trim() + ".md";
       const created = await invoke(api.createNote({ vaultId: vault.id, path }));
+      revisions.current.set(created.path, created.revision);
       setRaw((old) => [...old, created]);
       openNote(created.path);
       setMode("edit");
@@ -338,10 +361,168 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [flush]);
 
+  const importFiles = async (files) => {
+    try {
+      const imported = [];
+      for (const file of files) {
+        if (file.size > 25 * 1024 * 1024)
+          throw new Error("첨부파일은 25MB 이하여야 합니다.");
+        imported.push(
+          await invoke(
+            api.importAttachment({
+              vaultId: vault.id,
+              name: file.name,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            }),
+          ),
+        );
+      }
+      setVault((old) => ({
+        ...old,
+        attachments: [...(old.attachments ?? []), ...imported],
+      }));
+      return imported;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  };
+  const chooseAttachments = async () => {
+    setBusy(true);
+    try {
+      const imported = await invoke(
+        api.chooseAttachments({ vaultId: vault.id }),
+      );
+      setVault((old) => ({
+        ...old,
+        attachments: [...(old.attachments ?? []), ...imported],
+      }));
+      if (note && imported.length) {
+        change(
+          note.content +
+            "\n" +
+            imported
+              .map((a) => `${/\.pdf$/i.test(a.path) ? "" : "!"}[[${a.path}]]`)
+              .join("\n") +
+            "\n",
+        );
+        setMode("split");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openAttachment = async (path) => {
+    try {
+      const data = await invoke(
+        api.readAttachment({ vaultId: vault.id, path }),
+      );
+      setAttachment(data);
+      setSection("files");
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const prepareFile = async (path, action) => {
+    try {
+      let revision = revisions.current.get(path);
+      if (!/\.md$/i.test(path))
+        revision = (
+          await invoke(api.readAttachment({ vaultId: vault.id, path }))
+        ).revision;
+      setError("");
+      setFileTarget({ path, revision });
+      setNewName(path);
+      setModal(action);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const alterFile = async (event) => {
+    event?.preventDefault();
+    setBusy(true);
+    try {
+      await flush();
+      const revision =
+        revisions.current.get(fileTarget.path) ?? fileTarget.revision;
+      if (modal === "move") {
+        const snapshot = await invoke(
+          api.moveFile({
+            vaultId: vault.id,
+            from: fileTarget.path,
+            to: newName.trim(),
+            revision,
+          }),
+        );
+        install(snapshot);
+        if (/\.md$/i.test(newName.trim())) openNote(newName.trim());
+        else await openAttachment(newName.trim());
+      } else {
+        const item = await invoke(
+          api.trashFile({ vaultId: vault.id, path: fileTarget.path, revision }),
+        );
+        setLastTrash({ ...item, vaultId: vault.id });
+        install(await invoke(api.snapshot()));
+      }
+      setModal(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restoreLast = async () => {
+    setBusy(true);
+    try {
+      await flush();
+      const snapshot = await invoke(
+        api.restoreTrash({ vaultId: lastTrash.vaultId, id: lastTrash.id }),
+      );
+      install(snapshot);
+      if (/\.md$/i.test(lastTrash.path)) openNote(lastTrash.path);
+      else await openAttachment(lastTrash.path);
+      setLastTrash(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const followLink = (event) => {
+    const checkbox = event.target.closest("input[data-task-line]");
+    if (checkbox) {
+      event.preventDefault();
+      if (!checkbox.disabled)
+        try {
+          change(
+            toggleTask(
+              note.content,
+              Number(checkbox.dataset.taskLine),
+              checkbox.checked,
+            ),
+          );
+        } catch (err) {
+          setError(err.message);
+        }
+      return;
+    }
     const anchor = event.target.closest("a");
     if (!anchor) return;
     event.preventDefault();
+    if (anchor.dataset.attachment) {
+      openAttachment(anchor.dataset.attachment);
+      return;
+    }
+    if (anchor.dataset.anchor) {
+      preview.current?.querySelectorAll("[id]").forEach((n) => {
+        if (n.id === anchor.dataset.anchor)
+          n.scrollIntoView({ behavior: "smooth" });
+      });
+      return;
+    }
     const target = anchor.dataset.note;
     if (target !== undefined) {
       const resolved = resolveLink(target, active, model.notes);
@@ -351,7 +532,7 @@ export default function App() {
         if (heading)
           setTimeout(() => {
             const headingNode = [
-              ...(preview.current?.querySelectorAll("h1,h2,h3,h4") ?? []),
+              ...(preview.current?.querySelectorAll("h1,h2,h3,h4,h5,h6") ?? []),
             ].find((h) => h.textContent === decodeURIComponent(heading));
             headingNode?.scrollIntoView({ behavior: "smooth" });
           }, 50);
@@ -448,7 +629,7 @@ export default function App() {
             >
               <ShieldCheck size={20} />
             </IconButton>
-            <span className="avatar">ON</span>
+            <span className="avatar">DN</span>
           </div>
         </nav>
         <aside className="navigator">
@@ -512,7 +693,7 @@ export default function App() {
                 id="vault-search"
                 autoFocus
                 aria-label="전체 문서 검색"
-                placeholder="검색어를 입력하세요…"
+                placeholder='단어, "구문", tag:bms, path:노트/ -제외'
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -537,6 +718,38 @@ export default function App() {
           ) : (
             <FileTree notes={model.notes} active={active} onOpen={openNote} />
           )}
+          <div className="attachments-list">
+            <div className="nav-section-title">
+              <span>첨부파일</span>
+              <button disabled={busy} onClick={chooseAttachments}>
+                추가
+              </button>
+            </div>
+            {(vault.attachments ?? []).map((file) => (
+              <div className="attachment-row" key={file.path}>
+                <button
+                  title={file.path}
+                  onClick={() => openAttachment(file.path)}
+                >
+                  {file.path.split("/").at(-1)}
+                </button>
+                <button
+                  aria-label={`${file.path} 이동`}
+                  disabled={busy}
+                  onClick={() => prepareFile(file.path, "move")}
+                >
+                  이동
+                </button>
+                <button
+                  aria-label={`${file.path} 삭제`}
+                  disabled={busy}
+                  onClick={() => prepareFile(file.path, "trash")}
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+          </div>
           <button
             className="new-note-button"
             onClick={() => {
@@ -607,6 +820,45 @@ export default function App() {
               </span>
             </div>
             <div className="toolbar-actions">
+              {section !== "graph" && note && (
+                <>
+                  <button
+                    className="text-action"
+                    disabled={busy}
+                    onClick={chooseAttachments}
+                  >
+                    첨부
+                  </button>
+                  <button
+                    className="text-action"
+                    disabled={busy}
+                    onClick={() =>
+                      prepareFile(attachment?.path ?? note.path, "move")
+                    }
+                  >
+                    이름·이동
+                  </button>
+                  <button
+                    className="text-action"
+                    disabled={busy}
+                    onClick={() =>
+                      prepareFile(attachment?.path ?? note.path, "trash")
+                    }
+                  >
+                    휴지통
+                  </button>
+                  <button
+                    className="text-action"
+                    disabled={busy}
+                    onClick={() => {
+                      setPropertiesDraft(parseMetadata(note.content).yaml);
+                      setModal("properties");
+                    }}
+                  >
+                    속성
+                  </button>
+                </>
+              )}
               {section !== "graph" && (
                 <div className="view-segments">
                   <IconButton
@@ -662,6 +914,28 @@ export default function App() {
                 active={active}
                 onOpen={openNote}
               />
+            ) : attachment ? (
+              <div className="attachment-view">
+                <div className="attachment-heading">
+                  <strong>{attachment.path}</strong>
+                  <button onClick={() => setAttachment(null)}>
+                    문서로 돌아가기
+                  </button>
+                </div>
+                {attachment.mime === "application/pdf" ? (
+                  <PdfViewer key={attachment.path} bytes={attachment.bytes} />
+                ) : (
+                  <img
+                    alt={attachment.path}
+                    src={attachmentUrl(
+                      attachment.path,
+                      "",
+                      vault.attachments ?? [],
+                      vault.id,
+                    )}
+                  />
+                )}
+              </div>
             ) : note ? (
               <div className={`document-content ${mode}`}>
                 <div className="document-topline">
@@ -679,13 +953,21 @@ export default function App() {
                   </span>
                 </div>
                 <div className="editor-preview">
-                  {mode !== "read" && <Editor note={note} onChange={change} />}
+                  {mode !== "read" && (
+                    <Editor
+                      key={note.path}
+                      note={note}
+                      notes={model.notes}
+                      onChange={change}
+                      onImportFiles={importFiles}
+                      readOnly={busy}
+                    />
+                  )}
                   {mode !== "edit" && (
-                    <article
-                      ref={preview}
-                      className="markdown-preview"
+                    <DiagramPreview
+                      previewRef={preview}
                       onClick={followLink}
-                      dangerouslySetInnerHTML={{ __html: html }}
+                      html={html}
                     />
                   )}
                 </div>
@@ -754,6 +1036,34 @@ export default function App() {
               </span>
               <Link2 size={15} />
             </div>
+            {note && (
+              <section className="context-section">
+                <div className="section-label">
+                  <h3>속성</h3>
+                  <button
+                    onClick={() => {
+                      setPropertiesDraft(parseMetadata(note.content).yaml);
+                      setModal("properties");
+                    }}
+                  >
+                    편집
+                  </button>
+                </div>
+                {note.error && <p role="alert">{note.error}</p>}
+                <dl className="property-list">
+                  {Object.entries(note.properties ?? {}).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key}</dt>
+                      <dd>
+                        {typeof value === "object"
+                          ? JSON.stringify(value)
+                          : String(value)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
             <section className="context-section">
               <div className="section-label">
                 <List size={14} />
@@ -770,7 +1080,7 @@ export default function App() {
                         () =>
                           [
                             ...(preview.current?.querySelectorAll(
-                              "h1,h2,h3,h4",
+                              "h1,h2,h3,h4,h5,h6",
                             ) ?? []),
                           ]
                             .find((node) => node.textContent === h.text)
@@ -833,6 +1143,32 @@ export default function App() {
                 </button>
               ))}
             </section>
+            {!!note && (
+              <section className="context-section">
+                <div className="section-label">
+                  <h3>링크 없는 언급</h3>
+                </div>
+                {model.notes
+                  .filter(
+                    (n) =>
+                      n.path !== active &&
+                      !incoming.some((i) => i.path === n.path) &&
+                      [note.title, ...note.aliases].some(
+                        (name) => name.length > 1 && n.body.includes(name),
+                      ),
+                  )
+                  .slice(0, 20)
+                  .map((n) => (
+                    <button
+                      className="related-note"
+                      key={n.path}
+                      onClick={() => openNote(n.path)}
+                    >
+                      {n.title}
+                    </button>
+                  ))}
+              </section>
+            )}
             {!!note?.tags.length && (
               <section className="context-section">
                 <div className="section-label">
@@ -872,6 +1208,104 @@ export default function App() {
           </aside>
         )}
       </div>
+      {lastTrash && (
+        <div className="undo-toast">
+          휴지통으로 이동했습니다.{" "}
+          <button
+            disabled={busy || lastTrash.vaultId !== vault.id}
+            onClick={restoreLast}
+          >
+            되돌리기
+          </button>
+          <button
+            aria-label="휴지통 알림 닫기"
+            onClick={() => setLastTrash(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {(modal === "move" || modal === "trash") && (
+        <Modal
+          title={modal === "move" ? "파일 이름 변경·이동" : "휴지통으로 이동"}
+          onClose={() => !busy && setModal(null)}
+        >
+          <form onSubmit={alterFile}>
+            <p>{fileTarget?.path}</p>
+            {error && (
+              <p role="alert" className="error-banner">
+                {error}
+              </p>
+            )}
+            {modal === "move" ? (
+              <>
+                <label htmlFor="file-destination">보관함 안의 새 경로</label>
+                <input
+                  id="file-destination"
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+                <p className="muted">
+                  확장자를 유지하세요. 연결 문서의 링크도 함께 갱신합니다.
+                </p>
+              </>
+            ) : (
+              <p>복구 가능한 사본을 보관합니다. 연결 문서의 링크는 남습니다.</p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                disabled={busy}
+              >
+                취소
+              </button>
+              <button
+                className="primary-button"
+                disabled={busy || !newName.trim()}
+              >
+                {modal === "move" ? "이동·링크 갱신" : "휴지통으로 이동"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {modal === "properties" && (
+        <Modal title="문서 속성" wide onClose={() => setModal(null)}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                change(updateMetadata(note.content, propertiesDraft));
+                setModal(null);
+              } catch (err) {
+                setError(err.message);
+              }
+            }}
+          >
+            {error && (
+              <p role="alert" className="error-banner">
+                {error}
+              </p>
+            )}
+            <p className="muted">
+              YAML 형식으로 tags, aliases, status, 날짜 등 문서 속성을
+              편집합니다.
+            </p>
+            <textarea
+              className="properties-editor"
+              aria-label="YAML 속성"
+              value={propertiesDraft}
+              onChange={(e) => setPropertiesDraft(e.target.value)}
+              placeholder={"tags: [시험]\naliases: [별칭]\nstatus: draft"}
+            />
+            <div className="modal-actions">
+              <button className="primary-button">속성 적용</button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {busy && (
         <div className="busy-indicator">
           <LoaderCircle size={15} className="spin" />
@@ -958,8 +1392,9 @@ export default function App() {
             별도의 복구 폴더에 남습니다.
           </p>
           <p>
-            이 버전은 문서의 이미지와 플러그인을 실행하지 않습니다. 첨부파일과
-            다른 앱의 설정 파일은 그대로 둡니다.
+            로컬 이미지·PDF를 지원합니다. 외부 이미지와 플러그인은 실행하지
+            않습니다. 노트는 별도 Git 저장소로 관리하고, Git에서 가져온 뒤 문서
+            새로고침을 사용하세요.
           </p>
           <button
             className="secondary-button"
@@ -971,7 +1406,7 @@ export default function App() {
             복구 사본 폴더 열기
           </button>
           <div className="about-footer">
-            Dynote 0.1.0 · 독립적으로 제작한 노트 앱
+            Dynote 0.2.0 · 독립적으로 제작한 노트 앱
           </div>
         </Modal>
       )}
