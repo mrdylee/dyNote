@@ -2,13 +2,15 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
+v0.3.0의 Canvas·Bases는 현재 개발 브랜치에서 검증한 기능입니다. GitHub의 기존 v0.2.0 릴리스에는 포함되어 있지 않습니다.
+
 ## 실행
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/Dynote-darwin-arm64/Dynote.app`
+`release/v0.3.0/Dynote-darwin-arm64/Dynote.app`
 
-Windows 64비트용 실행 폴더는 `release/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.3.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -43,6 +45,7 @@ npm start
 - `"정확한 구문"`, `tag:시험`, `path:프로젝트/`, `-제외` 검색과 한국어 BM25 검색
 - 체크박스 클릭 저장, 콜아웃·각주·수식·Mermaid, 순환·깊이를 제한한 문서 삽입
 - 링크 없는 언급, 그래프의 경로·태그 필터와 현재 문서 주변의 연결 깊이
+- Canvas 카드 편집과 Bases 기본 표·속성 편집: [사용법과 지원 범위](docs/CANVAS-BASES.md)
 
 폴더를 바꾸거나 앱을 닫을 때도 저장 대기 중인 초안을 먼저 처리합니다. 저장에 실패하면 초안을 열린 창에 유지합니다. **초안은 앱 강제 종료나 프로세스 충돌까지 보존하는 별도 저장소는 아닙니다.** 저장 충돌 안내가 나오면 내용을 복사한 뒤 문서 새로고침을 선택하세요.
 
@@ -70,7 +73,7 @@ npm start
 
 앱 내부의 HTTP/WebSocket 요청과 외부 이미지 로딩은 차단합니다. 보관함 안의 검증된 로컬 이미지만 별도 경로로 제공합니다. PDF는 검증한 바이트를 내장 뷰어로 읽습니다. 사용자가 외부 링크를 직접 클릭하면 허용된 웹/메일 주소만 운영체제의 브라우저나 메일 앱으로 엽니다. 이 경우에는 해당 외부 앱이 네트워크를 사용합니다.
 
-플러그인 실행, ZIP 가져오기, 앱 내 Git 자동 동기화, 모바일, Canvas·Bases, 기존 Obsidian 플러그인 호환은 지원하지 않습니다. Obsidian 방식 Live Preview는 사용자 요청으로 제외했습니다. 현재 읽기·소스 편집·분할 미리보기를 유지합니다. Markdown 전체 규격 및 Obsidian의 모든 확장 문법과 동일하지 않습니다. 원자적 교체는 일반적인 중간 저장 손상을 줄이지만 전원 장애에 대한 디스크 내구성이나 악성 로컬 프로세스의 경로 교체 경쟁까지 보장하지 않습니다.
+플러그인 실행, ZIP 가져오기, 앱 내 Git 자동 동기화, 모바일, 기존 Obsidian 플러그인 호환은 지원하지 않습니다. Obsidian 방식 Live Preview는 사용자 요청으로 제외했습니다. 현재 읽기·소스 편집·분할 미리보기를 유지합니다. Markdown 전체 규격 및 Obsidian의 모든 확장 문법과 동일하지 않습니다. 원자적 교체는 일반적인 중간 저장 손상을 줄이지만 전원 장애에 대한 디스크 내구성이나 악성 로컬 프로세스의 경로 교체 경쟁까지 보장하지 않습니다.
 
 ## 패키징
 
@@ -99,4 +102,4 @@ REA의 관찰 범위와 한계: [REA 분석 기록](docs/REA-EVIDENCE.md). Elect
 3. 편집 후 저장 완료를 확인하고, 노트 저장소에서 변경 파일을 검토한 뒤 커밋·푸시합니다.
 4. 분기 이력이 갈라지거나 충돌이 있으면 Git 도구에서 먼저 해결합니다. 바이너리 첨부파일의 충돌에서는 두 사본을 모두 보존한 뒤 선택합니다. Dynote는 충돌을 자동 폐기하지 않습니다.
 
-Canvas·Bases·Obsidian 플러그인 호환은 별도 설계 항목으로 남아 있습니다. 원본과의 전체 호환성이나 대규모 보관함 성능을 보장하지 않습니다. [참고 코드 검토](docs/UPSTREAM-REVIEW.md), [v0.2.0 검증](docs/VERIFICATION.md)을 확인하세요.
+Canvas·Bases는 v0.3.0에서 기본 기능을 구현했습니다. Obsidian 플러그인 호환은 별도 설계 항목으로 남아 있습니다. 원본과의 전체 호환성이나 대규모 보관함 성능을 보장하지 않습니다. [참고 코드 검토](docs/UPSTREAM-REVIEW.md), [v0.2.0 검증](docs/VERIFICATION.md)을 확인하세요.

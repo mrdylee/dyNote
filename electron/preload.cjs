@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld(
     pickVault: () => call("pick-vault"),
     createNote: (args) => call("create", args),
     saveNote: (args) => call("save", args),
+    createDocument: (args) => call("create-document", args),
+    saveDocument: (args) => call("save-document", args),
     importAttachment: (args) => call("import-attachment", args),
     chooseAttachments: (args) => call("choose-attachments", args),
     readAttachment: (args) => call("read-attachment", args),

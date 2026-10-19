@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-19",
+  "version": "0.3.0",
+  "host": "Apple Silicon macOS",
+  "tests": {
+    "passed": 51,
+    "failed": 0
+  },
+  "packages": [
+    {
+      "platform": "darwin-arm64",
+      "asarSha256": "9eeb0861bca0378689f068e02118de60efc2c4045d2aa67ef1dceafa5c74fcf5",
+      "matchedSourceAndBundleFiles": 174,
+      "version": "0.3.0",
+      "nativeNodeAddonsIncluded": false
+    },
+    {
+      "platform": "win32-x64",
+      "asarSha256": "9eeb0861bca0378689f068e02118de60efc2c4045d2aa67ef1dceafa5c74fcf5",
+      "matchedSourceAndBundleFiles": 174,
+      "version": "0.3.0",
+      "nativeNodeAddonsIncluded": false
+    }
+  ],
+  "archives": [
+    {
+      "name": "Dynote-0.3.0-mac-arm64.zip",
+      "bytes": 189161326,
+      "sha256": "a377927ab470ec466ddcdfa02a913be0bb8ccf41c059eaba8dfd4e8588416705",
+      "files": 854,
+      "zipIntegrity": "passed"
+    },
+    {
+      "name": "Dynote-0.3.0-windows-x64.zip",
+      "bytes": 220157962,
+      "sha256": "87ec5ad161ee37056c86549ca5ea3925ebad5d70d8cfd35a95c88737a5becc26",
+      "files": 73,
+      "zipIntegrity": "passed"
+    }
+  ],
+  "windowsRuntimeByteMatchedFiles": 71,
+  "macRuntimeTested": true,
+  "windowsRuntimeTested": false,
+  "codeSigned": false,
+  "notarized": false,
+  "githubReleasePublished": false
+}

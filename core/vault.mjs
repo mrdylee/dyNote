@@ -177,10 +177,12 @@ export class Vault {
           throw new Error("같은 이름의 문서가 이미 있습니다.");
         throw error;
       }
+      const stat = await lstat(target);
       return {
         path: relative,
         content,
         revision: digest(Buffer.from(content)),
+        metadata: { size: Buffer.byteLength(content), mtime: stat.mtimeMs, ctime: stat.birthtimeMs },
       };
     });
   }
@@ -245,10 +247,12 @@ export class Vault {
         if (error.code !== "ENOENT") throw error;
       });
     }
+    const stat = await lstat(target);
     return {
       path: relative,
       content,
       revision: digest(Buffer.from(content)),
+      metadata: { size: Buffer.byteLength(content), mtime: stat.mtimeMs, ctime: stat.birthtimeMs },
       ...(documentKind(relative) ? { kind: documentKind(relative) } : {}),
     };
   }

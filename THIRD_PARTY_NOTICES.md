@@ -27,3 +27,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Other dependencies retain their licenses in their installed packages. Obsidian proprietary code and assets are not included.
+
+## Canvas and Bases (v0.3.0)
+
+- React Flow (`@xyflow/react` 12.12.0), https://github.com/xyflow/xyflow — MIT, Copyright (c) 2019-2025 webkid GmbH. Used as an installed UI library, with its packaged LICENSE retained.
+- `obsidian-bases-expression` 0.3.0-rc.4, https://github.com/callumalpass/obsidian-bases-expression — MIT, Copyright (c) 2026 Callum Alpass. Used as an installed headless expression library. Reviewed source commit: `1af9c81d8648407e56f7889cd78e7c02b4c258eb`. Its packaged LICENSE and Moment dependency license are retained. The Obsidian-specific builder/oracle scripts are not executed by Dynote.
+- JSON Canvas 1.0, https://github.com/obsidianmd/jsoncanvas — MIT, Copyright (c) 2024 Obsidian.md. The public data format informed Dynote's independent format adapter. The Obsidian Canvas editor implementation is not included.
+
+The MIT permission and warranty terms reproduced above apply to the respective MIT works with their own copyright notices. No Obsidian plugin API compatibility or endorsement is implied.

@@ -224,6 +224,14 @@ app
         checkVault(args);
         return vault.save(args.path, args.content, args.revision);
       },
+      "create-document": (args) => {
+        checkVault(args);
+        return vault.createDocument(args.path);
+      },
+      "save-document": (args) => {
+        checkVault(args);
+        return vault.saveDocument(args.path, args.content, args.revision);
+      },
       "import-attachment": (args) => {
         checkVault(args);
         return vault.importAttachment(args.name, args.bytes);

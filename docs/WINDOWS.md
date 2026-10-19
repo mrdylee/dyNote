@@ -1,10 +1,10 @@
-# Windows용 Dynote 0.2.0
+# Windows용 Dynote 0.3.0
 
 대상: Windows x64. 이 파일은 설치 프로그램이 아닌 독립 실행 앱 폴더입니다.
 
 ## 실행 방법
 
-1. `Dynote-0.2.0-windows-x64.zip`을 Windows PC로 복사합니다.
+1. `Dynote-0.3.0-windows-x64.zip`을 Windows PC로 복사합니다.
 2. ZIP을 마우스 오른쪽 버튼으로 클릭해 **압축 풀기**를 선택합니다.
 3. 압축을 푼 `Dynote-win32-x64` 폴더 안에서 **Dynote.exe**를 실행합니다.
 4. 앱이 열리면 왼쪽 보관함 이름 옆 화살표에서 **다른 폴더 열기**를 선택합니다.

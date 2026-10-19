@@ -1,7 +1,7 @@
 {
   "name": "dynote",
   "productName": "Dynote",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "An independent local Markdown notebook informed by REA artifact analysis.",
   "author": "Dynote contributors",
@@ -17,9 +17,9 @@
     "build": "vite build",
     "test": "node --test tests/*.test.mjs",
     "start": "electron .",
-    "package:mac": "npm run build && electron-packager . Dynote --platform=darwin --arch=arm64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
-    "package:win": "npm run build && electron-packager . Dynote --platform=win32 --arch=x64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
-    "package:linux": "npm run build && electron-packager . Dynote --platform=linux --arch=x64 --out=release --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\""
+    "package:mac": "npm run build && electron-packager . Dynote --platform=darwin --arch=arm64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
+    "package:win": "npm run build && electron-packager . Dynote --platform=win32 --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\"",
+    "package:linux": "npm run build && electron-packager . Dynote --platform=linux --arch=x64 --out=release/v0.3.0 --overwrite --asar --ignore=\"^/(src|tests|docs|release|node_modules/@napi-rs)(/|$)\""
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",

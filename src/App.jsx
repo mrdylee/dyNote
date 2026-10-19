@@ -39,6 +39,10 @@ import Editor from "./Editor.jsx";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import DiagramPreview from "./DiagramPreview.jsx";
+import CanvasEditor from "./CanvasEditor.jsx";
+import BasesView from "./BasesView.jsx";
+import { documentKind } from "../core/documents.mjs";
+import { version } from "../package.json";
 import "katex/dist/katex.min.css";
 
 const api = window.notes;
@@ -156,6 +160,7 @@ function Modal({ title, children, onClose, wide = false }) {
 export default function App() {
   const [vault, setVault] = useState(null);
   const [raw, setRaw] = useState([]);
+  const [documents, setDocuments] = useState([]);
   const [active, setActive] = useState(null);
   const [tabs, setTabs] = useState([]);
   const [section, setSection] = useState("files");
@@ -178,6 +183,7 @@ export default function App() {
   const preview = useRef(null);
   const model = useMemo(() => buildKnowledge(raw), [raw]);
   const note = model.notes.find((n) => n.path === active);
+  const structured = documents.find((d) => d.path === active);
   const results = useMemo(
     () => searchNotes(model.notes, query),
     [model, query],
@@ -215,13 +221,15 @@ export default function App() {
     clearTimeout(timer.current);
     setVault(snapshot);
     setRaw(snapshot.notes);
+    setDocuments(snapshot.documents ?? []);
     revisions.current = new Map(
-      snapshot.notes.map((n) => [n.path, n.revision]),
+      [...snapshot.notes, ...(snapshot.documents ?? [])].map((n) => [n.path, n.revision]),
     );
     setAttachment(null);
     const initial =
       snapshot.notes.find((n) => n.path === "시작하기.md")?.path ??
       snapshot.notes[0]?.path ??
+      snapshot.documents?.[0]?.path ??
       null;
     setActive(initial);
     setTabs(initial ? [initial] : []);
@@ -229,14 +237,15 @@ export default function App() {
     setStatus("saved");
     queue.current = new SaveQueue(
       (path, content, revision) =>
-        invoke(api.saveNote({ vaultId: snapshot.id, path, content, revision })),
+        invoke((documentKind(path) ? api.saveDocument : api.saveNote)({ vaultId: snapshot.id, path, content, revision })),
       (saved) => {
         revisions.current.set(saved.path, saved.revision);
         setRaw((current) =>
           current.map((n) =>
-            n.path === saved.path ? { ...n, revision: saved.revision } : n,
+            n.path === saved.path ? { ...n, revision: saved.revision, metadata: saved.metadata } : n,
           ),
         );
+        setDocuments((current) => current.map((d) => d.path === saved.path ? { ...d, revision: saved.revision } : d));
       },
     );
   }, []);
@@ -286,10 +295,14 @@ export default function App() {
 
   const change = (content) => {
     if (!note || content === note.content) return;
-    queue.current.set({ path: note.path, content, revision: note.revision });
-    setRaw((old) =>
-      old.map((n) => (n.path === note.path ? { ...n, content } : n)),
-    );
+    changeFile(note.path, content);
+  };
+  const changeFile = (path, content) => {
+    const source = [...raw, ...documents].find((n) => n.path === path);
+    if (!source || source.content === content || busy) return;
+    queue.current.set({ path, content, revision: revisions.current.get(path) ?? source.revision });
+    const update = (old) => old.map((n) => n.path === path ? { ...n, content } : n);
+    if (documentKind(path)) setDocuments(update); else setRaw(update);
     setStatus("dirty");
     clearTimeout(timer.current);
     timer.current = setTimeout(() => flush().catch(() => {}), 700);
@@ -312,12 +325,13 @@ export default function App() {
     e.preventDefault();
     setBusy(true);
     try {
-      const path = /\.md$/i.test(newName.trim())
+      const path = /\.(md|canvas|base)$/i.test(newName.trim())
         ? newName.trim()
         : newName.trim() + ".md";
-      const created = await invoke(api.createNote({ vaultId: vault.id, path }));
+      const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId: vault.id, path }));
       revisions.current.set(created.path, created.revision);
-      setRaw((old) => [...old, created]);
+      if (documentKind(path)) setDocuments((old) => [...old, created]);
+      else setRaw((old) => [...old, created]);
       openNote(created.path);
       setMode("edit");
       setNewName("");
@@ -425,10 +439,16 @@ export default function App() {
       setError(err.message);
     }
   };
+  const openFile = (path) => {
+    if ([...raw, ...documents].some((n) => n.path === path)) openNote(path);
+    else if ((vault.attachments ?? []).some((n) => n.path === path)) openAttachment(path);
+    else setError(`파일을 찾을 수 없습니다: ${path}`);
+  };
+  const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
   const prepareFile = async (path, action) => {
     try {
       let revision = revisions.current.get(path);
-      if (!/\.md$/i.test(path))
+      if (!/\.(md|canvas|base)$/i.test(path))
         revision = (
           await invoke(api.readAttachment({ vaultId: vault.id, path }))
         ).revision;
@@ -457,7 +477,7 @@ export default function App() {
           }),
         );
         install(snapshot);
-        if (/\.md$/i.test(newName.trim())) openNote(newName.trim());
+        if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim());
         else await openAttachment(newName.trim());
       } else {
         const item = await invoke(
@@ -481,7 +501,7 @@ export default function App() {
         api.restoreTrash({ vaultId: lastTrash.vaultId, id: lastTrash.id }),
       );
       install(snapshot);
-      if (/\.md$/i.test(lastTrash.path)) openNote(lastTrash.path);
+      if (/\.(md|canvas|base)$/i.test(lastTrash.path)) openNote(lastTrash.path);
       else await openAttachment(lastTrash.path);
       setLastTrash(null);
     } catch (err) {
@@ -525,7 +545,7 @@ export default function App() {
     }
     const target = anchor.dataset.note;
     if (target !== undefined) {
-      const resolved = resolveLink(target, active, model.notes);
+      const resolved = resolveLink(target, active, [...model.notes, ...documents]);
       if (resolved.status === "resolved") {
         if (resolved.path !== active) openNote(resolved.path);
         const heading = target.split("#")[1];
@@ -716,8 +736,12 @@ export default function App() {
               )}
             </div>
           ) : (
-            <FileTree notes={model.notes} active={active} onOpen={openNote} />
+            <FileTree notes={[...model.notes, ...documents]} active={active} onOpen={openNote} />
           )}
+          <div className="structured-create-actions">
+            <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
+            <button disabled={busy} onClick={() => { setNewName("새 Bases.base"); setModal("new"); }}>+ Bases</button>
+          </div>
           <div className="attachments-list">
             <div className="nav-section-title">
               <span>첨부파일</span>
@@ -820,11 +844,11 @@ export default function App() {
               </span>
             </div>
             <div className="toolbar-actions">
-              {section !== "graph" && note && (
+              {section !== "graph" && (note || structured) && (
                 <>
                   <button
                     className="text-action"
-                    disabled={busy}
+                    disabled={busy || !note}
                     onClick={chooseAttachments}
                   >
                     첨부
@@ -833,7 +857,7 @@ export default function App() {
                     className="text-action"
                     disabled={busy}
                     onClick={() =>
-                      prepareFile(attachment?.path ?? note.path, "move")
+                      prepareFile(attachment?.path ?? structured?.path ?? note.path, "move")
                     }
                   >
                     이름·이동
@@ -842,14 +866,14 @@ export default function App() {
                     className="text-action"
                     disabled={busy}
                     onClick={() =>
-                      prepareFile(attachment?.path ?? note.path, "trash")
+                      prepareFile(attachment?.path ?? structured?.path ?? note.path, "trash")
                     }
                   >
                     휴지통
                   </button>
                   <button
                     className="text-action"
-                    disabled={busy}
+                    disabled={busy || !note}
                     onClick={() => {
                       setPropertiesDraft(parseMetadata(note.content).yaml);
                       setModal("properties");
@@ -859,7 +883,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {section !== "graph" && (
+              {section !== "graph" && !structured && (
                 <div className="view-segments">
                   <IconButton
                     label="읽기 보기"
@@ -914,6 +938,12 @@ export default function App() {
                 active={active}
                 onOpen={openNote}
               />
+            ) : structured && !attachment ? (
+              structured.kind === "canvas" ? <CanvasEditor key={`${vault.id}:${structured.path}`} document={structured}
+                files={[...model.notes, ...documents, ...(vault.attachments ?? [])]} attachments={vault.attachments ?? []} vaultId={vault.id}
+                onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy} />
+                : <BasesView key={`${vault.id}:${structured.path}`} document={structured} notes={model.notes}
+                  onChange={(content) => changeFile(structured.path, content)} onNoteChange={changeFile} onOpen={openFile} onError={setError} readOnly={busy} />
             ) : attachment ? (
               <div className="attachment-view">
                 <div className="attachment-heading">
@@ -1021,8 +1051,8 @@ export default function App() {
               </span>
             </div>
             <div>
-              <span>{note?.content.length.toLocaleString() ?? 0}자</span>
-              <span>Markdown</span>
+              <span>{(note?.content.length ?? structured?.content.length ?? 0).toLocaleString()}자</span>
+              <span>{structured?.kind ?? "Markdown"}</span>
               <span>UTF-8</span>
             </div>
           </footer>
@@ -1324,7 +1354,7 @@ export default function App() {
               placeholder="예: 오늘의 아이디어"
             />
             <p className="muted">
-              폴더/문서 이름으로 입력하면 폴더도 함께 만듭니다.
+              폴더/문서 이름으로 입력하면 폴더도 함께 만듭니다. .canvas 또는 .base 확장자로 해당 문서를 만들 수 있습니다.
             </p>
             <div className="modal-actions">
               <button
@@ -1406,7 +1436,7 @@ export default function App() {
             복구 사본 폴더 열기
           </button>
           <div className="about-footer">
-            Dynote 0.2.0 · 독립적으로 제작한 노트 앱
+            Dynote {version} · 독립적으로 제작한 노트 앱
           </div>
         </Modal>
       )}
