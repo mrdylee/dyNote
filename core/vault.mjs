@@ -13,6 +13,8 @@ import { constants } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { rewriteLinks } from "./links.mjs";
+import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
+import { rewriteCanvas } from "./canvas.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -35,7 +37,7 @@ export function validFilePath(value) {
           !/[. ]$/.test(part) &&
           !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part),
       ) &&
-    /\.(?:md|png|jpe?g|gif|webp|pdf)$/i.test(value)
+    /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf)$/i.test(value)
   );
 }
 
@@ -110,14 +112,15 @@ export class Vault {
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
     try {
-      if ((await handle.stat()).size > MAX_BYTES)
+      const stat = await handle.stat();
+      if (stat.size > MAX_BYTES)
         throw new Error("8MB보다 큰 문서는 이 버전에서 열 수 없습니다.");
       const bytes = await handle.readFile();
       const content = new TextDecoder("utf-8", {
         fatal: true,
         ignoreBOM: true,
       }).decode(bytes);
-      return { path: relative, content, revision: digest(bytes) };
+      return { path: relative, content, revision: digest(bytes), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs }, ...(documentKind(relative) ? { kind: documentKind(relative) } : {}) };
     } finally {
       await handle.close();
     }
@@ -132,6 +135,7 @@ export class Vault {
     const notes = [];
     const warnings = [];
     const attachments = [];
+    const documents = [];
     const walk = async (directory, prefix = "") => {
       const items = await readdir(directory, { withFileTypes: true });
       for (const item of items) {
@@ -145,9 +149,9 @@ export class Vault {
           }
         } else if (item.isFile() && attachmentMime(item.name)) {
           if (validFilePath(relative)) attachments.push({ path: relative });
-        } else if (item.isFile() && /\.md$/i.test(item.name)) {
+        } else if (item.isFile() && /\.(?:md|canvas|base)$/i.test(item.name)) {
           try {
-            notes.push(await this.#read(relative));
+            (documentKind(relative) ? documents : notes).push(await this.#read(relative));
           } catch (error) {
             warnings.push(`${relative}: ${error.message}`);
           }
@@ -156,7 +160,8 @@ export class Vault {
     };
     await walk(this.root);
     notes.sort((a, b) => a.path.localeCompare(b.path, "ko"));
-    return { id: this.id, name: this.name, notes, attachments, warnings };
+    documents.sort((a, b) => a.path.localeCompare(b.path, "ko"));
+    return { id: this.id, name: this.name, notes, documents, attachments, warnings };
   }
 
   create(relative) {
@@ -181,14 +186,34 @@ export class Vault {
   }
 
   save(relative, content, expectedRevision) {
-    return this.#enqueue(() => this.#save(relative, content, expectedRevision));
+    return this.#enqueue(() => {
+      if (!validNotePath(relative)) throw new Error("Markdown 문서만 저장할 수 있습니다.");
+      return this.#save(relative, content, expectedRevision);
+    });
+  }
+
+  createDocument(relative) {
+    return this.#enqueue(async () => {
+      if (!validFilePath(relative) || !documentKind(relative)) throw new Error("Canvas 또는 Bases 경로여야 합니다.");
+      const content = initialDocument(relative);
+      await writeFile(await this.#file(relative, true), content, { flag: "wx", mode: 0o600 });
+      return { path: relative, content, revision: digest(Buffer.from(content)), kind: documentKind(relative) };
+    });
+  }
+
+  saveDocument(relative, content, expectedRevision) {
+    return this.#enqueue(() => {
+      if (!documentKind(relative)) throw new Error("Canvas 또는 Bases 파일이어야 합니다.");
+      return this.#save(relative, content, expectedRevision);
+    });
   }
 
   async #save(relative, content, expectedRevision) {
-    if (!validNotePath(relative))
-      throw new Error("Markdown 문서만 저장할 수 있습니다.");
+    if (!validFilePath(relative) || (!validNotePath(relative) && !documentKind(relative)))
+      throw new Error("저장할 수 없는 문서 형식입니다.");
     if (typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES)
       throw new Error("문서는 8MB 이하여야 합니다.");
+    if (documentKind(relative)) validateDocument(relative, content);
     const current = await this.#read(relative);
     if (current.revision !== expectedRevision)
       throw new Error(
@@ -200,7 +225,7 @@ export class Vault {
     await mkdir(backups, { recursive: true, mode: 0o700 });
     const backup = path.join(
       backups,
-      `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 8)}.md`,
+      `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 8)}${path.extname(relative)}`,
     );
     await writeFile(backup, current.content, { flag: "wx", mode: 0o600 });
     const temporary = path.join(
@@ -224,6 +249,7 @@ export class Vault {
       path: relative,
       content,
       revision: digest(Buffer.from(content)),
+      ...(documentKind(relative) ? { kind: documentKind(relative) } : {}),
     };
   }
 
@@ -301,11 +327,12 @@ export class Vault {
       if (current.revision !== expectedRevision)
         throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
       const snapshot = await this.#snapshot();
-      const files = [...snapshot.notes, ...snapshot.attachments];
-      const edits = snapshot.notes
+      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.attachments];
+      const edits = [...snapshot.notes, ...snapshot.documents]
         .map((n) => ({
           ...n,
-          next: rewriteLinks(n.content, n.path, from, to, files),
+          next: n.kind === "canvas" ? rewriteCanvas(n.content, n.path, from, to, files)
+            : n.kind === "base" ? n.content : rewriteLinks(n.content, n.path, from, to, files),
         }))
         .filter((n) => n.next !== n.content);
       for (const edit of edits)
