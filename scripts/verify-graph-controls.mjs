@@ -21,11 +21,16 @@ try {
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1420, 940); w.setIgnoreMouseEvents(true); });
   await page.getByRole('button', { name: '그래프 보기', exact: true }).waitFor();
   await page.evaluate(() => {
-    window.controlProbe = { graphPosts: 0, draws: 0 };
+    window.controlProbe = { graphPosts: 0, draws: 0, indices: [], lastIndices: [] };
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (fn) => raf((time) => {
+      window.controlProbe.indices = []; fn(time);
+      if (window.controlProbe.indices.length) window.controlProbe.lastIndices = window.controlProbe.indices;
+    });
     const NativeWorker = window.Worker;
     window.Worker = class extends NativeWorker { postMessage(message, ...rest) { if (message.type === 'graph') window.controlProbe.graphPosts++; return super.postMessage(message, ...rest); } };
     for (const api of [WebGLRenderingContext, WebGL2RenderingContext]) for (const name of ['drawArrays', 'drawElements']) {
-      const original = api.prototype[name]; api.prototype[name] = function(...args) { window.controlProbe.draws++; return original.apply(this, args); };
+      const original = api.prototype[name]; api.prototype[name] = function(...args) { window.controlProbe.draws++; if (name === 'drawElements') window.controlProbe.indices.push(args[1]); return original.apply(this, args); };
     }
   });
   await page.getByRole('button', { name: '그래프 보기', exact: true }).click();
@@ -33,6 +38,8 @@ try {
   const legend = page.locator('.graph-legend');
   const counts = async (nodes, edges) => page.waitForFunction(([n, e]) => document.querySelector('.graph-legend')?.textContent.includes(`${n}개 노드 · ${e}개 연결`), [nodes, edges]);
   await counts(4, 2);
+  await page.getByRole('status').filter({ hasText: '배치 완료' }).waitFor();
+  assert.equal(await page.evaluate(() => window.controlProbe.lastIndices[0]), 12, 'disabled arrows must submit only two triangles per edge');
   await page.getByRole('checkbox', { name: '태그', exact: true }).check(); await counts(5, 3);
   await page.getByRole('checkbox', { name: '첨부 파일', exact: true }).check(); await counts(7, 5);
   await page.getByRole('checkbox', { name: '존재하는 파일만 표시', exact: true }).check(); await counts(6, 4);
@@ -56,12 +63,14 @@ try {
   assert.equal(await page.evaluate(() => window.controlProbe.graphPosts), graphPosts, 'appearance edits must not rebuild physics');
   await slider('중심 장력', 1); await slider('반발력', 2000); await slider('링크 장력', 0.5); await slider('링크 거리', 300);
   await page.getByRole('status').filter({ hasText: '배치 완료' }).waitFor();
+  assert.equal(await page.evaluate(() => window.controlProbe.lastIndices[0]), 36, 'enabled arrows add one triangle per edge');
   await page.getByRole('button', { name: '그래프 설정 닫기', exact: true }).click();
   const before = await page.locator('.graph-stage canvas').screenshot();
   await page.getByRole('button', { name: '그래프 설정 열기', exact: true }).click();
   await page.getByRole('checkbox', { name: '화살표', exact: true }).uncheck();
   await page.getByRole('button', { name: '그래프 설정 닫기', exact: true }).click();
   const after = await page.locator('.graph-stage canvas').screenshot();
+  assert.equal(await page.evaluate(() => window.controlProbe.lastIndices[0]), 24, 'disabling arrows restores the original edge geometry');
   assert.notDeepEqual(before, after, 'arrow toggle must alter actual rendered canvas');
   await page.getByRole('button', { name: '그래프 설정 열기', exact: true }).click();
   await page.getByRole('checkbox', { name: '화살표', exact: true }).check();

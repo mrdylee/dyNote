@@ -1,0 +1,33 @@
+{
+  "reports": [
+    {
+      "frames": 152,
+      "renderP95": 0.9000000953674316,
+      "inputP95": 6.799999952316284,
+      "heap": 34775934,
+      "canvas": [
+        1000,
+        700
+      ],
+      "hash": "b4b934ad89bb5103aa198cb939e48c65df90c85080d459c3ed4195a3fefd5dc5",
+      "version": "0.5.0",
+      "count": 1000,
+      "errors": []
+    },
+    {
+      "frames": 152,
+      "renderP95": 0.5,
+      "inputP95": 5.900000095367432,
+      "heap": 27584349,
+      "canvas": [
+        1000,
+        700
+      ],
+      "hash": "b4b934ad89bb5103aa198cb939e48c65df90c85080d459c3ed4195a3fefd5dc5",
+      "version": "0.6.1",
+      "count": 1000,
+      "errors": []
+    }
+  ],
+  "note": "Sequential app runs (current means development Electron), identical generated notes and 1000x700 canvas. Render callback excludes GPU completion; synthetic input excludes OS latency. Single run."
+}

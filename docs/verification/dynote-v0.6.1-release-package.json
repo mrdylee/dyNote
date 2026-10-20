@@ -1,0 +1,22 @@
+{
+  "version": "0.6.1",
+  "packages": [
+    {
+      "platform": "darwin-arm64",
+      "asarSha256": "5b8d08a663d8427d8a1e77fbc1ec553b897340e158f5ac13b5bc39f628aac572",
+      "matchedSourceAndBundleFiles": 205,
+      "wasmSha256": "ee88364630bb6d9fe828544e988e9e50531856bdfac6510d997a2278b483c468",
+      "copilotRuntimeIncluded": true
+    },
+    {
+      "platform": "win32-x64",
+      "asarSha256": "d8d288b39b9aa6332a31e6c772fa55b76a6c88f57d279d309e29f91280a50092",
+      "matchedSourceAndBundleFiles": 205,
+      "wasmSha256": "ee88364630bb6d9fe828544e988e9e50531856bdfac6510d997a2278b483c468",
+      "copilotRuntimeIncluded": true
+    }
+  ],
+  "windowsRuntimeTested": false,
+  "distributionSigned": false,
+  "notarized": false
+}

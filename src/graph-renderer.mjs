@@ -2,6 +2,7 @@ import { Application, Buffer, BufferUsage, Container, Geometry, Graphics, Mesh, 
 // Pixi's CSP polyfill replaces generated JavaScript with ordinary functions.
 import "pixi.js/unsafe-eval";
 import { graphReplayOrder } from "../core/graph.mjs";
+import { graphLabelAlpha } from "../core/graph-options.mjs";
 import { screenToWorld, zoomAt, segmentVisible } from "../core/graph-camera.mjs";
 
 export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, onCamera = () => {}, onReplay = () => {} }) {
@@ -32,6 +33,25 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
   const invalidate = () => { if (!destroyed && frame === null) frame = requestAnimationFrame(draw); };
   const cameraChanged = () => { onCamera(camera.zoom); invalidate(); };
   const destroyEdges = () => { edgeMesh?.destroy(); geometry?.destroy(true); shader?.destroy(); edgeMesh = geometry = shader = null; };
+  let edgeStride = 4;
+  function createEdges() {
+    destroyEdges(); edgeStride = display.arrows ? 7 : 4;
+    const indexStride = display.arrows ? 9 : 6;
+    if (graph.links.length) {
+      vertices = new Float32Array(graph.links.length * edgeStride); colors = new Float32Array(graph.links.length * edgeStride * 2);
+      const indices = new Uint32Array(graph.links.length / 2 * indexStride);
+      for (let i = 0; i < graph.links.length / 2; i++) {
+        const v = i * edgeStride;
+        indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i * indexStride);
+        if (display.arrows) indices.set([v + 4, v + 5, v + 6], i * indexStride + 6);
+      }
+      positionBuffer = new Buffer({ data: vertices, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+      colorBuffer = new Buffer({ data: colors, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+      geometry = new Geometry({ attributes: { aPosition: { buffer: positionBuffer, format: "float32x2" }, aColor: { buffer: colorBuffer, format: "float32x4" } }, indexBuffer: indices });
+      shader = Shader.from({ gl: { vertex: "in vec2 aPosition; in vec4 aColor; out vec4 vColor; void main(){ gl_Position=vec4(aPosition,0.,1.); vColor=aColor; }", fragment: "in vec4 vColor; out vec4 finalColor; void main(){ finalColor=vColor; }" } });
+      edgeMesh = new Mesh({ geometry, shader }); app.stage.addChildAt(edgeMesh, 0);
+    }
+  }
   const finishDrag = (open = false) => {
     const previous = drag; drag = null;
     if (!previous) return;
@@ -47,7 +67,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     const progress = replayState ? Math.min(1, (performance.now() - replayState.start) / 4000) : 1;
     const revealed = (i) => !replayState || progress >= 1 || replayState.order[i] <= Math.floor(progress * (replayState.last + 1));
     if (replayState && progress >= 1) { replayState = null; onReplay(false); }
-    const labelAlpha = Math.max(0, Math.min(1, Math.log2(camera.zoom) + 1 - display.labelThreshold));
+    const labelAlpha = graphLabelAlpha(camera.zoom, display.labelThreshold);
     const end = Math.min(graph.nodes.length, sprites.length + 300);
     for (let i = sprites.length; i < end; i++) {
       const sprite = new Sprite(texture); sprite.anchor.set(0.5); dots.addChild(sprite); sprites.push(sprite);
@@ -70,7 +90,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     // One indexed GPU mesh for all edges, without per-edge scene objects.
     if (geometry) {
       for (let e = 0; e < graph.links.length; e += 2) {
-        const a = graph.links[e], b = graph.links[e + 1], offset = e * 7;
+        const a = graph.links[e], b = graph.links[e + 1], offset = e * edgeStride;
         const x1 = screen[2 * a], y1 = screen[2 * a + 1], x2 = screen[2 * b], y2 = screen[2 * b + 1];
         const visible = revealed(a) && revealed(b) && segmentVisible(x1, y1, x2, y2, width, height);
         const length = Math.max(0.001, Math.hypot(x2 - x1, y2 - y1));
@@ -80,17 +100,25 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
         vertices[offset + 4] = (x2 - nx) / width * 2 - 1; vertices[offset + 5] = 1 - (y2 - ny) / height * 2;
         vertices[offset + 6] = (x2 + nx) / width * 2 - 1; vertices[offset + 7] = 1 - (y2 + ny) / height * 2;
         // Arrowheads share the edge mesh: no per-link display objects.
-        const ux = (x2 - x1) / length, uy = (y2 - y1) / length;
-        const radius = Math.max(1.5, (4 + Math.min(6, Math.sqrt(graph.nodes[b].degree))) * display.nodeSize * camera.zoom) + 2;
-        const tipX = x2 - ux * radius, tipY = y2 - uy * radius;
-        const arrowSize = Math.max(5, display.lineWidth * 3);
-        const points = [tipX, tipY, tipX - ux * arrowSize - uy * arrowSize * 0.5, tipY - uy * arrowSize + ux * arrowSize * 0.5, tipX - ux * arrowSize + uy * arrowSize * 0.5, tipY - uy * arrowSize - ux * arrowSize * 0.5];
-        for (let v = 0; v < 3; v++) { vertices[offset + 8 + v * 2] = points[v * 2] / width * 2 - 1; vertices[offset + 9 + v * 2] = 1 - points[v * 2 + 1] / height * 2; }
+        let showArrow = false;
+        if (display.arrows) {
+          const ux = (x2 - x1) / length, uy = (y2 - y1) / length;
+          const radius = Math.max(1.5, (4 + Math.min(6, Math.sqrt(graph.nodes[b].degree))) * display.nodeSize * camera.zoom) + 2;
+          const tipX = x2 - ux * radius, tipY = y2 - uy * radius;
+          const arrowSize = Math.max(5, display.lineWidth * 3);
+          showArrow = camera.zoom >= 0.5 && length > radius * 2 + arrowSize;
+          vertices[offset + 8] = tipX / width * 2 - 1;
+          vertices[offset + 9] = 1 - tipY / height * 2;
+          vertices[offset + 10] = (tipX - ux * arrowSize - uy * arrowSize * 0.5) / width * 2 - 1;
+          vertices[offset + 11] = 1 - (tipY - uy * arrowSize + ux * arrowSize * 0.5) / height * 2;
+          vertices[offset + 12] = (tipX - ux * arrowSize + uy * arrowSize * 0.5) / width * 2 - 1;
+          vertices[offset + 13] = 1 - (tipY - uy * arrowSize - ux * arrowSize * 0.5) / height * 2;
+        }
         const focused = a === focus || b === focus;
         const opacity = visible ? focused ? 0.65 : focus !== undefined && focus >= 0 ? 0.08 : 0.20 : 0;
-        for (let v = 0; v < 7; v++) {
-          const c = (e / 2 * 7 + v) * 4;
-          const alpha = v < 4 || (display.arrows && camera.zoom >= 0.5 && length > radius * 2 + arrowSize) ? opacity : 0;
+        for (let v = 0; v < edgeStride; v++) {
+          const c = (e / 2 * edgeStride + v) * 4;
+          const alpha = v < 4 || showArrow ? opacity : 0;
           colors[c] = 0.55 * alpha; colors[c + 1] = 0.43 * alpha; colors[c + 2] = 0.68 * alpha; colors[c + 3] = alpha;
         }
       }
@@ -183,19 +211,10 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
       finishDrag(); graph = next; hover = -1; autoFit = true; nodeColors = [];
       if (replayState) { replayState = null; onReplay(false); }
       sprites.forEach((sprite) => sprite.destroy()); sprites = [];
-      texts.forEach((text) => text.destroy()); texts = []; destroyEdges();
+      texts.forEach((text) => text.destroy()); texts = [];
       positions = new Float32Array(next.nodes.length * 2); screen = new Float32Array(positions.length);
       for (let i = 0; i < next.nodes.length; i++) { positions[2 * i] = Math.cos(i * 2.399963229728653) * Math.sqrt(i + 1) * 25; positions[2 * i + 1] = Math.sin(i * 2.399963229728653) * Math.sqrt(i + 1) * 25; }
-      if (next.links.length) {
-        vertices = new Float32Array(next.links.length * 7); colors = new Float32Array(next.links.length * 14);
-        const indices = new Uint32Array(next.links.length / 2 * 9);
-        for (let i = 0; i < next.links.length / 2; i++) indices.set([7 * i, 7 * i + 1, 7 * i + 2, 7 * i, 7 * i + 2, 7 * i + 3, 7 * i + 4, 7 * i + 5, 7 * i + 6], i * 9);
-        positionBuffer = new Buffer({ data: vertices, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
-        colorBuffer = new Buffer({ data: colors, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
-        geometry = new Geometry({ attributes: { aPosition: { buffer: positionBuffer, format: "float32x2" }, aColor: { buffer: colorBuffer, format: "float32x4" } }, indexBuffer: indices });
-        shader = Shader.from({ gl: { vertex: "in vec2 aPosition; in vec4 aColor; out vec4 vColor; void main(){ gl_Position=vec4(aPosition,0.,1.); vColor=aColor; }", fragment: "in vec4 vColor; out vec4 finalColor; void main(){ finalColor=vColor; }" } });
-        edgeMesh = new Mesh({ geometry, shader }); app.stage.addChildAt(edgeMesh, 0);
-      }
+      createEdges();
       fit();
       return positions.slice();
     },
@@ -210,7 +229,12 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     },
     stopReplay() { if (replayState) { replayState = null; onReplay(false); invalidate(); } },
     setActive(id) { active = id; invalidate(); },
-    setDisplay(next) { display = { ...display, ...next }; invalidate(); },
+    setDisplay(next) {
+      const arrows = display.arrows;
+      display = { ...display, ...next };
+      if (graph && arrows !== display.arrows) createEdges();
+      invalidate();
+    },
     setFont(next) { labelFont = next; texts.forEach((text) => { text.style.fontFamily = next; }); invalidate(); },
     fit, zoom,
     destroy() {

@@ -1,0 +1,47 @@
+{
+  "reports": [
+    {
+      "frames": 152,
+      "renderP95": 3,
+      "inputP95": 15.099999904632568,
+      "heap": 130760549,
+      "canvas": [
+        1000,
+        700
+      ],
+      "hash": "b5c800a50b827d2c57c1e22a798b552458db5fb35a514b01664dea5e1528d70d",
+      "version": "0.5.0",
+      "count": 10000,
+      "errors": []
+    },
+    {
+      "frames": 152,
+      "renderP95": 3,
+      "inputP95": 15.700000047683716,
+      "heap": 126967162,
+      "canvas": [
+        1000,
+        700
+      ],
+      "hash": "b5c800a50b827d2c57c1e22a798b552458db5fb35a514b01664dea5e1528d70d",
+      "version": "0.6.0",
+      "count": 10000,
+      "errors": []
+    },
+    {
+      "frames": 152,
+      "renderP95": 2.9000000953674316,
+      "inputP95": 15.700000047683716,
+      "heap": 140587140,
+      "canvas": [
+        1000,
+        700
+      ],
+      "hash": "b5c800a50b827d2c57c1e22a798b552458db5fb35a514b01664dea5e1528d70d",
+      "version": "current",
+      "count": 10000,
+      "errors": []
+    }
+  ],
+  "note": "Sequential app runs (current means development Electron), identical generated notes and 1000x700 canvas. Render callback excludes GPU completion; synthetic input excludes OS latency. Single run."
+}

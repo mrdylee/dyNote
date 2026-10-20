@@ -73,3 +73,17 @@ test("replay without timestamps still reveals synthetic nodes with their owning 
   const ranks = graph.graphReplayOrder(g);
   for (let i = 0; i < g.nodes.length; i++) if (['tag', 'missing'].includes(g.nodes[i].type)) assert.equal(ranks[i], ranks[g.index.get('A.md')]);
 });
+test("default graph labels retain readability at medium zoom and old settings retain opacity", async () => {
+  const { graphLabelAlpha, normalizeGraphSettings } = await import('../core/graph-options.mjs');
+  assert.equal(typeof graphLabelAlpha, 'function');
+  assert.ok(graphLabelAlpha(0.4, 0) >= 0.24);
+  for (const labels of [0.5, 1, 2, 3]) {
+    const { labelThreshold } = normalizeGraphSettings({ labels });
+    for (const zoom of [0.1, 0.3, 0.4, 0.6, 1, 2]) {
+      const previous = Math.max(0, Math.min(1, (zoom * labels - 0.28) * 2));
+      assert.ok(Math.abs(graphLabelAlpha(zoom, labelThreshold) - previous) < 1e-10);
+    }
+  }
+  assert.ok(graphLabelAlpha(0.4, -1) > graphLabelAlpha(0.4, 0));
+  assert.equal(graphLabelAlpha(0.4, 1), 0);
+});

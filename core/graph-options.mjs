@@ -1,4 +1,8 @@
 import { DEFAULT_FORCES } from "./graph-kernel.mjs";
+// Keep the previous default fade curve; increasing the threshold delays labels.
+export function graphLabelAlpha(zoom, threshold) {
+  return Math.max(0, Math.min(1, (zoom * 2 ** -threshold - 0.28) * 2));
+}
 export const GRAPH_RANGES = [
   ["center", "중심 장력", 0, 5, 0.1], ["repel", "반발력", 0, 10000, 100],
   ["link", "링크 장력", 0, 2, 0.05], ["distance", "링크 거리", 10, 1000, 10],
