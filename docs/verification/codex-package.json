@@ -1,0 +1,10 @@
+{
+  "platform": "darwin-arm64",
+  "version": "0.4.1",
+  "unpublishedDevelopmentBuild": true,
+  "matchedSourceAndBundleFiles": 205,
+  "asarSha256": "240138a886ade84c279950a68521638b876edc0b5fae8587716136ea3ad58fb7",
+  "copilotRuntimeIncluded": true,
+  "codexRuntime": "installed native CLI; not bundled",
+  "windowsBuiltThisChange": false
+}

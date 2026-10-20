@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "Electron app discovers native Codex CLI and shows isolated ChatGPT login",
+    "Provider switch clears conversation and context; Copilot receives no Codex dialogue",
+    "Codex uses its saved model, sends selection only, reviews edits and preserves CRLF/undo",
+    "Pending request prevents provider switch; stop retains the question"
+  ],
+  "errors": [],
+  "liveModelResponseVerified": false,
+  "liveAccountLoginVerified": false,
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "electron": "44.9.0"
+  }
+}

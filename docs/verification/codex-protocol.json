@@ -1,0 +1,15 @@
+{
+  "liveAccountLoginVerified": false,
+  "liveModelResponseVerified": false,
+  "checks": [
+    "Native CLI starts with isolated app home and no existing account",
+    "Native browser login URL passes allowlist; flow canceled without opening browser",
+    "Ephemeral no-environment thread reaches only the local fixture backend",
+    "Actual native runtime exposes no file, shell, browser, connector or agent tools",
+    "Native streaming and successful turn completion confirmed with synthetic answer"
+  ],
+  "modelVisibleTools": [
+    "update_plan",
+    "request_user_input"
+  ]
+}

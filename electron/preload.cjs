@@ -14,6 +14,16 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:copilot-event", listener);
       return () => ipcRenderer.removeListener("notes:copilot-event", listener);
     },
+    codexStatus: () => call("codex-status"),
+    codexLogin: () => call("codex-login"),
+    codexCancelLogin: () => call("codex-cancel-login"),
+    codexSend: (args) => call("codex-send", args),
+    codexCancel: (args) => call("codex-cancel", args),
+    onCodexEvent: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:codex-event", listener);
+      return () => ipcRenderer.removeListener("notes:codex-event", listener);
+    },
     pickVault: () => call("pick-vault"),
     vaults: () => call("vaults"),
     selectVault: (args) => call("select-vault", args),

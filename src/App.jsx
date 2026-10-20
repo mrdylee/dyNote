@@ -187,6 +187,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [rightTab, setRightTab] = useState("copilot");
+  const [aiProvider, setAiProvider] = useState(() => { try { return localStorage.getItem("dynote.ai.provider") === "codex" ? "codex" : "copilot"; } catch { return "copilot"; } });
   const [editorSelection, setEditorSelection] = useState(null);
   const editorView = useRef(null);
   const [status, setStatus] = useState("saved");
@@ -978,7 +979,7 @@ export default function App() {
                 </div>
               )}
               <IconButton
-                label="Copilot 채팅 열기"
+                label="AI 채팅 열기"
                 active={right && rightTab === "copilot"}
                 onClick={() => { setRight(true); setRightTab("copilot"); }}
               >
@@ -1152,9 +1153,11 @@ export default function App() {
                 <List size={14} />
                 문서 정보
               </button>
-              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />Copilot</button>
+              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />AI 채팅</button>
             </div>
-            <CopilotPanel key={vault.id ?? "missing"} api={api} vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
+            <CopilotPanel key={`${vault.id ?? "missing"}:${aiProvider}`} api={api} provider={aiProvider}
+              onProviderChange={(value) => { setAiProvider(value); try { localStorage.setItem("dynote.ai.provider", value); } catch { /* Keep the choice in memory. */ } }}
+              vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
               selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
               onReview={() => { if (mode === "read") setMode("edit"); }}
               onApply={async (proposal) => {

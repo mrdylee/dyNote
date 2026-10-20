@@ -35,7 +35,7 @@ export function applyProposal(target, current, replacement) {
 
 export function prepareRequest(args) {
   if (!args || typeof args.requestId !== "string" || !/^[\w-]{1,80}$/.test(args.requestId) || typeof args.vaultId !== "string")
-    throw new Error("잘못된 Copilot 요청입니다.");
+    throw new Error("잘못된 AI 요청입니다.");
   const prompt = bounded(args.prompt, 8192, "질문은 8 KiB 이내로 입력해 주세요.").trim();
   if (!prompt) throw new Error("질문을 입력해 주세요.");
   const model = bounded(args.model, 200, "모델을 선택해 주세요.");

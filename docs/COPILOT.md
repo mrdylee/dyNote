@@ -1,6 +1,6 @@
 # Copilot in Dynote
 
-Open the **Copilot** tab in the right panel. The sparkle button in the document
+Open **AI 채팅** in the right panel and select **GitHub Copilot**. The sparkle button in the document
 toolbar opens it again when the panel is closed. The document outline and
 backlinks remain available under **문서 정보**.
 

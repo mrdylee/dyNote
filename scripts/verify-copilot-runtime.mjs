@@ -23,7 +23,7 @@ try {
   page.on("pageerror", (e) => report.errors.push(e.message));
   report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, electron: process.versions.electron }));
   await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1050, 700); });
-  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), true);
   const first = await page.evaluate(() => window.notes.copilotStatus());
   assert.equal(first.ok, true, first.error);
@@ -33,7 +33,7 @@ try {
   report.checks.push("Real SDK starts from this Electron app and reports authentication state");
   await page.getByRole("tab", { name: "문서 정보", exact: true }).click();
   assert.equal(await page.getByRole("region", { name: "Copilot 채팅" }).isVisible(), false);
-  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
+  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
   await page.screenshot({ path: "output/playwright/copilot-connect.png" });
 
   // Only the transport is replaced. Rendering, selection, IPC, save queue,
