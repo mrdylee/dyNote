@@ -2,17 +2,17 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.4.0은 [Live Preview 1단계](docs/LIVE-PREVIEW.md), 설치 글꼴 선택, 기본 10분 간격의 Git 자동 저장을 추가한 프리릴리스입니다. 기존 그래프·Canvas·Bases 기본 기능을 포함합니다. [릴리스 변경사항](docs/RELEASE-NOTES-0.4.0.md)과 [검증 기록](docs/RELEASE-REVIEW-0.4.0.md)을 확인하세요.
+v0.4.1은 설치 글꼴 목록을 끝까지 스크롤하고 이름으로 검색할 수 있도록 수정한 프리릴리스입니다. [Live Preview 1단계](docs/LIVE-PREVIEW.md), 기본 10분 간격의 Git 자동 저장, 그래프·Canvas·Bases 기본 기능을 포함합니다. [릴리스 변경사항](docs/RELEASE-NOTES-0.4.1.md)과 [검증 기록](docs/RELEASE-REVIEW-0.4.1.md)을 확인하세요.
 
 ## 실행
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.4.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.4.1/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.4.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.4.1/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -48,7 +48,7 @@ npm start
 - 체크박스 클릭 저장, 콜아웃·각주·수식·Mermaid, 순환·깊이를 제한한 문서 삽입
 - 링크 없는 언급, 그래프의 경로·태그 필터와 현재 문서 주변의 연결 깊이
 - Canvas 카드 편집과 Bases 기본 표·속성 편집: [사용법과 지원 범위](docs/CANVAS-BASES.md)
-- 설치 글꼴 선택: 화면·본문·코드별 글꼴과 크기, 본문 줄 간격, 설정 유지
+- 설치 글꼴 선택: 검색·스크롤·키보드 탐색, 화면·본문·코드별 글꼴과 크기, 본문 줄 간격, 설정 유지
 - 노트 전용 Git 저장소 연결·가져오기, 주기적 커밋·업로드: [글꼴 및 Git 설정](docs/FONTS-GIT.md)
 
 폴더를 바꾸거나 앱을 닫을 때도 저장 대기 중인 초안을 먼저 처리합니다. 저장에 실패하면 초안을 열린 창에 유지합니다. **초안은 앱 강제 종료나 프로세스 충돌까지 보존하는 별도 저장소는 아닙니다.** 저장 충돌 안내가 나오면 내용을 복사한 뒤 문서 새로고침을 선택하세요.

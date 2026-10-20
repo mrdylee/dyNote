@@ -1,0 +1,49 @@
+{
+  "version": "0.4.1",
+  "packages": [
+    {
+      "platform": "darwin-arm64",
+      "asarSha256": "e99cf815d2a41c64c6de9b5e394fe9777f76022df494a5105a6f63a3a0a3fdcd",
+      "matchedSourceAndBundleFiles": 198,
+      "wasmSha256": "ee88364630bb6d9fe828544e988e9e50531856bdfac6510d997a2278b483c468",
+      "nativeNodeAddonsIncluded": false
+    },
+    {
+      "platform": "win32-x64",
+      "asarSha256": "e99cf815d2a41c64c6de9b5e394fe9777f76022df494a5105a6f63a3a0a3fdcd",
+      "matchedSourceAndBundleFiles": 198,
+      "wasmSha256": "ee88364630bb6d9fe828544e988e9e50531856bdfac6510d997a2278b483c468",
+      "nativeNodeAddonsIncluded": false
+    }
+  ],
+  "windowsRuntimeTested": false,
+  "distributionSigned": false,
+  "notarized": false,
+  "windowsRuntimeByteMatchedFiles": 71,
+  "windowsExecutableFormat": "PE32+ Windows GUI x86-64",
+  "archives": [
+    {
+      "name": "Dynote-0.4.1-mac-arm64.zip",
+      "bytes": 208672378,
+      "sha256": "ff8e5ccae805c5268af8b2ecfe3299e876ac7d9c7a89c1b41cf93f384a963d36",
+      "files": 1165,
+      "zipIntegrity": "passed"
+    },
+    {
+      "name": "Dynote-0.4.1-windows-x64.zip",
+      "bytes": 239989461,
+      "sha256": "669db9a477e83e38bb09d8ce42cb905fffaf341715b21948423b9a99bc0b9cc3",
+      "files": 76,
+      "zipIntegrity": "passed"
+    }
+  ],
+  "tests": {
+    "passed": 99,
+    "failed": 0
+  },
+  "dependencyAuditKnownVulnerabilities": 0,
+  "macRuntimeTested": true,
+  "runtimeReports": [
+    "dynote-v0.4.1-settings-runtime.json"
+  ]
+}
