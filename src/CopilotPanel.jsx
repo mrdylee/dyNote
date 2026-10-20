@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip } from "lucide-react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import DiagramPreview from "./DiagramPreview.jsx";
 import { captureContext, applyProposal, prepareRequest } from "../core/copilot.mjs";
 
 const invoke = async (promise) => {
@@ -73,7 +74,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       }
       if (event.type === "done") {
         if (request.mode === "edit") setProposals([{ id: request.requestId, kind: "edit", path: request.target.path, target: request.target, content: event.content }]);
-        setPrompt((text) => text === request.prompt ? "" : text);
+        setPrompt((text) => text === request.inputPrompt ? "" : text);
       }
       if (event.type === "tool") setProgress((old) => [...old, event.message].slice(-24));
       if (event.type === "proposal") {
@@ -126,9 +127,10 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
+  const canSend = connection.authenticated && model && prompt.trim() && !checking && !authBusy && !busy && !applying && vaultId;
   const send = async (event) => {
     event?.preventDefault();
-    if (running || checking || authBusy || busy || applying) return;
+    if (pending.current || running || !canSend) return;
     try {
       const { context, target } = captureContext({ vaultId, note, scope, selection });
       const requestId = crypto.randomUUID();
@@ -140,7 +142,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       });
       const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
-      pending.current = { ...args, target };
+      pending.current = { ...args, target, inputPrompt: prompt };
       setMessages((old) => [...old,
         { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },
         { id: requestId, role: "assistant", content: "", complete: false, mode },
@@ -182,10 +184,6 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       {auth && <p role="status" className={`copilot-auth ${auth.phase === "error" ? "failed" : ""}`}>{auth.message}</p>}
       {authBusy && <button className="text-action" onClick={() => invoke(ai.cancelLogin()).catch((e) => setError(e.message))}>로그인 취소</button>}
       {connection.authenticated && <button className="text-action" disabled={running || checking || authBusy} onClick={login}>계정 다시 연결</button>}
-      {connection.authenticated && <label className="copilot-model">모델<select aria-label={`${label} 모델`} value={model} disabled={running || checking} onChange={(e) => setModel(e.target.value)}>
-        <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
-        {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select></label>}
     </div>
     <div className="copilot-chat-heading"><span>노트 어시스턴트</span><button aria-label={`${label} 새 대화`} disabled={running || applying} onClick={newConversation}><Plus size={14} />새 대화</button></div>
     <div className="copilot-transcript" ref={transcript} role="log" aria-label={`${label} 대화`}>
@@ -194,7 +192,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       </div>}
       {messages.map((m) => <article className={`copilot-message ${m.role}`} key={m.id}>
         <strong>{m.role === "user" ? "나" : m.mode === "edit" ? `${label} · 수정안` : label}</strong>
-        {m.role === "assistant" && m.content ? <div className="copilot-message-content markdown-answer" dangerouslySetInnerHTML={{ __html: answerHtml(m.content) }} />
+        {m.role === "assistant" && m.content ? <DiagramPreview className="copilot-message-content markdown-answer" html={answerHtml(m.content)} renderDiagrams={m.complete} />
           : <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>}
       </article>)}
       {!!progress.length && <details className="copilot-progress" open={running}><summary>문서 작업 · {progress.length}단계{running ? " · 진행 중" : ""}</summary>
@@ -208,16 +206,12 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     </div>
     {error && !review && <p className="copilot-error" role="alert">{error}</p>}
     <form className="copilot-composer" onSubmit={send}>
-      <div className="copilot-options">
-        <label>보낼 내용<select aria-label={`${label} 전달 범위`} value={scope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
+      <div className="copilot-context-row">
+        <select aria-label={`${label} 전달 범위`} title="Copilot에 보낼 내용" value={scope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
           <option value="none">문서 없음</option><option value="document" disabled={!note}>현재 문서</option><option value="selection" disabled={!note}>선택 영역</option>
-        </select></label>
-        <label>작업<select aria-label={`${label} 작업`} value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
-          <option value="agent">Agent · 문서 작업</option>
-          <option value="chat">질문하기</option><option value="edit" disabled={scope === "none" || !note}>수정 제안</option>
-        </select></label>
+        </select>
+        <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "현재 문서는 보내지 않습니다" : note?.path ?? "문서를 열어 주세요"}</div>
       </div>
-      <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "현재 문서는 보내지 않습니다" : `${scope === "selection" ? "선택 영역" : "현재 문서"} · ${note?.path ?? "문서를 열어 주세요"}`}</div>
       <div className="copilot-attachments">
         <button type="button" disabled={running || applying} onClick={() => setAttachmentsOpen(!attachmentsOpen)}><Paperclip size={12} />참고 문서 {references.length}/5</button>
         {references.map((path) => <button type="button" className="attachment-chip" key={path} disabled={running} title="첨부 제거" onClick={() => setReferences((old) => old.filter((p) => p !== path))}>{path} ×</button>)}
@@ -228,13 +222,23 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
         {mode === "agent" && <label className="copilot-vault-access"><input type="checkbox" checked={vaultAccess} disabled={running} onChange={(e) => setVaultAccess(e.target.checked)} />보관함 검색·읽기 허용</label>}
         {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 Copilot에 전송됩니다.</small>}
       </div>
-      <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
-      <div className="copilot-send-row"><span>선택한 내용과 대화가 {label}에 전송됩니다.</span>
-        {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message))}><Square size={15} />중지</button>
-          : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!connection.authenticated || !model || !prompt.trim() || checking || authBusy || busy || applying || !vaultId}><ArrowUp size={16} /></button>}
+      <div className="copilot-input-box">
+        <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) send(); } }} />
+        <div className="copilot-send-row">
+          <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
+            <option value="agent">Agent</option><option value="chat">Ask</option><option value="edit" disabled={scope === "none" || !note}>Edit</option>
+          </select>
+        {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking} onChange={(e) => setModel(e.target.value)}>
+          <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
+          {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select></label>}
+          {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message))}><Square size={15} />중지</button>
+            : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!canSend}><ArrowUp size={16} /></button>}
+        </div>
       </div>
-      <small className="copilot-allowance">계정의 Copilot 사용량 한도가 적용됩니다.</small>
+      <small className="copilot-shortcuts">Enter 전송 · Shift+Enter 줄바꿈</small>
+      <small className="copilot-allowance">선택한 내용과 대화가 전송되며 Copilot 사용량이 적용됩니다.</small>
     </form>
     {review && <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label={`${label} 수정안 확인`} className="modal wide copilot-review">
       <div className="modal-heading"><h2>수정안 확인</h2><button disabled={applying} onClick={() => setReview(null)}>닫기</button></div>

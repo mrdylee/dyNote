@@ -838,7 +838,7 @@ kbd {
 .context-panel.with-copilot { width: clamp(310px, 28vw, 390px); overflow: hidden; background: #fff; }
 .copilot-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; font-size: 12px; }
 .copilot-panel[hidden], .document-info[hidden] { display: none; }
-.copilot-connection { padding: 15px 16px 12px; border-bottom: 1px solid var(--border); }
+.copilot-connection { padding: 9px 14px; border-bottom: 1px solid var(--border); }
 .copilot-account { display: flex; align-items: center; gap: 7px; }
 .copilot-account strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .copilot-account button { border: 0; background: transparent; color: var(--muted); padding: 4px; }
@@ -847,9 +847,8 @@ kbd {
 .copilot-login .text-action { margin-left: 8px; margin-top: 8px; }
 .copilot-auth { font-size: 11px; line-height: 1.6; margin-bottom: 0; overflow-wrap: anywhere; }
 .copilot-auth.failed { color: #a44140; }
-.copilot-model { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); }
-.copilot-panel select { min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font: inherit; color: #4d4659; }
-.copilot-model select { flex: 1; width: 0; }
+.copilot-model { flex: 1; min-width: 0; }
+.copilot-model select { width: 100%; }
 .copilot-chat-heading { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px 4px; color: var(--muted); font-size: 10px; }
 .copilot-chat-heading button { display: flex; gap: 3px; align-items: center; background: transparent; border: 0; color: var(--muted); font-size: 10px; }
 .copilot-transcript { flex: 1; min-height: 80px; overflow: auto; padding: 12px 16px; scrollbar-width: thin; }
@@ -888,13 +887,20 @@ kbd {
 .copilot-proposal button { background: white; border: 1px solid #d2c6e5; border-radius: 6px; padding: 8px 10px; color: #6e5594; }
 .copilot-error { padding: 10px 16px; margin: 0; background: #fff5f3; color: #a44140; line-height: 1.6; overflow-wrap: anywhere; max-height: 110px; overflow: auto; }
 .copilot-composer { padding: 12px 14px 10px; border-top: 1px solid var(--border); background: #fcfbfe; flex-shrink: 0; }
-.copilot-options { display: flex; gap: 8px; }
-.copilot-options label { display: grid; gap: 5px; flex: 1; min-width: 0; font-size: 10px; color: var(--muted); }
-.copilot-context-label { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 10px; color: #9a8da9; padding: 10px 1px 7px; }
-.copilot-composer textarea { width: 100%; resize: vertical; max-height: 180px; min-height: 65px; border: 1px solid #ded5e9; border-radius: 8px; padding: 10px; font: inherit; line-height: 1.6; background: white; }
-.copilot-composer textarea:focus { outline: 2px solid #c4b1e8; outline-offset: 1px; }
+.copilot-context-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 8px; }
+.copilot-context-row select { flex-shrink: 0; max-width: 110px; }
+.copilot-context-label { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 10px; color: #9a8da9; }
+.copilot-context-row select, .copilot-send-row select { border: 0; border-radius: 5px; background: transparent; color: #75668d; font: inherit; font-size: 11px; padding: 5px 3px; cursor: pointer; text-overflow: ellipsis; }
+.copilot-send-row select:hover, .copilot-context-row select:hover { background: #f0ecf6; }
+.copilot-send-row select:focus-visible { outline: 2px solid #c4b1e8; }
+.markdown-answer .mermaid-diagram { overflow: auto; max-width: 100%; padding: 8px 0; }
+.markdown-answer .mermaid-diagram svg { display: block; max-width: 100%; height: auto; }
+.copilot-input-box { border: 1px solid #ded5e9; border-radius: 9px; background: white; padding: 3px; }
+.copilot-input-box:focus-within { outline: 2px solid #c4b1e8; outline-offset: 1px; }
+.copilot-composer textarea { display: block; width: 100%; resize: vertical; max-height: 180px; min-height: 65px; border: 0; border-radius: 6px; padding: 7px; font: inherit; line-height: 1.6; background: transparent; }
+.copilot-composer textarea:focus { outline: none; }
 .copilot-send-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-top: 7px; }
-.copilot-send-row > span { color: #9b91a5; font-size: 9px; line-height: 1.5; }
+.copilot-shortcuts { display: block; margin-top: 8px; font-size: 10px; color: #9b91a5; }
 .copilot-send-row button { display: flex; gap: 4px; align-items: center; justify-content: center; flex-shrink: 0; padding: 8px 10px; border-radius: 7px; }
 .copilot-allowance { display: block; color: #aaa1b3; font-size: 9px; margin-top: 7px; }
 .copilot-review { max-height: 85vh; overflow: auto; padding: 24px; }

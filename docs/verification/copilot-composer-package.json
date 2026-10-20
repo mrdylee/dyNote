@@ -1,0 +1,8 @@
+{
+  "asar": "output/copilot-composer-20261020/Dynote-darwin-arm64/Dynote.app/Contents/Resources/app.asar",
+  "sha256": "b041c90a306a638cd7e2c922e106d7e1b07710df36df84b897c738e9fe43ed34",
+  "matchedFiles": 204,
+  "installedPath": "/Applications/Dynote.app",
+  "installedSha256": "b041c90a306a638cd7e2c922e106d7e1b07710df36df84b897c738e9fe43ed34",
+  "backupPath": "/Users/james_black/work/project/REA/open-notes/output/installed-before-composer-20261020/Dynote.app"
+}

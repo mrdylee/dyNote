@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import DOMPurify from "dompurify";
 let serial = 0;
-export default function DiagramPreview({ html, onClick, previewRef }) {
+export default function DiagramPreview({ html, onClick, previewRef, className = "markdown-preview", renderDiagrams = true }) {
   const own = useRef(null);
   useEffect(() => {
+    if (!renderDiagrams) return;
     let disposed = false;
     const root = own.current;
     const blocks = [...root.querySelectorAll("code.language-mermaid")];
@@ -47,14 +48,14 @@ export default function DiagramPreview({ html, onClick, previewRef }) {
     return () => {
       disposed = true;
     };
-  }, [html]);
+  }, [html, renderDiagrams]);
   return (
     <article
       ref={(node) => {
         own.current = node;
         if (previewRef) previewRef.current = node;
       }}
-      className="markdown-preview"
+      className={className}
       onClick={onClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />

@@ -25,11 +25,11 @@ GitHub.com sign-in, not the SDK's Enterprise Cloud or Entra login paths.
 - **선택 영역:** sends only selected text from the source/Live Preview editor.
   It does not send the rest of that note. Explicit attachments and optionally
   allowed vault search/read can provide other notes.
-- **질문하기:** displays a streamed text response.
-- **수정 제안:** asks for replacement Markdown for the selected scope. Review
+- **Ask (질문):** displays a streamed text response.
+- **Edit (수정 제안):** asks for replacement Markdown for the selected scope. Review
   **변경 내용 확인**, then click **문서에 적용**. The normal editor undo command
   can undo this edit. Applying uses local autosave and the existing Git schedule.
-- **Agent · 문서 작업** (Copilot): reads the current snapshot, then prepares
+- **Agent (문서 작업)** (Copilot): reads the current snapshot, then prepares
   append/prepend/replacement or new-note proposals using Dynote tools. Ask
   “현재 문서 끝에 시험 체크리스트를 추가해 줘” or “참고 문서를 요약해서 새 문서로 만들어 줘”.
   Review each proposal, then apply or discard it. New notes open in the center
@@ -41,9 +41,9 @@ GitHub.com sign-in, not the SDK's Enterprise Cloud or Entra login paths.
 
 Agent mode stages changes; it never writes files autonomously. New-note creation
 rejects existing paths. Markdown replies render formatting and code blocks;
-remote images and navigation links are not activated.
+remote images and navigation links are not activated. Markdown tables render in the chat. Completed fenced `mermaid` blocks render as sanitized SVG diagrams; while streaming they remain code. Invalid diagrams stay as readable source with a syntax hint.
 
-Ctrl/Cmd+Enter sends the question. **중지** cancels an active response and keeps
+**Enter** sends the question; **Shift+Enter** inserts a newline on Windows and macOS. IME composition Enter does not send. Agent/Ask/Edit and model selection (including Auto when available) are compact controls below the input. **중지** cancels an active response and keeps
 the prompt. Agent mode retains conversation/proposals when switching notes;
 Ask/edit mode clears them. Switching vaults or changing the context scope starts
 a new conversation. Closing the right panel cancels

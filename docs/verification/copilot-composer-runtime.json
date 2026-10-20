@@ -1,0 +1,55 @@
+{
+  "checks": [
+    "Enter sends exactly once; Shift+Enter adds newline; composing Enter and keyCode229 do not send; repeated Enter while running does not send",
+    "Completed Mermaid renders as sanitized SVG; streaming stays code; invalid diagram remains readable code; Markdown tables render; empty Enter does not send",
+    "At 1050x700 mode/model selectors sit below textarea; send button and transcript remain visible"
+  ],
+  "errors": [],
+  "transport": "deterministic IPC; no account or live model",
+  "windowsNative": false,
+  "geometry": {
+    "input": {
+      "x": 759,
+      "y": 534.9140625,
+      "right": 1032,
+      "bottom": 606.5,
+      "height": 71.5859375
+    },
+    "mode": {
+      "x": 759,
+      "y": 618,
+      "right": 816,
+      "bottom": 643,
+      "height": 25
+    },
+    "model": {
+      "x": 824,
+      "y": 618,
+      "right": 988,
+      "bottom": 643,
+      "height": 25
+    },
+    "send": {
+      "x": 996,
+      "y": 613.5,
+      "right": 1032,
+      "bottom": 647.5,
+      "height": 34
+    },
+    "panel": {
+      "x": 741,
+      "y": 95,
+      "right": 1050,
+      "bottom": 700,
+      "height": 605
+    },
+    "log": {
+      "x": 741,
+      "y": 197.5,
+      "right": 1050,
+      "bottom": 428.4140625,
+      "height": 230.9140625
+    },
+    "height": 700
+  }
+}
