@@ -1,0 +1,13 @@
+{
+  "platform": "darwin",
+  "baseline": {
+    "storedInKeychain": false,
+    "roundTrip": true
+  },
+  "fixed": {
+    "storedInKeychain": true,
+    "roundTrip": true
+  },
+  "restrictedSessionCreated": true,
+  "syntheticValuesRemoved": true
+}

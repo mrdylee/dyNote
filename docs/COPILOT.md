@@ -52,6 +52,11 @@ empty tool exposure, rejected permission requests, no configuration/skill/hook
 discovery, no host Git context or shared session store. Dynote exposes no
 arbitrary filesystem or command tools to the model.
 
+Desktop sign-in uses the SDK's `copilot-cli` client mode because SDK 1.0.23
+forcibly disables the OS keychain in `empty` mode. Dynote explicitly sets the
+restricted session defaults and clears installed plugins for both login and
+chat sessions. It still rejects plaintext credential storage.
+
 SDK sessions are temporary and deleted after each request. Dynote holds its
 visible dialogue in memory, and sends that bounded dialogue for subsequent
 questions. A runtime crash can leave temporary SDK files in Dynote's application
@@ -68,6 +73,12 @@ SDK startup/auth-status path, and deterministic chat responses injected only in
 the test process. Those injected responses do **not** prove live model access.
 The account authorization/model round trip requires a user-authenticated check.
 No Windows native execution is claimed by the macOS runtime checks.
+
+`scripts/verify-copilot-keychain.mjs` checks the native credential-store path
+with disposable synthetic data in an isolated SDK profile. It reproduces the
+old mode's failure to use the keychain, verifies the desktop mode's keychain
+round trip, and removes the synthetic entries. It does not use account tokens
+or authorize a GitHub account.
 
 Sources: [SDK](https://github.com/github/copilot-sdk),
 [authentication](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/authenticate).

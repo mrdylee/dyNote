@@ -47,6 +47,25 @@ test("sessions expose no tools, disable discovery and reject permissions", () =>
   assert.equal(options.infiniteSessions.enabled, false);
 });
 
+test("desktop SDK enables OS credential storage while retaining isolated session defaults", async () => {
+  const controller = new CopilotController({ directory: "/tmp/dynote-keychain-regression", onEvent() {}, openExternal() {} });
+  // Use the installed SDK's actual environment builder without starting a
+  // process, accessing credentials or contacting GitHub.
+  const client = await controller.createClient();
+  assert.notEqual(client.buildRuntimeEnv().COPILOT_DISABLE_KEYTAR, "1");
+  assert.equal(client.buildRuntimeEnv().COPILOT_HOME, controller.directory);
+  const options = sessionOptions(null, "chat");
+  assert.equal(options.enableExperimentalMode, false);
+  assert.equal(options.skipCustomInstructions, true);
+  assert.equal(options.customAgentsLocalOnly, true);
+  assert.equal(options.coauthorEnabled, false);
+  assert.equal(options.manageScheduleEnabled, false);
+  assert.deepEqual(options.includedBuiltinSkills, []);
+  assert.equal(options.mcpOAuthTokenStorage, "in-memory");
+  assert.equal(options.skipEmbeddingRetrieval, true);
+  assert.equal(options.embeddingCacheStorage, "in-memory");
+});
+
 test("login opens only GitHub HTTPS authorization URLs", () => {
   assert.equal(safeLoginUrl("https://github.com/login/oauth/authorize?client_id=public"), "https://github.com/login/oauth/authorize?client_id=public");
   for (const url of ["https://github.com.evil.test/login", "javascript:alert(1)", "http://github.com/login", "https://user:secret@github.com/login", "https://github.com/other"])
@@ -54,10 +73,11 @@ test("login opens only GitHub HTTPS authorization URLs", () => {
 });
 
 function fixture({ start, respond } = {}) {
-  const events = [], configurations = [], deleted = [];
+  const events = [], configurations = [], deleted = [], updates = [];
   let handler, aborted = 0;
   const session = {
     sessionId: "session-1",
+    rpc: { options: { update: async (options) => updates.push(options) } },
     on(fn) { handler = fn; return () => { handler = null; }; },
     async sendAndWait(args) {
       if (respond) return respond(args, (event) => handler?.(event));
@@ -75,7 +95,7 @@ function fixture({ start, respond } = {}) {
     stop: async () => {},
   };
   const controller = new CopilotController({ directory: "/tmp/dynote-controller-unit", createClient: async () => client, onEvent: (e) => events.push(e), openExternal: async () => {} });
-  return { controller, client, events, configurations, deleted, get aborted() { return aborted; } };
+  return { controller, client, events, configurations, deleted, updates, get aborted() { return aborted; } };
 }
 
 test("controller streams one bounded request and deletes its temporary session", async () => {
@@ -88,6 +108,7 @@ test("controller streams one bounded request and deletes its temporary session",
   assert.equal(f.events.at(-1).content, "안녕하세요");
   assert.deepEqual(f.deleted, ["session-1"]);
   assert.equal(f.configurations[0].model, "test-model");
+  assert.deepEqual(f.updates, [{ installedPlugins: [] }]);
   await f.controller.close();
 });
 
@@ -157,7 +178,7 @@ test("login forwards only an allowlisted URL and rejects plaintext token storage
   f.controller.openExternal = async (url) => opened.push(url);
   f.client.createSession = async () => ({
     sessionId: "auth-session",
-    rpc: { accounts: { login: {
+    rpc: { options: { update: async (options) => f.updates.push(options) }, accounts: { login: {
       begin: async () => ({ flowId: "flow-1", step: { kind: "open-url", url: "https://github.com/login/oauth/authorize?client_id=public" } }),
       advance: async () => ({ kind: "completed", result: { status: "needs-plaintext-consent" } }),
       cancel: async (args) => canceled.push(args.flowId),
@@ -170,6 +191,7 @@ test("login forwards only an allowlisted URL and rejects plaintext token storage
   assert.match(f.events.at(-1).message, /자격 증명/);
   assert.deepEqual(canceled, ["flow-1"]);
   assert.deepEqual(f.deleted, ["auth-session"]);
+  assert.deepEqual(f.updates, [{ installedPlugins: [] }]);
   await f.controller.close();
 });
 
@@ -177,7 +199,7 @@ test("successful login clears the model cache before reporting connection", asyn
   const f = fixture();
   f.client.createSession = async () => ({
     sessionId: "auth-session",
-    rpc: { accounts: { login: {
+    rpc: { options: { update: async (options) => f.updates.push(options) }, accounts: { login: {
       begin: async () => ({ flowId: "flow-1", step: { kind: "completed", result: { status: "completed", login: "test-user" } } }),
       cancel: async () => {},
     } } },
