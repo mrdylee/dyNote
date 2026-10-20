@@ -115,6 +115,10 @@ app
     if (vault) await gitBackup.open(vault);
     copilot = new CopilotController({
       directory: path.join(app.getPath("userData"), "copilot"),
+      getNotes: async (vaultId) => {
+        checkVault({ vaultId });
+        return (await vault.snapshot()).notes;
+      },
       openExternal: (url) => shell.openExternal(url),
       onEvent: (event) => {
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
@@ -296,7 +300,7 @@ app
       },
       create: (args) => {
         checkVault(args);
-        return vault.create(args.path);
+        return vault.create(args.path, args.content);
       },
       save: (args) => {
         checkVault(args);

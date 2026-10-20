@@ -862,7 +862,28 @@ kbd {
 .copilot-message > strong { display: block; font-size: 10px; margin-bottom: 7px; color: #9684ae; }
 .copilot-message-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
 .copilot-message.user .copilot-message-content { background: #f4f1fa; border-radius: 10px; padding: 10px 12px; }
+.markdown-answer { white-space: normal; }
+.markdown-answer p { margin: 0 0 9px; }
+.markdown-answer h1, .markdown-answer h2, .markdown-answer h3 { font-size: 14px; margin: 13px 0 7px; }
+.markdown-answer pre { overflow: auto; padding: 10px; border-radius: 6px; background: #f5f3f8; font-size: 11px; }
+.markdown-answer code { overflow-wrap: anywhere; }
+.markdown-answer ul, .markdown-answer ol { padding-left: 22px; }
+.markdown-answer table { display: block; overflow: auto; border-collapse: collapse; }
+.markdown-answer td, .markdown-answer th { border: 1px solid var(--border); padding: 5px; }
+.copilot-progress { margin-bottom: 12px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.copilot-progress ul { padding-left: 18px; line-height: 1.8; }
+.copilot-attachments { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+.copilot-attachments > button { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 5px; background: white; padding: 5px 7px; font-size: 10px; max-width: 100%; overflow-wrap: anywhere; }
+.copilot-attachments small { width: 100%; color: var(--muted); font-size: 10px; }
+.copilot-vault-access { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 10px; }
+.copilot-attachment-picker { width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: white; }
+.copilot-attachment-picker input { width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+.copilot-attachment-picker > div { max-height: 130px; overflow: auto; }
+.copilot-attachment-picker button { display: block; width: 100%; padding: 7px; text-align: left; border: 0; background: white; font-size: 11px; overflow-wrap: anywhere; }
+.copilot-attachment-picker button:hover { background: #f4f1fa; }
 .copilot-proposal { border: 1px solid #ddd2ee; border-radius: 8px; padding: 12px; background: #fbf9fe; }
+.copilot-proposal + .copilot-proposal { margin-top: 8px; }
+.copilot-proposal button + button { margin-left: 6px; }
 .copilot-proposal p { overflow-wrap: anywhere; font-size: 11px; line-height: 1.6; }
 .copilot-proposal button { background: white; border: 1px solid #d2c6e5; border-radius: 6px; padding: 8px 10px; color: #6e5594; }
 .copilot-error { padding: 10px 16px; margin: 0; background: #fff5f3; color: #a44140; line-height: 1.6; overflow-wrap: anywhere; max-height: 110px; overflow: auto; }

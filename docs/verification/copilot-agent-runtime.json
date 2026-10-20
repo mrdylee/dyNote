@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "Agent default; searchable reference attachments; tool progress; safe Markdown; drafts do not modify disk",
+    "Agent conversation survives note switching; review opens target center editor; apply preserves CRLF; one undo restores original",
+    "Reviewed new note is created atomically and opened in the center editor",
+    "Agent selected-text edit preserves unshared document text and supports undo",
+    "Typing after a request prevents stale draft application",
+    "Each turn captures current editor text; external disk changes are preserved by revision checks"
+  ],
+  "errors": [],
+  "modelTransport": "deterministic fixture; real note tools, renderer and vault",
+  "liveModelVerified": false
+}

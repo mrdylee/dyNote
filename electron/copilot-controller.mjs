@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { MAX_ANSWER, prepareRequest, safeLoginUrl, sessionOptions } from "../core/copilot.mjs";
+import { noteTools } from "../core/copilot-agent.mjs";
 
 const message = (error) => String(error?.message ?? error).replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, "[redacted]").slice(0, 800);
 
@@ -12,10 +13,11 @@ export function runtimeEnvironment(env = process.env) {
 }
 
 export class CopilotController {
-  constructor({ directory, onEvent, openExternal, createClient }) {
+  constructor({ directory, onEvent, openExternal, createClient, getNotes }) {
     this.directory = directory;
     this.onEvent = onEvent;
     this.openExternal = openExternal;
+    this.getNotes = getNotes;
     this.createClient = createClient ?? (async () => {
       const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
       // Executables must live outside app.asar; the platform package is unpacked
@@ -88,7 +90,9 @@ export class CopilotController {
       if (!status.authenticated) throw new Error("먼저 GitHub Copilot에 연결해 주세요.");
       if (!status.models.some((model) => model.id === args.model))
         throw new Error(status.error || "선택한 모델을 사용할 수 없습니다. 연결 상태를 새로 확인해 주세요.");
-      job.session = await client.createSession(sessionOptions(args.model, args.mode));
+      const tools = args.mode === "agent" ? noteTools({ args, getNotes: this.getNotes, emit, canceled: () => job.canceled || !!job.failure || this.closed }) : [];
+      job.session = await client.createSession(sessionOptions(args.model, args.mode, tools));
+      if (job.canceled) return;
       await job.session.rpc.options.update({ installedPlugins: [] });
       if (job.canceled) return;
       unsubscribe = job.session.on((event) => {
@@ -107,8 +111,8 @@ export class CopilotController {
         if (event.type === "session.error") job.failure = message(event.data.message);
       });
       const result = await job.session.sendAndWait({
-        prompt: JSON.stringify({ request: args.prompt, context: args.context, dialogue: args.history }),
-      }, 120000);
+        prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history }),
+      }, args.mode === "agent" ? 240000 : 120000);
       if (job.canceled) return;
       if (job.failure) throw new Error(job.failure);
       content = result?.data?.content ?? content;
@@ -156,6 +160,7 @@ export class CopilotController {
       client = await this.client();
       if (job.canceled) return;
       job.session = await client.createSession(sessionOptions(null, "chat"));
+      if (job.canceled) return;
       await job.session.rpc.options.update({ installedPlugins: [] });
       if (job.canceled) return;
       const login = job.session.rpc.accounts.login;

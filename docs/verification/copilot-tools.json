@@ -1,0 +1,12 @@
+{
+  "nativeRuntime": true,
+  "modelCalled": false,
+  "offeredTools": [
+    "dynote_create_note",
+    "dynote_edit_note",
+    "dynote_read_note",
+    "dynote_search_notes"
+  ],
+  "readAndDraftDispatched": true,
+  "arbitraryBuiltinToolsExcluded": true
+}

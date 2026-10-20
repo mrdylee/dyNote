@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles } from "lucide-react";
+import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip } from "lucide-react";
+import MarkdownIt from "markdown-it";
+import DOMPurify from "dompurify";
 import { captureContext, applyProposal, prepareRequest } from "../core/copilot.mjs";
 
 const invoke = async (promise) => {
@@ -8,8 +10,12 @@ const invoke = async (promise) => {
   return result.value;
 };
 const disconnected = { authenticated: false, login: "", models: [], error: "" };
+const markdown = new MarkdownIt({ html: false, breaks: true });
+// Model output must not fetch remote images or navigate the app.
+markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[이미지: ${tokens[index].content}]`);
+const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
-export default function CopilotPanel({ api, provider = "copilot", onProviderChange, vaultId, note, selection, busy, onApply, onReview, visible }) {
+export default function CopilotPanel({ api, provider = "copilot", onProviderChange, vaultId, note, notes = [], selection, busy, onApply, onReview, visible }) {
   const label = provider === "codex" ? "Codex" : "Copilot";
   const accountLabel = provider === "codex" ? "ChatGPT" : "GitHub";
   const ai = {
@@ -22,18 +28,24 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
   const [auth, setAuth] = useState(null);
   const [model, setModel] = useState(() => { try { return localStorage.getItem(`dynote.${provider}.model`) ?? ""; } catch { return ""; } });
   const [scope, setScope] = useState("document");
-  const [mode, setMode] = useState("chat");
+  const [mode, setMode] = useState(provider === "copilot" ? "agent" : "chat");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [proposal, setProposal] = useState(null);
+  const [proposals, setProposals] = useState([]);
   const [review, setReview] = useState(null);
+  const [applying, setApplying] = useState(false);
+  const [progress, setProgress] = useState([]);
+  const [references, setReferences] = useState([]);
+  const [attachmentSearch, setAttachmentSearch] = useState("");
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [vaultAccess, setVaultAccess] = useState(false);
   const pending = useRef(null), transcript = useRef(null), mounted = useRef(true), loginPending = useRef(false);
   const previousPath = useRef(note?.path);
   const checkedConnection = useRef(false);
   const latest = useRef(null);
-  latest.current = { note, vaultId, onApply, busy };
+  latest.current = { note, notes, vaultId, onApply, busy };
   const refresh = async () => {
     setChecking(true); setError("");
     try {
@@ -60,12 +72,20 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
         setMessages((old) => old.map((m) => m.id === request.requestId ? { ...m, content: event.content, complete: event.type === "done" } : m));
       }
       if (event.type === "done") {
-        if (request.mode === "edit") setProposal({ target: request.target, content: event.content });
+        if (request.mode === "edit") setProposals([{ id: request.requestId, kind: "edit", path: request.target.path, target: request.target, content: event.content }]);
         setPrompt((text) => text === request.prompt ? "" : text);
+      }
+      if (event.type === "tool") setProgress((old) => [...old, event.message].slice(-24));
+      if (event.type === "proposal") {
+        const proposal = event.proposal;
+        // Only the renderer has the complete document when sharing a selection.
+        if (proposal.kind === "edit" && proposal.path === request.target?.path) proposal.target = request.target;
+        setProposals((old) => [...old, proposal]);
       }
       if (event.type === "error") setError(event.error);
       if (event.type === "canceled") setError("응답을 중지했습니다. 질문을 수정해 다시 보낼 수 있습니다.");
       if (["done", "error", "canceled"].includes(event.type)) {
+        if (event.type !== "done") { setProposals([]); setReview(null); }
         pending.current = null;
         setRunning(false);
       }
@@ -89,16 +109,17 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
   useEffect(() => {
     if (previousPath.current === note?.path) return;
     previousPath.current = note?.path;
+    if (provider === "copilot" && mode === "agent") return;
     if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
     pending.current = null;
-    setRunning(false); setMessages([]); setProposal(null); setReview(null); setError("");
+    setRunning(false); setMessages([]); setProposals([]); setReview(null); setError("");
   }, [note?.path]);
   useEffect(() => {
     if (visible && transcript.current) transcript.current.scrollTop = messages.length ? transcript.current.scrollHeight : 0;
-  }, [messages, visible]);
+  }, [messages, progress, proposals, visible]);
   const authBusy = auth && ["starting", "waiting"].includes(auth.phase);
   const newConversation = () => {
-    setMessages([]); setProposal(null); setReview(null); setError("");
+    setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
   const login = async () => {
     setError(""); setAuth({ phase: "starting", message: `${accountLabel} 연결 준비 중…` }); loginPending.current = true;
@@ -107,13 +128,18 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
   };
   const send = async (event) => {
     event?.preventDefault();
-    if (running || checking || authBusy || busy) return;
+    if (running || checking || authBusy || busy || applying) return;
     try {
       const { context, target } = captureContext({ vaultId, note, scope, selection });
       const requestId = crypto.randomUUID();
-      const history = messages.filter((m) => m.complete && m.mode === "chat").map(({ role, content }) => ({ role, content }));
-      const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, history: mode === "edit" ? [] : history });
-      setError(""); setProposal(null); setReview(null); setRunning(true);
+      const history = messages.filter((m) => m.complete && m.mode !== "edit").map(({ role, content }) => ({ role, content }));
+      const attached = provider === "copilot" ? references.filter((path) => path !== context.path).map((path) => {
+        const found = notes.find((n) => n.path === path);
+        if (!found) throw new Error(`첨부 문서가 없어졌습니다: ${path}`);
+        return { path, content: found.content };
+      }) : [];
+      const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
+      setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       pending.current = { ...args, target };
       setMessages((old) => [...old,
         { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },
@@ -124,28 +150,32 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
       pending.current = null; setRunning(false); setError(e.message);
     }
   };
-  let stale = false;
-  if (proposal) {
-    try { applyProposal(proposal.target, { vaultId, ...note }, proposal.content); }
-    catch { stale = true; }
-  }
+  const isStale = (proposal) => {
+    if (proposal.kind === "create") return notes.some((n) => n.path === proposal.path);
+    const current = notes.find((n) => n.path === proposal.path);
+    try { applyProposal(proposal.target, { vaultId, ...current }, proposal.content); return false; }
+    catch { return true; }
+  };
   const apply = async () => {
     try {
       const current = latest.current;
-      if (current.busy) return;
-      applyProposal(review.target, { vaultId: current.vaultId, ...current.note }, review.content);
+      if (current.busy || applying) return;
+      setApplying(true);
+      if (review.kind !== "create") applyProposal(review.target, { vaultId: current.vaultId, ...current.notes.find((n) => n.path === review.path) }, review.content);
       await current.onApply(review);
-      setReview(null); setProposal(null);
+      setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", mode: "agent", complete: true, content: `적용 완료: ${review.path}. 다음 작업에서는 현재 내용을 다시 확인합니다.` }]);
+      setReview(null); setProposals((old) => old.filter((p) => p.id !== review.id));
     } catch (e) { setError(e.message); }
+    finally { setApplying(false); }
   };
 
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-connection">
-      <label className="copilot-model">서비스<select aria-label="AI 서비스" value={provider} disabled={checking || running || authBusy} onChange={(e) => onProviderChange(e.target.value)}>
+      <label className="copilot-model">서비스<select aria-label="AI 서비스" value={provider} disabled={checking || running || applying || authBusy} onChange={(e) => onProviderChange(e.target.value)}>
         <option value="copilot">GitHub Copilot</option><option value="codex">OpenAI Codex</option>
       </select></label>
       <div className="copilot-account"><GitBranch size={15} /><strong>{connection.authenticated ? connection.login || `${accountLabel} 연결됨` : provider === "codex" ? "OpenAI Codex" : "GitHub Copilot"}</strong>
-        <button title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""} /></button>
+        <button title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || applying || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""} /></button>
       </div>
       {!connection.authenticated && !authBusy && <div className="copilot-login">
         <p>사용 중인 {provider === "codex" ? "ChatGPT" : "Copilot"} 계정으로<br />노트에 관해 이야기해 보세요.</p>
@@ -160,45 +190,62 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
         {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select></label>}
     </div>
-    <div className="copilot-chat-heading"><span>노트 어시스턴트</span><button aria-label={`${label} 새 대화`} disabled={running} onClick={newConversation}><Plus size={14} />새 대화</button></div>
+    <div className="copilot-chat-heading"><span>노트 어시스턴트</span><button aria-label={`${label} 새 대화`} disabled={running || applying} onClick={newConversation}><Plus size={14} />새 대화</button></div>
     <div className="copilot-transcript" ref={transcript} role="log" aria-label={`${label} 대화`}>
       {!messages.length && <div className="copilot-empty"><Sparkles size={24} /><h3>생각을 더 선명하게</h3><p>내용을 요약하거나, 문장을 다듬거나,<br />시험 항목을 체크리스트로 정리해 보세요.</p>
-        <div className="copilot-suggestions">{["핵심 내용을 요약해 줘", "실행할 일을 체크리스트로 정리해 줘"].map((text) => <button key={text} onClick={() => setPrompt(text)}>{text}</button>)}</div>
+        <div className="copilot-suggestions">{(mode === "agent" ? ["현재 문서에 실행할 일 체크리스트를 추가해 줘", "현재 문서를 참고해서 새 요약 문서를 만들어 줘"] : ["핵심 내용을 요약해 줘", "실행할 일을 체크리스트로 정리해 줘"]).map((text) => <button key={text} onClick={() => setPrompt(text)}>{text}</button>)}</div>
       </div>}
       {messages.map((m) => <article className={`copilot-message ${m.role}`} key={m.id}>
         <strong>{m.role === "user" ? "나" : m.mode === "edit" ? `${label} · 수정안` : label}</strong>
-        <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>
+        {m.role === "assistant" && m.content ? <div className="copilot-message-content markdown-answer" dangerouslySetInnerHTML={{ __html: answerHtml(m.content) }} />
+          : <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>}
       </article>)}
-      {proposal && <div className="copilot-proposal">
-        <p>{stale ? "문서가 변경되어 이 수정안을 적용할 수 없습니다. 다시 요청해 주세요." : `${proposal.target.path} · ${scope === "selection" ? "선택 영역" : "문서 전체"} 수정안`}</p>
-        <button disabled={stale || busy} onClick={() => { onReview(); setReview(proposal); }}>변경 내용 확인</button>
-      </div>}
+      {!!progress.length && <details className="copilot-progress" open={running}><summary>문서 작업 · {progress.length}단계{running ? " · 진행 중" : ""}</summary>
+        <ul>{progress.map((text, i) => <li key={i}>{text}</li>)}</ul></details>}
+      {proposals.map((proposal) => <div className="copilot-proposal" key={proposal.id}>
+        <p>{proposal.path} · {proposal.kind === "create" ? "새 문서" : "수정안"}</p>
+        {isStale(proposal) && <p>문서가 변경되었거나 같은 이름이 있습니다. 다시 요청해 주세요.</p>}
+        <button disabled={running || isStale(proposal) || busy || applying} onClick={() => { if (proposal.kind !== "create") onReview(proposal.path); setReview(proposal); }}>변경 내용 확인</button>
+        <button disabled={running || applying} onClick={() => setProposals((old) => old.filter((p) => p.id !== proposal.id))}>버리기</button>
+      </div>)}
     </div>
-    {error && <p className="copilot-error" role="alert">{error}</p>}
+    {error && !review && <p className="copilot-error" role="alert">{error}</p>}
     <form className="copilot-composer" onSubmit={send}>
       <div className="copilot-options">
-        <label>보낼 내용<select aria-label={`${label} 전달 범위`} value={scope} disabled={running} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
+        <label>보낼 내용<select aria-label={`${label} 전달 범위`} value={scope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
           <option value="none">문서 없음</option><option value="document" disabled={!note}>현재 문서</option><option value="selection" disabled={!note}>선택 영역</option>
         </select></label>
-        <label>작업<select aria-label={`${label} 작업`} value={mode} disabled={running} onChange={(e) => { setMode(e.target.value); setProposal(null); }}>
+        <label>작업<select aria-label={`${label} 작업`} value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
+          {provider === "copilot" && <option value="agent">Agent · 문서 작업</option>}
           <option value="chat">질문하기</option><option value="edit" disabled={scope === "none" || !note}>수정 제안</option>
         </select></label>
       </div>
-      <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "문서를 첨부하지 않습니다" : `${scope === "selection" ? "선택 영역" : "현재 문서"} · ${note?.path ?? "문서를 열어 주세요"}`}</div>
+      <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "현재 문서는 보내지 않습니다" : `${scope === "selection" ? "선택 영역" : "현재 문서"} · ${note?.path ?? "문서를 열어 주세요"}`}</div>
+      {provider === "copilot" && <div className="copilot-attachments">
+        <button type="button" disabled={running || applying} onClick={() => setAttachmentsOpen(!attachmentsOpen)}><Paperclip size={12} />참고 문서 {references.length}/5</button>
+        {references.map((path) => <button type="button" className="attachment-chip" key={path} disabled={running} title="첨부 제거" onClick={() => setReferences((old) => old.filter((p) => p !== path))}>{path} ×</button>)}
+        {attachmentsOpen && <div className="copilot-attachment-picker">
+          <input aria-label="참고 문서 검색" placeholder="문서 이름 검색" value={attachmentSearch} onChange={(e) => setAttachmentSearch(e.target.value)} />
+          <div>{notes.filter((n) => n.path !== note?.path && !references.includes(n.path) && n.path.toLocaleLowerCase().includes(attachmentSearch.toLocaleLowerCase())).slice(0, 100).map((n) => <button type="button" disabled={references.length >= 5 || running} key={n.path} onClick={() => { setReferences((old) => [...old, n.path]); setAttachmentsOpen(false); }}>{n.path}</button>)}</div>
+        </div>}
+        {mode === "agent" && <label className="copilot-vault-access"><input type="checkbox" checked={vaultAccess} disabled={running} onChange={(e) => setVaultAccess(e.target.checked)} />보관함 검색·읽기 허용</label>}
+        {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 Copilot에 전송됩니다.</small>}
+      </div>}
       <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
       <div className="copilot-send-row"><span>선택한 내용과 대화가 {label}에 전송됩니다.</span>
         {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message))}><Square size={15} />중지</button>
-          : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!connection.authenticated || !model || !prompt.trim() || checking || authBusy || busy || !vaultId}><ArrowUp size={16} /></button>}
+          : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!connection.authenticated || !model || !prompt.trim() || checking || authBusy || busy || applying || !vaultId}><ArrowUp size={16} /></button>}
       </div>
       <small className="copilot-allowance">계정의 {provider === "codex" ? "ChatGPT / Codex" : "Copilot"} 사용량 한도가 적용됩니다.</small>
     </form>
     {review && <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label={`${label} 수정안 확인`} className="modal wide copilot-review">
-      <div className="modal-heading"><h2>수정안 확인</h2><button onClick={() => setReview(null)}>닫기</button></div>
-      <p>{review.target.path} · 확인한 내용만 문서에 반영합니다.</p>
-      <div className="copilot-comparison"><section><h3>변경 전</h3><pre>{review.target.before}</pre></section><section><h3>변경 후</h3><pre>{review.content}</pre></section></div>
-      {stale && <p role="alert">문서가 변경되었습니다. 수정 제안을 다시 요청해 주세요.</p>}
-      <div className="modal-actions"><button onClick={() => setReview(null)}>취소</button><button className="primary-button" disabled={busy || stale} onClick={apply}><Check size={14} />문서에 적용</button></div>
+      <div className="modal-heading"><h2>수정안 확인</h2><button disabled={applying} onClick={() => setReview(null)}>닫기</button></div>
+      <p>{review.path} · 확인한 내용만 문서에 반영합니다.</p>
+      <div className="copilot-comparison"><section><h3>변경 전</h3><pre>{review.target?.before ?? "(새 문서)"}</pre></section><section><h3>변경 후</h3><pre>{review.content}</pre></section></div>
+      {isStale(review) && <p role="alert">문서가 변경되었습니다. 수정 제안을 다시 요청해 주세요.</p>}
+      {error && <p role="alert" className="copilot-error">{error}</p>}
+      <div className="modal-actions"><button disabled={applying} onClick={() => setReview(null)}>취소</button><button className="primary-button" disabled={busy || applying || isStale(review)} onClick={apply}><Check size={14} />{applying ? "저장 중…" : review.kind === "create" ? "새 문서 만들기" : "문서에 적용"}</button></div>
     </section></div>}
   </section>;
 }

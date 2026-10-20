@@ -278,12 +278,14 @@ export class Vault {
     return { id: this.id, name: this.name, notes, documents, attachments, warnings };
   }
 
-  create(relative) {
+  create(relative, initialContent) {
     return this.#enqueue(async () => {
       if (!validNotePath(relative))
         throw new Error("허용되지 않는 Markdown 경로입니다.");
+      const content = initialContent === undefined ? `# ${path.basename(relative, ".md")}\n\n` : initialContent;
+      if (typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES)
+        throw new Error("문서 내용이 잘못되었거나 너무 큽니다.");
       const target = await this.#file(relative, true);
-      const content = `# ${path.basename(relative, ".md")}\n\n`;
       try {
         await writeFile(target, content, { flag: "wx", mode: 0o600 });
       } catch (error) {

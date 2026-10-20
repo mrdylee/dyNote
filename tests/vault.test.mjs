@@ -23,6 +23,16 @@ async function fixture(t) {
   return { dir, root, recovery, store: await Vault.open(root, recovery) };
 }
 
+test("new note initial content is atomic and never overwrites existing files", async (t) => {
+  const { store, root } = await fixture(t);
+  const created = await store.create("Generated.md", "# Agent\n작성 내용");
+  assert.equal(created.content, "# Agent\n작성 내용");
+  assert.equal(await readFile(join(root, "Generated.md"), "utf8"), created.content);
+  await assert.rejects(store.create("Generated.md", "overwrite"), /이미/);
+  await assert.rejects(store.create("Invalid.md", { text: "bad" }), /내용/);
+  assert.equal(await readFile(join(root, "Generated.md"), "utf8"), created.content);
+});
+
 test("Korean content round-trips and original bytes are backed up outside the vault", async (t) => {
   const { store, recovery, root } = await fixture(t);
   const { notes } = await store.snapshot();

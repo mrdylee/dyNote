@@ -1158,15 +1158,25 @@ export default function App() {
             <CopilotPanel key={`${vault.id ?? "missing"}:${aiProvider}`} api={api} provider={aiProvider}
               onProviderChange={(value) => { setAiProvider(value); try { localStorage.setItem("dynote.ai.provider", value); } catch { /* Keep the choice in memory. */ } }}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
+              notes={raw}
               selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
-              onReview={() => { if (mode === "read") setMode("edit"); }}
+              onReview={(path) => { openNote(path); setMode("edit"); }}
               onApply={async (proposal) => {
                 if (busy) throw new Error("저장 작업이 끝난 뒤 다시 적용해 주세요.");
-                const content = applyProposal(proposal.target, { vaultId: vault.id, ...note }, proposal.content);
+                if (proposal.kind === "create") {
+                  await flush();
+                  const created = await invoke(api.createNote({ vaultId: vault.id, path: proposal.path, content: proposal.content }));
+                  revisions.current.set(created.path, created.revision);
+                  setRaw((old) => [...old, created]);
+                  openNote(created.path); setMode("edit");
+                  return;
+                }
+                const target = raw.find((n) => n.path === proposal.path);
+                const content = applyProposal(proposal.target, { vaultId: vault.id, ...target }, proposal.content);
                 const view = editorView.current;
-                if (view && !view.state.readOnly) {
+                if (view && !view.state.readOnly && note?.path === proposal.path) {
                   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });
-                } else changeFile(note.path, content);
+                } else changeFile(proposal.path, content);
                 await flush();
               }} />
             <div className="document-info" hidden={rightTab !== "info"}>
