@@ -25,7 +25,7 @@ export default function Graph({ notes, edges, attachments = emptyFiles, document
     else onOpen(path);
   };
   const graph = useMemo(() => buildVaultGraph(notes, edges, attachments, documents), [notes, edges, attachments, documents]);
-  const { local, depth, incoming, outgoing, neighborLinks, center, repel, link, distance, nodeSize, lineWidth, labelThreshold, arrows, query, path, tag, showTags, showAttachments, existingOnly, showOrphans } = settings;
+  const { local, depth, incoming, outgoing, neighborLinks, center, repel, link, distance, nodeSize, lineWidth, labelThreshold, showLabels, arrows, query, path, tag, showTags, showAttachments, existingOnly, showOrphans } = settings;
   const selected = useMemo(() => selectGraph(graph, { path, tag, active, local, depth, incoming, outgoing, neighborLinks, query, showTags, showAttachments, existingOnly, showOrphans }), [graph, path, tag, active, local, depth, incoming, outgoing, neighborLinks, query, showTags, showAttachments, existingOnly, showOrphans]);
   const tags = useMemo(() => [...new Set(notes.flatMap((n) => n.tags ?? []))].sort(), [notes]);
   const choices = useMemo(() => {
@@ -69,7 +69,7 @@ export default function Graph({ notes, edges, attachments = emptyFiles, document
     worker.current.postMessage({ type: "graph", epoch: epoch.current, positions, links, radii, settings: { center, repel, link, distance }, paused: document.hidden }, [positions.buffer, links.buffer, radii.buffer]);
   }, [selected, ready]);
   useEffect(() => { if (ready) send("settings", { settings: { center, repel, link, distance } }); }, [center, repel, link, distance, ready]);
-  useEffect(() => { engine.current?.setDisplay({ nodeSize, lineWidth, labelThreshold, arrows }); }, [nodeSize, lineWidth, labelThreshold, arrows, ready]);
+  useEffect(() => { engine.current?.setDisplay({ nodeSize, lineWidth, labelThreshold, showLabels, arrows }); }, [nodeSize, lineWidth, labelThreshold, showLabels, arrows, ready]);
   useEffect(() => { engine.current?.setColors(graphColors(selected.nodes, settings.groups)); }, [selected, settings.groups, ready]);
   useEffect(() => { engine.current?.setActive(active); }, [active, ready, selected]);
   useEffect(() => { if (fontFamily) engine.current?.setFont(fontFamily); }, [fontFamily, ready]);
@@ -103,7 +103,7 @@ export default function Graph({ notes, edges, attachments = emptyFiles, document
             </div>)}
             <button className="graph-wide-button" disabled={settings.groups.length >= 64} onClick={() => update("groups", [...settings.groups, { query: "", color: ["#9871c2", "#49a591", "#da8a54", "#588fc9"][settings.groups.length % 4] }])}><Plus size={14} /> 새 그룹</button>
           </>)}
-          {section("displayOpen", "표시", <>{toggle("arrows", "화살표")}{GRAPH_RANGES.slice(4).map(range)}<small>표시 시작점이 클수록 더 확대해야 이름이 보입니다.</small><button className="graph-wide-button" disabled={!selected.nodes.length} onClick={() => replaying ? engine.current?.stopReplay() : engine.current?.replay()}>{replaying ? "애니메이션 중지" : "애니메이션 재생"}</button><small>문서의 생성·수정 시간 순서로 표시합니다.</small></>)}
+          {section("displayOpen", "표시", <>{toggle("arrows", "화살표")}{toggle("showLabels", "문서 이름 표시")}{GRAPH_RANGES.slice(4).map(range)}<small>표시 시작점이 클수록 더 확대해야 이름이 보입니다. 이름 표시를 꺼도 선택하거나 가리킨 노드의 이름은 보입니다.</small><button className="graph-wide-button" disabled={!selected.nodes.length} onClick={() => replaying ? engine.current?.stopReplay() : engine.current?.replay()}>{replaying ? "애니메이션 중지" : "애니메이션 재생"}</button><small>문서의 생성·수정 시간 순서로 표시합니다.</small></>)}
           {section("forcesOpen", "장력", GRAPH_RANGES.slice(0, 4).map(range))}
         </aside>}
       </div>

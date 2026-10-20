@@ -87,3 +87,24 @@ test("default graph labels retain readability at medium zoom and old settings re
   assert.ok(graphLabelAlpha(0.4, -1) > graphLabelAlpha(0.4, 0));
   assert.equal(graphLabelAlpha(0.4, 1), 0);
 });
+test("legacy disabled and low label settings retain opacity through save and reload", async () => {
+  const { graphLabelAlpha, normalizeGraphSettings } = await import('../core/graph-options.mjs');
+  for (let step = 0; step <= 30; step++) {
+    const labels = step / 10;
+    const settings = normalizeGraphSettings({ labels });
+    assert.equal(settings.showLabels, labels > 0);
+    const stored = JSON.parse(JSON.stringify(settings));
+    assert.deepEqual(normalizeGraphSettings(stored), stored);
+    for (const zoom of [0.015, 0.4, 1, 2.25, 3, 6]) {
+      const previous = Math.max(0, Math.min(1, (zoom * labels - 0.28) * 2));
+      assert.ok(Math.abs(graphLabelAlpha(zoom, settings.labelThreshold, settings.showLabels) - previous) < 1e-10, `labels=${labels}, zoom=${zoom}`);
+    }
+  }
+});
+test("explicit name visibility survives normalization and overrides legacy settings", async () => {
+  const { graphLabelAlpha, normalizeGraphSettings } = await import('../core/graph-options.mjs');
+  assert.equal(graphLabelAlpha(6, -3, false), 0);
+  assert.equal(normalizeGraphSettings({ showLabels: false, labels: 1 }).showLabels, false);
+  assert.equal(normalizeGraphSettings({ showLabels: true, labelThreshold: 0, labels: 0 }).showLabels, true);
+  assert.equal(normalizeGraphSettings({ labelThreshold: 3 }).showLabels, true);
+});

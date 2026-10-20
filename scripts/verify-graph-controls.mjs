@@ -64,6 +64,11 @@ try {
   await slider('중심 장력', 1); await slider('반발력', 2000); await slider('링크 장력', 0.5); await slider('링크 거리', 300);
   await page.getByRole('status').filter({ hasText: '배치 완료' }).waitFor();
   assert.equal(await page.evaluate(() => window.controlProbe.lastIndices[0]), 36, 'enabled arrows add one triangle per edge');
+  const namesOn = await page.locator('.graph-stage canvas').screenshot();
+  await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).uncheck();
+  const namesOff = await page.locator('.graph-stage canvas').screenshot();
+  assert.notDeepEqual(namesOn, namesOff, 'name visibility must change the rendered canvas');
+  assert.equal(await page.evaluate(() => window.controlProbe.graphPosts), graphPosts, 'name visibility must not rebuild physics');
   await page.getByRole('button', { name: '그래프 설정 닫기', exact: true }).click();
   const before = await page.locator('.graph-stage canvas').screenshot();
   await page.getByRole('button', { name: '그래프 설정 열기', exact: true }).click();
@@ -85,6 +90,7 @@ try {
   await page.getByRole('button', { name: '그래프 보기', exact: true }).click();
   assert.equal(await page.getByRole('slider', { name: '노드 크기', exact: true }).inputValue(), '2');
   assert.equal(await page.getByRole('checkbox', { name: '화살표', exact: true }).isChecked(), true);
+  assert.equal(await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).isChecked(), false);
   assert.equal(await page.getByRole('textbox', { name: '그룹 1 검색' }).inputValue(), 'tag:team');
   await counts(5, 4);
   report.checks.push('vault settings retained across unmount/remount');
@@ -92,6 +98,7 @@ try {
   await page.screenshot({ path: 'output/playwright/graph-controls.png' });
   await page.reload();
   await page.getByRole('button', { name: '그래프 보기', exact: true }).click();
+  assert.equal(await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).isChecked(), false);
   assert.equal(await page.getByRole('slider', { name: '노드 크기', exact: true }).inputValue(), '2');
   assert.equal(await page.getByRole('textbox', { name: '그룹 1 검색' }).inputValue(), 'tag:team');
   report.checks.push('settings restored after renderer reload');
@@ -103,7 +110,22 @@ try {
   await counts(4, 2);
   assert.equal(await page.getByRole('checkbox', { name: '화살표', exact: true }).isChecked(), false);
   assert.equal(await page.getByRole('slider', { name: '노드 크기', exact: true }).inputValue(), '1');
+  assert.equal(await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).isChecked(), true);
   report.checks.push('reset restores all control defaults');
+  for (const labels of [0, 0.1]) {
+    await page.evaluate((labels) => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith('dynote:graph:'));
+      localStorage.setItem(key, JSON.stringify({ labels }));
+    }, labels);
+    await page.reload();
+    await page.getByRole('button', { name: '그래프 보기', exact: true }).click();
+    await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).waitFor();
+    assert.equal(await page.getByRole('checkbox', { name: '문서 이름 표시', exact: true }).isChecked(), labels > 0);
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith('dynote:graph:')))));
+    assert.equal(saved.showLabels, labels > 0);
+    if (labels) assert.ok(Math.abs(saved.labelThreshold + Math.log2(labels)) < 1e-10);
+  }
+  report.checks.push('name visibility changes canvas without resetting physics; off state persists; legacy 0 and 0.1 migrate through actual UI');
   assert.equal(await readFile(`${vaultRoot}/work/A.md`, 'utf8'), '# Alpha\n[[B]] [[Future]] ![[photo.png]] [[guide.pdf]]\n#team/project');
   assert.deepEqual(report.errors, []);
   await writeFile('output/playwright/graph-controls.json', JSON.stringify(report, null, 2));

@@ -67,7 +67,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     const progress = replayState ? Math.min(1, (performance.now() - replayState.start) / 4000) : 1;
     const revealed = (i) => !replayState || progress >= 1 || replayState.order[i] <= Math.floor(progress * (replayState.last + 1));
     if (replayState && progress >= 1) { replayState = null; onReplay(false); }
-    const labelAlpha = graphLabelAlpha(camera.zoom, display.labelThreshold);
+    const labelAlpha = graphLabelAlpha(camera.zoom, display.labelThreshold, display.showLabels);
     const end = Math.min(graph.nodes.length, sprites.length + 300);
     for (let i = sprites.length; i < end; i++) {
       const sprite = new Sprite(texture); sprite.anchor.set(0.5); dots.addChild(sprite); sprites.push(sprite);
