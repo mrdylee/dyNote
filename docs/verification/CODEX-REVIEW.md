@@ -38,6 +38,14 @@ model answer remain unverified. UI answers and native protocol answers used
 explicit synthetic fixtures. No Windows package was rebuilt or executed for
 this change. No GitHub push/release, signing or notarization was performed.
 
-The earlier Copilot build was installed to `/Applications/Dynote.app` and its
-real window and existing vault were verified. Replacing it with this Codex build
-requires the Mac to be unlocked so the existing app can close normally.
+Installed this Codex build to `/Applications/Dynote.app` after normally quitting
+the previous application. Its ASAR SHA-256 matches `codex-package.json`.
+The previous bundle is preserved in
+`output/installed-before-codex-20261020/Dynote.app`. Vault settings were unchanged
+across installation. The live installed window opened the existing
+`open-notes-ui-vault-20261019` vault, displayed its two documents and saved status,
+and showed the new AI chat tab and service selector.
+
+The user started Copilot login during the live check, so that flow was left
+undisturbed. Codex selection and connection UI were verified in the packaged
+runtime checks above; real account login remains unverified.
