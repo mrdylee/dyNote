@@ -46,6 +46,8 @@ import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
+import VaultSettings from "./VaultSettings.jsx";
+import GitHistory from "./GitHistory.jsx";
 import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
 
@@ -185,6 +187,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);
+  const [settingsTab, setSettingsTab] = useState("vault");
+  useEffect(() => api?.onOpenSettings(() => { if (!busy) setModal("settings"); }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
   const [attachment, setAttachment] = useState(null);
@@ -194,7 +198,7 @@ export default function App() {
   const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 연결 안 됨", enabled: false, config: null });
   const acceptGitStatus = (value) => { if (value.vaultId === currentVault.current) setGitStatus(value); };
   useEffect(() => {
-    if (!vault) return;
+    if (!vault?.id) return;
     let mounted = true;
     const update = (value) => { if (mounted && value.vaultId === vault.id) setGitStatus(value); };
     setGitStatus({ phase: "off", message: "Git 설정 확인 중…", enabled: false, config: null });
@@ -245,6 +249,7 @@ export default function App() {
   const install = useCallback((snapshot) => {
     clearTimeout(timer.current);
     setVault(snapshot);
+    if (!snapshot.id) { setSettingsTab("vault"); setModal("settings"); }
     setRaw(snapshot.notes);
     setDocuments(snapshot.documents ?? []);
     revisions.current = new Map(
@@ -380,6 +385,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event) => {
+      if (busy) return;
       if (
         (event.metaKey || event.ctrlKey) &&
         ["p", "k", "s", "n"].includes(event.key.toLowerCase())
@@ -399,7 +405,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [flush]);
+  }, [flush, busy]);
 
   const importFiles = async (files) => {
     try {
@@ -691,7 +697,7 @@ export default function App() {
             </IconButton>
           </div>
           <div className="rail-bottom">
-            <IconButton label="글꼴 및 Git 설정" onClick={() => setModal("settings")}><Settings size={20} /></IconButton>
+            <IconButton label="설정" disabled={busy} onClick={() => setModal("settings")}><Settings size={20} /></IconButton>
             <IconButton
               label="저장과 복구 안내"
               onClick={() => setModal("about")}
@@ -1115,7 +1121,7 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
-            <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => setModal("settings")}>{gitStatus.message}</button>
+            <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
               <span>{(note?.content.length ?? structured?.content.length ?? 0).toLocaleString()}자</span>
               <span>{structured?.kind ?? "Markdown"}</span>
@@ -1511,9 +1517,27 @@ export default function App() {
         </Modal>
       )}
       {modal === "settings" && (
-        <Modal title="글꼴 및 Git 설정" wide className="settings-modal" onClose={() => setModal(null)}>
-          <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />
-          <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
+        <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
+          <nav className="settings-tabs" aria-label="설정 항목">
+            {[["vault", "보관함"], ["fonts", "글꼴"], ["git", "Git 백업"], ["history", "백업 복원"]].map(([key, label]) =>
+              <button key={key} aria-current={settingsTab === key ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+          </nav>
+          {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
+            onList={() => invoke(api.vaults())}
+            onPick={async () => {
+              setBusy(true);
+              try { await flush(); const snapshot = await invoke(api.pickVault()); if (snapshot) install(snapshot); }
+              finally { setBusy(false); }
+            }}
+            onSelect={async (root) => {
+              setBusy(true);
+              try { await flush(); install(await invoke(api.selectVault({ root }))); }
+              finally { setBusy(false); }
+            }}
+            onForget={(root) => invoke(api.forgetVault({ root }))} />}
+          {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
+          {["git", "history"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
+          {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);
@@ -1521,7 +1545,19 @@ export default function App() {
               finally { setBusy(false); }
             }}
             onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: vault.id }))); }}
-            onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: vault.id })))} />
+            onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: vault.id })))} />}
+          {settingsTab === "history" && vault.id && <GitHistory key={vault.id} busy={busy}
+            onList={(month) => invoke(api.gitHistory({ vaultId: vault.id, month }))}
+            onPreview={async (commit) => { await flush(); return invoke(api.previewGit({ vaultId: vault.id, commit })); }}
+            onRestore={async (preview) => {
+              setBusy(true);
+              try {
+                await flush();
+                const result = await invoke(api.restoreGit({ vaultId: vault.id, commit: preview.commit, revision: preview.revision }));
+                install(result.snapshot); return result;
+              } finally { setBusy(false); }
+            }}
+            onRecovery={() => invoke(api.showRecovery()).catch((e) => setError(e.message))} />}
         </Modal>
       )}
       {modal === "reload" && (

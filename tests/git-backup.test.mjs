@@ -23,7 +23,7 @@ async function fixture() {
 }
 
 test("Git inputs accept HTTPS/SSH and reject credentials, commands and invalid branches", () => {
-  assert.equal(validateGitConfig(config).interval, 420);
+  assert.equal(validateGitConfig(config).schedule, "daily");
   for (const url of ["git@github.com:owner/notes.git", "ssh://git@example.com:2222/owner/notes.git"])
     assert.equal(validateGitConfig({ ...config, remote: url }).remote, url);
   for (const url of ["--upload-pack=bad", "ext::sh bad", "file:///tmp/repo", "https://user:secret@example.com/repo", "https://example.com/repo?token=secret", "git@host:path\n--bad"])
@@ -32,11 +32,10 @@ test("Git inputs accept HTTPS/SSH and reject credentials, commands and invalid b
     assert.throws(() => validateGitConfig({ ...config, branch }), /브랜치/);
 });
 
-test("Git intervals default to ten minutes and preserve configurable whole-minute values", () => {
-  for (const interval of [undefined, null, 0, -60, 30, 90, 86460, "600", Infinity])
-    assert.equal(validateGitConfig({ ...config, interval }).interval, 600);
-  for (const minutes of [1, 5, 7, 10, 17, 1440])
-    assert.equal(validateGitConfig({ ...config, interval: minutes * 60 }).interval, minutes * 60);
+test("legacy minute settings migrate to a daily schedule", () => {
+  const normalized = validateGitConfig(config);
+  assert.equal(normalized.schedule, "daily");
+  assert.equal(normalized.interval, undefined);
 });
 
 test("Git processes ignore inherited repository redirects and leave the other repository untouched", async () => {
@@ -139,20 +138,24 @@ test("a tracked note replaced by a directory cannot stage unrelated files recurs
 test("controller persists per-vault settings and timers commit changes only while enabled", async () => {
   const { GitController } = await import("../electron/git-controller.mjs");
   const f = await fixture(), scheduled = [], cleared = [], events = [];
+  let clock = new Date(2026, 9, 20, 12);
   const settingsFile = path.join(f.dir, "backup.json");
-  const options = { settingsFile, run: f.run, onStatus: (value) => events.push(value), setTimer: (callback, ms) => { const timer = { callback, ms }; scheduled.push(timer); return timer; }, clearTimer: (timer) => cleared.push(timer) };
+  const options = { settingsFile, now: () => clock, run: f.run, onStatus: (value) => events.push(value), setTimer: (callback, ms) => { const timer = { callback, ms }; scheduled.push(timer); return timer; }, clearTimer: (timer) => cleared.push(timer) };
   const controller = new GitController(options);
   await controller.open({ id: "one", root: f.root });
   await controller.connect("one", config);
   assert.equal(controller.status().phase, "synced");
-  assert.equal(scheduled.at(-1).ms, 420000);
+  assert.equal(scheduled.at(-1).ms, 60000);
   await writeFile(path.join(f.root, "Home.md"), "automatic tick");
+  await scheduled.at(-1).callback();
+  assert.notEqual(f.git(f.bare, "show", "main:Home.md"), "automatic tick");
+  clock = new Date(2026, 9, 21, 23);
   await scheduled.at(-1).callback();
   assert.equal(f.git(f.bare, "show", "main:Home.md"), "automatic tick");
   const restarted = new GitController(options);
   await restarted.open({ id: "one", root: f.root });
   assert.equal(restarted.status().config.remote, remote);
-  assert.equal(restarted.status().config.interval, 420);
+  assert.equal(restarted.status().config.schedule, "daily");
   assert.equal(restarted.status().enabled, true);
   await restarted.disconnect("one");
   assert.equal(restarted.status().enabled, false);
@@ -189,4 +192,93 @@ test("controller coalesces overlapping ticks and reports edits made during an up
   await controller.sync("one");
   assert.equal(f.git(f.bare, "show", "main:Home.md"), "edit during upload");
   assert.equal(controller.status().phase, "synced"); controller.close();
+});
+
+test("daily backup survives restart, catches missed days in background, and skips a second run", async () => {
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const f = await fixture(), ticks = [];
+  let clock = new Date(2026, 9, 20, 12);
+  const options = { settingsFile: path.join(f.dir, "daily.json"), run: f.run, now: () => clock,
+    setTimer: (callback) => { ticks.push(callback); return callback; }, clearTimer: () => {} };
+  const first = new GitController(options);
+  await first.open({ id: "one", root: f.root }); await first.connect("one", config);
+  assert.equal(first.status().lastBackupDay, "2026-10-20");
+  await writeFile(path.join(f.root, "Home.md"), "next work");
+  first.close();
+  const second = new GitController(options);
+  await second.open({ id: "one", root: f.root }); await second.tail;
+  assert.equal(f.git(f.bare, "rev-list", "--count", "main"), "1");
+  clock = new Date(2026, 9, 21, 9); await ticks.at(-1)();
+  assert.equal(f.git(f.bare, "rev-list", "--count", "main"), "1", "yesterday was backed up; wait for tonight");
+  second.close(); clock = new Date(2026, 9, 22, 9);
+  let started, release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const entered = new Promise((resolve) => { started = resolve; });
+  const resumed = new GitController({ ...options, run: async (root, args, opts) => {
+    if (args[0] === "push") { started(); await blocked; }
+    return f.run(root, args, opts);
+  } });
+  await resumed.open({ id: "one", root: f.root });
+  await entered; // open() returned before a blocked network request completed.
+  release(); await resumed.tail;
+  assert.equal(resumed.status().lastBackupDay, "2026-10-22");
+  assert.equal(f.git(f.bare, "show", "main:Home.md"), "next work");
+  await writeFile(path.join(f.root, "Home.md"), "late work");
+  clock = new Date(2026, 9, 22, 23); await ticks.at(-1)();
+  assert.equal(f.git(f.bare, "rev-list", "--count", "main"), "2");
+  resumed.close();
+});
+
+test("daily offline retries upload the recorded commit without committing later edits", async () => {
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const f = await fixture(); let tick, clock = new Date(2026, 9, 20, 12);
+  const options = { settingsFile: path.join(f.dir, "daily.json"), run: f.run, now: () => clock,
+    setTimer: (callback) => { tick = callback; return callback; }, clearTimer: () => {} };
+  const controller = new GitController(options);
+  await controller.open({ id: "one", root: f.root }); await controller.connect("one", config);
+  await writeFile(path.join(f.root, "Home.md"), "daily snapshot");
+  await rename(f.bare, f.bare + ".offline"); clock = new Date(2026, 9, 21, 23);
+  await tick(); const head = f.git(f.root, "rev-parse", "HEAD");
+  assert.equal(controller.status().pendingCommit, head);
+  await writeFile(path.join(f.root, "Home.md"), "later local edit");
+  clock = new Date(2026, 9, 21, 23, 11); await tick();
+  assert.equal(f.git(f.root, "rev-parse", "HEAD"), head);
+  controller.close(); await rename(f.bare + ".offline", f.bare);
+  const resumed = new GitController(options);
+  await resumed.open({ id: "one", root: f.root }); await resumed.tail;
+  assert.equal(f.git(f.bare, "rev-parse", "main"), head);
+  assert.equal(f.git(f.bare, "show", "main:Home.md"), "daily snapshot");
+  assert.equal(await readFile(path.join(f.root, "Home.md"), "utf8"), "later local edit");
+  assert.equal(resumed.status().pendingCommit, null);
+  resumed.close();
+});
+
+test("retry recognizes a pending commit already included in a newer remote history", async () => {
+  const f = await fixture(); await f.service.connect(config); await f.service.sync(config);
+  const pending = f.git(f.root, "rev-parse", "HEAD");
+  const other = path.join(f.dir, "other"); f.git(f.dir, "clone", f.bare, other);
+  await writeFile(path.join(other, "Other.md"), "another device"); f.git(other, "add", ".");
+  f.git(other, "-c", "user.name=Other", "-c", "user.email=other@example.invalid", "commit", "-m", "later remote");
+  f.git(other, "push", "origin", "main");
+  const newer = f.git(f.bare, "rev-parse", "main");
+  await writeFile(path.join(f.root, "Home.md"), "uncommitted local edit");
+  const result = await f.service.sync(config, { commit: false, revision: pending });
+  assert.equal(result.phase, "synced");
+  assert.equal(f.git(f.bare, "rev-parse", "main"), newer);
+  assert.equal(f.git(f.root, "rev-parse", "HEAD"), pending);
+  assert.equal(await readFile(path.join(f.root, "Home.md"), "utf8"), "uncommitted local edit");
+});
+
+test("re-enabling the same daily backup shows an enabled waiting state without another commit", async () => {
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const f = await fixture();
+  const controller = new GitController({ settingsFile: path.join(f.dir, "daily.json"), run: f.run,
+    now: () => new Date(2026, 9, 20, 12), setTimer: () => 1, clearTimer: () => {} });
+  await controller.open({ id: "one", root: f.root }); await controller.connect("one", config);
+  const head = f.git(f.root, "rev-parse", "HEAD"); await controller.disconnect("one");
+  await writeFile(path.join(f.root, "Home.md"), "later edits");
+  const status = await controller.connect("one", config);
+  assert.equal(status.enabled, true); assert.equal(status.phase, "ready"); assert.match(status.message, /대기/);
+  assert.equal(f.git(f.root, "rev-parse", "HEAD"), head);
+  controller.close();
 });

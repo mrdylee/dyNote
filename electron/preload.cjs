@@ -5,6 +5,17 @@ contextBridge.exposeInMainWorld(
   Object.freeze({
     snapshot: () => call("snapshot"),
     pickVault: () => call("pick-vault"),
+    vaults: () => call("vaults"),
+    selectVault: (args) => call("select-vault", args),
+    forgetVault: (args) => call("forget-vault", args),
+    gitHistory: (args) => call("git-history", args),
+    previewGit: (args) => call("git-preview", args),
+    restoreGit: (args) => call("git-restore", args),
+    onOpenSettings: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:open-settings", listener);
+      return () => ipcRenderer.removeListener("notes:open-settings", listener);
+    },
     createNote: (args) => call("create", args),
     saveNote: (args) => call("save", args),
     createDocument: (args) => call("create-document", args),

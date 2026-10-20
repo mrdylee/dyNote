@@ -1643,3 +1643,32 @@ kbd {
 .git-status { cursor: pointer; font: inherit; color: #7963a3; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-status.error { color: #b24a5c; }
 .git-identity { grid-template-columns: 1fr 1fr; }
+
+.settings-tabs { display: flex; gap: 6px; margin-top: 20px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.settings-tabs button { padding: 9px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+.settings-tabs button[aria-current="page"] { color: #5142ac; background: #f0edfc; font-weight: 600; }
+.settings-tabs + .settings-section { border-top: 0; margin-top: 0; }
+.vault-settings-list { padding: 0; list-style: none; }
+.vault-settings-list li { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin: 14px 0; }
+.vault-settings-list p { overflow-wrap: anywhere; font-size: 12px; }
+.vault-settings-list small { color: #5142ac; margin-left: 8px; }
+.daily-backup-info { padding: 14px; background: #f7f6fc; border-radius: 8px; margin-top: 16px; }
+.backup-month { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.backup-month label { text-align: center; }
+.backup-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.backup-calendar .weekday { text-align: center; font-size: 12px; color: var(--muted); padding: 8px; }
+.backup-calendar button { display: flex; min-height: 52px; gap: 4px; flex-direction: column; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 8px; background: #f9f9fb; color: #999; }
+.backup-calendar .has-backup { color: #5142ac; background: #f3f0ff; font-weight: 600; }
+.backup-calendar button[aria-pressed="true"] { border-color: #7660cf; background: #e9e3ff; }
+.backup-calendar small { font-size: 10px; }
+.backup-records { display: grid; gap: 6px; margin: 18px 0; max-height: 190px; overflow-y: auto; }
+.backup-record { display: flex; gap: 12px; justify-content: space-between; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: white; padding: 12px; }
+.backup-record strong { overflow-wrap: anywhere; min-width: 0; font-weight: 500; }
+.backup-record[aria-pressed="true"] { border-color: #7660cf; background: #f8f6ff; }
+.restore-preview { border-top: 1px solid var(--border); padding-top: 10px; }
+.restore-preview ul { max-height: 170px; overflow-y: auto; list-style: none; padding: 0; }
+.restore-preview li { display: flex; gap: 14px; padding: 5px 0; font-size: 12px; }
+.restore-preview li span { flex-shrink: 0; color: var(--muted); }
+.restore-preview code { overflow-wrap: anywhere; }
+.settings-section .restore-confirm { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.restore-confirm input { width: auto; }

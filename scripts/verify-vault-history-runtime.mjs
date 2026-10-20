@@ -1,0 +1,94 @@
+const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
+import { mkdtemp, mkdir, writeFile, readFile, rename, realpath, access } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import assert from "node:assert/strict";
+
+const root = await realpath(await mkdtemp(`${tmpdir()}/dynote-vault-history-`));
+const profile = `${root}/profile`, vaultRoot = `${root}/내 노트`, other = `${root}/다른 보관함`, config = `${root}/gitconfig`;
+await mkdir(profile); await mkdir(vaultRoot); await mkdir(other); await writeFile(config, "");
+const env = { ...process.env, OPEN_NOTES_DATA: profile, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1" };
+const git = (args, date) => execFileSync("git", args, { cwd: vaultRoot, encoding: "utf8", env: { ...env, ...(date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {}) }, stdio: ["pipe", "pipe", "pipe"] }).trim();
+git(["init", "--initial-branch=main"]); git(["config", "user.name", "Runtime"]); git(["config", "user.email", "runtime@example.invalid"]);
+const firstDate = new Date(); firstDate.setDate(firstDate.getDate() - 2); firstDate.setHours(12, 0, 0, 0);
+const secondDate = new Date(); secondDate.setDate(secondDate.getDate() - 1); secondDate.setHours(12, 0, 0, 0);
+const firstContent = "# 이전 노트\n\n첫 번째 백업\n", latest = "# 현재 노트\n\n두 번째 백업\n";
+await writeFile(`${vaultRoot}/Home.md`, firstContent); git(["add", "."]); git(["commit", "-m", "첫 번째 백업"], firstDate.toISOString());
+await writeFile(`${vaultRoot}/Home.md`, latest); await writeFile(`${vaultRoot}/New.md`, "최신 추가 문서"); git(["add", "."]); git(["commit", "-m", "두 번째 백업"], secondDate.toISOString());
+const head = git(["rev-parse", "HEAD"]);
+await writeFile(`${other}/Other.md`, "# 다른 보관함\n"); await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
+await mkdir("output/playwright", { recursive: true });
+const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env });
+let app, page;
+const report = { checks: [], errors: [] };
+async function start() {
+  app = await launch(); page = await app.firstWindow(); page.setDefaultTimeout(10000);
+  page.on("pageerror", (e) => report.errors.push(e.message));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 700));
+  await page.getByRole("button", { name: "설정", exact: true }).waitFor();
+}
+async function menu() {
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById("dynote-settings").click());
+  await page.getByRole("dialog", { name: "설정", exact: true }).waitFor();
+}
+try {
+  await start();
+  report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, electron: process.versions.electron }));
+  await menu();
+  await page.locator(".vault-settings-list").getByText(vaultRoot, { exact: true }).waitFor();
+  await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, other);
+  await page.getByRole("button", { name: "폴더 선택·추가", exact: true }).click();
+  await page.locator(".vault-switch strong").filter({ hasText: "다른 보관함" }).waitFor();
+  assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, other);
+  await app.close(); await start(); await menu();
+  await page.locator(".vault-switch strong").filter({ hasText: "다른 보관함" }).waitFor();
+  const firstRow = page.locator(".vault-settings-list li").filter({ has: page.getByText(vaultRoot, { exact: true }) });
+  await firstRow.getByRole("button", { name: "열기", exact: true }).click();
+  await page.locator(".vault-switch strong").filter({ hasText: "내 노트" }).waitFor();
+  const otherRow = page.locator(".vault-settings-list li").filter({ has: page.getByText(other, { exact: true }) });
+  await otherRow.getByRole("button", { name: "목록에서 제거", exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".vault-settings-list li").length === 1);
+  await access(`${other}/Other.md`);
+  report.checks.push("native Settings menu opens; folder selection persists across restart; switching and removing a recent entry preserves the actual folder");
+  await page.getByRole("button", { name: "백업 복원", exact: true }).click();
+  assert.equal(await page.locator(".settings-tabs [aria-current=page]").innerText(), "백업 복원");
+  const month = `${firstDate.getFullYear()}-${String(firstDate.getMonth()+1).padStart(2,"0")}`;
+  const day = `${month}-${String(firstDate.getDate()).padStart(2,"0")}`;
+  await page.getByLabel("백업 월", { exact: true }).fill(month);
+  await page.getByRole("button", { name: `${day} 백업 1개`, exact: true }).click();
+  await page.locator(".backup-record").filter({ hasText: "첫 번째 백업" }).click();
+  await page.locator(".restore-preview").waitFor();
+  assert.match(await page.locator(".restore-preview").innerText(), /New.md/);
+  assert.equal(await page.getByRole("button", { name: "선택한 백업으로 돌아가기", exact: true }).isDisabled(), true);
+  await page.locator(".backup-calendar").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "output/playwright/backup-calendar-preview.png" });
+  await page.locator(".restore-confirm").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "output/playwright/backup-restore-confirm.png" });
+  await page.getByRole("checkbox", { name: "위 파일 변경 내용을 확인했습니다.", exact: true }).check();
+  await page.getByRole("button", { name: "선택한 백업으로 돌아가기", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "복원했습니다." }).waitFor();
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), firstContent);
+  await assert.rejects(access(`${vaultRoot}/New.md`), { code: "ENOENT" });
+  assert.equal(git(["rev-parse", "HEAD"]), head);
+  const restored = await page.getByRole("status").filter({ hasText: "복원했습니다." }).innerText();
+  const recovery = restored.split("복원 전 파일 보관 위치: ")[1].split("\n")[0];
+  assert.equal(await readFile(`${recovery}/files/Home.md`, "utf8"), latest);
+  assert.equal(await readFile(`${recovery}/files/New.md`, "utf8"), "최신 추가 문서");
+  await page.screenshot({ path: "output/playwright/backup-restored.png" });
+  report.checks.push("calendar date/record selection shows additions/modifications/deletions; confirmation required; restore changes disk and refreshes UI while preserving HEAD and original recovery files");
+  await app.close(); await rename(vaultRoot, `${vaultRoot}-offline`); await start();
+  await page.getByRole("dialog", { name: "설정", exact: true }).waitFor();
+  assert.match(await page.locator(".settings-section").innerText(), /보관함을 열지 못했습니다/);
+  assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, vaultRoot);
+  await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, `${vaultRoot}-offline`);
+  await page.getByRole("button", { name: "폴더 선택·추가", exact: true }).click();
+  await page.locator(".vault-switch strong").filter({ hasText: "내 노트-offline" }).waitFor();
+  assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, `${vaultRoot}-offline`);
+  report.checks.push("an unavailable saved folder opens Settings with an error and retains its path, without silently opening demo notes; choosing its new path recovers access");
+  assert.deepEqual(report.errors, []);
+  await writeFile("output/playwright/vault-history-runtime.json", JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+} catch (error) {
+  await page?.screenshot({ path: "output/playwright/vault-history-failure.png" }).catch(() => {});
+  console.error(await page?.locator("body").innerText().catch(() => "unavailable")); throw error;
+} finally { await app?.close(); }

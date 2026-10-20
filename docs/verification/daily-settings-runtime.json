@@ -1,0 +1,21 @@
+{
+  "checks": [
+    "Git address starts empty; daily backup remains disconnected",
+    "font list supports wheel to the last entry, keyboard End/Home/PageDown, search, selection and default reset",
+    "installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown",
+    "local autosave and font preferences persist; same-day restart does not add an automatic commit",
+    "missed previous-day backup is uploaded in the background on startup; stored schedule is daily",
+    "Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work",
+    "same-day re-enable shows the correct waiting state without adding another commit"
+  ],
+  "errors": [],
+  "remoteRequests": [],
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.9.0",
+    "version": "0.4.1"
+  },
+  "installedFontFamilies": 258
+}

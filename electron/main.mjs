@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { Vault } from "../core/vault.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission } from "../core/security.mjs";
 import { demoNotes } from "../core/demo.mjs";
+import { VaultRegistry } from "./vault-registry.mjs";
+import { GitHistory } from "../core/git-history.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 
@@ -40,7 +42,10 @@ let vault;
 let closeReady = false;
 let closePending = false;
 let recovery;
-let settings;
+let registry;
+let vaultError = "";
+let restoring = false;
+let activeMutations = 0;
 let gitBackup;
 
 function validateSender(event) {
@@ -56,31 +61,37 @@ function validateSender(event) {
 }
 
 function checkVault(args) {
-  if (!args || args.vaultId !== vault.id)
+  if (!vault || !args || args.vaultId !== vault.id)
     throw new Error("보관함이 변경되었습니다. 문서를 다시 열어 주세요.");
 }
 
+async function selectVault(root) {
+  const selected = await Vault.open(root, recovery);
+  const snapshot = await selected.snapshot();
+  await registry.select(selected.root);
+  vault = selected; vaultError = "";
+  await gitBackup.open(vault);
+  return snapshot;
+}
+
 async function initialVault() {
-  const demo = path.join(app.getPath("userData"), "처음 만나는 노트");
-  for (const [relative, content] of Object.entries(demoNotes)) {
-    const file = path.join(demo, relative);
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, content, { flag: "wx", mode: 0o600 }).catch(
-      (error) => {
+  try {
+    await registry.load();
+    if (registry.selected) return await Vault.open(registry.selected, recovery);
+    const demo = path.join(app.getPath("userData"), "처음 만나는 노트");
+    for (const [relative, content] of Object.entries(demoNotes)) {
+      const file = path.join(demo, relative);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content, { flag: "wx", mode: 0o600 }).catch((error) => {
         if (error.code !== "EEXIST") throw error;
-      },
-    );
-  }
-  let selected = demo;
-  try {
-    selected = JSON.parse(await readFile(settings, "utf8")).vaultRoot || demo;
-  } catch {
-    /* First launch uses only synthetic notes. */
-  }
-  try {
-    return await Vault.open(selected, recovery);
-  } catch {
-    return Vault.open(demo, recovery);
+      });
+    }
+    const selected = await Vault.open(demo, recovery);
+    await registry.select(selected.root);
+    return selected;
+  } catch (error) {
+    vaultError = `보관함을 열지 못했습니다. 설정에서 경로를 확인해 주세요. ${registry.selected ?? ""} · ${error.message}`;
+    return null;
   }
 }
 
@@ -88,20 +99,20 @@ app
   .whenReady()
   .then(async () => {
     recovery = path.join(app.getPath("userData"), "recovery");
-    settings = path.join(app.getPath("userData"), "settings.json");
+    registry = new VaultRegistry(path.join(app.getPath("userData"), "settings.json"));
     await mkdir(app.getPath("userData"), { recursive: true });
     vault = await initialVault();
     gitBackup = new GitController({
       settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
       onStatus: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status); },
     });
-    await gitBackup.open(vault);
+    if (vault) await gitBackup.open(vault);
     protocol.handle("notes", async (request) => {
       try {
         const url = new URL(request.url);
         if (url.host === "vault") {
           const parts = decodeURIComponent(url.pathname).slice(1).split("/");
-          if (parts.shift() !== vault.id)
+          if (!vault || parts.shift() !== vault.id)
             return new Response("Forbidden", { status: 403 });
           const asset = await vault.readAttachment(parts.join("/"));
           if (!asset.mime.startsWith("image/"))
@@ -172,7 +183,9 @@ app
       Menu.buildFromTemplate([
         {
           label: app.name,
-          submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
+          submenu: [{ role: "about" }, { type: "separator" },
+            { id: "dynote-settings", label: "설정…", accelerator: "CmdOrCtrl+,", click: () => window.webContents.send("notes:open-settings") },
+            { type: "separator" }, { role: "quit" }],
         },
         {
           label: "편집",
@@ -209,23 +222,31 @@ app
       console.error("Load failed:", code, text),
     );
     for (const [name, action] of Object.entries({
-      snapshot: () => vault.snapshot(),
+      snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
+      "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
+      "select-vault": (args) => {
+        if (!registry.roots.includes(args?.root)) throw new Error("등록된 보관함을 선택해 주세요.");
+        return selectVault(args.root);
+      },
+      "forget-vault": async (args) => { await registry.forget(args?.root); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
+      "git-history": (args) => { checkVault(args); return new GitHistory(vault).list(args.month); },
+      "git-preview": (args) => { checkVault(args); return new GitHistory(vault).preview(args.commit); },
+      "git-restore": (args) => {
+        checkVault(args);
+        return gitBackup.enqueue(async () => {
+          checkVault(args);
+          const result = await new GitHistory(vault).restore(args.commit, args.revision);
+          gitBackup.markDirty(vault.id);
+          return result;
+        });
+      },
       "pick-vault": async () => {
         const result = await dialog.showOpenDialog(window, {
-          properties: ["openDirectory"],
+          properties: ["openDirectory", "createDirectory"],
           title: "Markdown 보관함 선택",
         });
         if (result.canceled) return null;
-        const selected = await Vault.open(result.filePaths[0], recovery);
-        const snapshot = await selected.snapshot();
-        await writeFile(
-          settings,
-          JSON.stringify({ vaultRoot: selected.root }),
-          { mode: 0o600 },
-        );
-        vault = selected;
-        await gitBackup.open(vault);
-        return snapshot;
+        return selectVault(result.filePaths[0]);
       },
       "git-status": (args) => { checkVault(args); return gitBackup.status(); },
       "git-connect": (args) => { checkVault(args); return gitBackup.connect(vault.id, args.config); },
@@ -238,11 +259,7 @@ app
         if (result.canceled) return null;
         checkVault(args);
         await GitBackup.clone(result.filePaths[0], config);
-        const selected = await Vault.open(result.filePaths[0], recovery);
-        const snapshot = await selected.snapshot();
-        await writeFile(settings, JSON.stringify({ vaultRoot: selected.root }), { mode: 0o600 });
-        vault = selected;
-        await gitBackup.open(vault);
+        const snapshot = await selectVault(result.filePaths[0]);
         try { await gitBackup.connect(vault.id, config); }
         catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
         return snapshot;
@@ -317,25 +334,37 @@ app
         return vault.restoreTrash(args.id);
       },
       recovery: async () => {
-        await mkdir(vault.recoveryRoot, { recursive: true });
-        return shell.openPath(vault.recoveryRoot);
+        const root = vault?.recoveryRoot ?? recovery;
+        await mkdir(root, { recursive: true });
+        return shell.openPath(root);
       },
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone"].includes(name);
+        const readOnly = ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
+        let locked = false;
         try {
           validateSender(event);
+          if (!readOnly) {
+            if (restoring || (exclusive && activeMutations)) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+            if (exclusive) restoring = true;
+            activeMutations++; locked = true;
+          }
           const id = vault?.id;
           const value = await action(args);
           if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash"].includes(name)) gitBackup.markDirty(id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };
+        } finally {
+          if (locked) { activeMutations--; if (exclusive) restoring = false; }
         }
       });
     ipcMain.on("notes:close-ready", (event) => {
       try {
         validateSender(event);
+        if (restoring) return;
         closeReady = true;
         window.close();
       } catch {
@@ -345,6 +374,7 @@ app
     window.on("close", (event) => {
       if (closeReady || window.webContents.isDestroyed()) return;
       event.preventDefault();
+      if (restoring) return;
       if (!closePending) {
         closePending = true;
         window.webContents.send("notes:before-close");

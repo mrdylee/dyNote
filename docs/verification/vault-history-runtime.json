@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "native Settings menu opens; folder selection persists across restart; switching and removing a recent entry preserves the actual folder",
+    "calendar date/record selection shows additions/modifications/deletions; confirmation required; restore changes disk and refreshes UI while preserving HEAD and original recovery files",
+    "an unavailable saved folder opens Settings with an error and retains its path, without silently opening demo notes; choosing its new path recovers access"
+  ],
+  "errors": [],
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "electron": "44.9.0"
+  }
+}

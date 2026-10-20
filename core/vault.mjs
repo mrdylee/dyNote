@@ -131,6 +131,120 @@ export class Vault {
     return this.#snapshot();
   }
 
+  captureFiles() { return this.#enqueue(() => this.#captureFiles()); }
+
+  async #captureFiles() {
+    const files = [];
+    let total = 0;
+    const walk = async (directory, prefix = "") => {
+      for (const item of await readdir(directory, { withFileTypes: true })) {
+        if (item.name.startsWith(".")) continue;
+        const relative = prefix + item.name;
+        if (item.isSymbolicLink()) {
+          if (validFilePath(relative)) throw new Error(`심볼릭 링크는 복원할 수 없습니다: ${relative}`);
+          continue;
+        }
+        if (item.isDirectory()) await walk(path.join(directory, item.name), relative + "/");
+        else if (validFilePath(relative)) {
+          const file = await this.#binary(relative);
+          total += file.bytes.length;
+          if (total > 512 * 1024 * 1024) throw new Error("한 번에 복원할 보관함은 512MB 이하여야 합니다.");
+          files.push(file);
+        }
+      }
+    };
+    await walk(this.root);
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    return { files, revision: digest(JSON.stringify(files.map((file) => [file.path, file.revision]))) };
+  }
+
+  async #restoreTarget(relative) {
+    if (!validFilePath(relative)) throw new Error("잘못된 복원 경로입니다.");
+    let target = this.root;
+    const parts = relative.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      target = path.join(target, parts[i]);
+      const info = await lstat(target).catch((error) => { if (error.code !== "ENOENT") throw error; });
+      if (info && (info.isSymbolicLink() || (i < parts.length - 1 ? !info.isDirectory() : !info.isFile())))
+        throw new Error(`복원 경로에 링크 또는 다른 종류의 파일이 있습니다: ${relative}`);
+    }
+    return target;
+  }
+
+  applySnapshot(files, expectedRevision) {
+    return this.#enqueue(async () => {
+      await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });
+      const recoveryRoot = await realpath(this.recoveryRoot);
+      if (recoveryRoot === this.root || recoveryRoot.startsWith(this.root + path.sep))
+        throw new Error("복구 사본 폴더가 보관함 안에 있습니다. 별도 노트 폴더를 선택해 주세요.");
+      const before = await this.#captureFiles();
+      if (before.revision !== expectedRevision) throw new Error("미리보기 이후 파일이 변경되었습니다. 복원 내용을 다시 확인해 주세요.");
+      const current = new Map(before.files.map((file) => [file.path, file]));
+      const target = new Map();
+      const names = new Map();
+      for (const file of [...before.files, ...files]) {
+        if (!validFilePath(file.path)) throw new Error("잘못된 복원 경로입니다.");
+        const parts = file.path.split("/");
+        for (let i = 1; i <= parts.length; i++) {
+          const name = parts.slice(0, i).join("/"), key = name.normalize("NFC").toLowerCase();
+          if (names.has(key) && names.get(key) !== name)
+            throw new Error("대소문자 또는 유니코드 표기만 다른 중복 경로가 있습니다. Git 도구에서 경로를 정리해 주세요.");
+          names.set(key, name);
+        }
+      }
+      let total = 0;
+      for (const file of files) {
+        if (!Buffer.isBuffer(file.bytes) || file.bytes.length > 25 * 1024 * 1024 || target.has(file.path))
+          throw new Error("잘못되었거나 너무 큰 복원 파일입니다.");
+        total += file.bytes.length;
+        if (total > 512 * 1024 * 1024) throw new Error("복원 파일은 총 512MB 이하여야 합니다.");
+        await this.#restoreTarget(file.path);
+        target.set(file.path, { ...file, revision: digest(file.bytes) });
+      }
+      const changes = [...new Set([...current.keys(), ...target.keys()])]
+        .filter((name) => current.get(name)?.revision !== target.get(name)?.revision);
+      const recoveryPath = path.join(this.recoveryRoot, "git-restore", randomUUID());
+      await mkdir(path.join(recoveryPath, "files"), { recursive: true, mode: 0o700 });
+      for (const file of before.files) {
+        const saved = path.join(recoveryPath, "files", file.path);
+        await mkdir(path.dirname(saved), { recursive: true, mode: 0o700 });
+        await writeFile(saved, file.bytes, { flag: "wx", mode: 0o600 });
+      }
+      await writeFile(path.join(recoveryPath, "manifest.json"), JSON.stringify({
+        createdAt: new Date().toISOString(), revision: before.revision,
+        files: before.files.map(({ path, revision }) => ({ path, revision })),
+      }), { flag: "wx", mode: 0o600 });
+      if ((await this.#captureFiles()).revision !== expectedRevision)
+        throw new Error(`복구 사본 생성 중 파일이 변경되었습니다. 다시 확인해 주세요. 복구 사본: ${recoveryPath}`);
+      const readCurrent = (name) => this.#binary(name).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
+      const replace = async (name, file) => {
+        if (!file) { await unlink(await this.#file(name)); return; }
+        const destination = await this.#file(name, true);
+        const temporary = path.join(path.dirname(destination), `.open-notes-${randomUUID()}.tmp`);
+        try {
+          await writeFile(temporary, file.bytes, { flag: "wx", mode: 0o600 });
+          await rename(temporary, destination);
+        } finally { await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; }); }
+      };
+      const applied = [];
+      try {
+        for (const name of changes) {
+          if ((await readCurrent(name))?.revision !== current.get(name)?.revision)
+            throw new Error(`복원 중 외부 변경이 감지되었습니다: ${name}`);
+          await replace(name, target.get(name)); applied.push(name);
+        }
+        return { recoveryPath, snapshot: await this.#snapshot() };
+      } catch (error) {
+        for (const name of applied.reverse()) {
+          try {
+            if ((await readCurrent(name))?.revision === target.get(name)?.revision) await replace(name, current.get(name));
+          } catch { /* Keep recovery copies; never overwrite an external edit during rollback. */ }
+        }
+        throw new Error(`${error.message} 복구 사본: ${recoveryPath}`);
+      }
+    });
+  }
+
   async #snapshot() {
     const notes = [];
     const warnings = [];

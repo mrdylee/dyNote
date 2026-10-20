@@ -28,11 +28,13 @@ const setup = async () => {
 };
 try {
   await setup();
-  await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
-  assert.equal(await page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true }).inputValue(), "10");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "Git 백업", exact: true }).click();
   assert.equal(await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).inputValue(), "");
   assert.equal(await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).isDisabled(), true);
-  report.checks.push("Git address starts empty and the minute input defaults to 10; backup remains disconnected");
+  assert.match(await page.locator(".daily-backup-info").innerText(), /하루 한 번/);
+  report.checks.push("Git address starts empty; daily backup remains disconnected");
+  await page.getByRole("button", { name: "글꼴", exact: true }).click();
   await page.getByRole("button", { name: "설치 글꼴 불러오기", exact: true }).click();
   await page.getByRole("status").filter({ hasText: /개 설치 글꼴/ }).waitFor();
   assert.equal(await page.getByLabel("본문 글꼴 목록", { exact: true }).count(), 1, "installed fonts need an accessible, scrollable chooser rather than a datalist popup");
@@ -93,16 +95,11 @@ try {
   assert.equal(await page.locator(".cm-scroller").evaluate((el) => getComputedStyle(el).fontSize), "15px");
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), original);
   report.checks.push("installed fonts enumerated; samples, reading, Live Preview and source use chosen fonts and sizes without modifying Markdown");
-  await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "Git 백업", exact: true }).click();
   await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).fill(remote);
   await page.getByRole("textbox", { name: "Git 커밋 이름", exact: true }).fill("Runtime Test");
   await page.getByRole("textbox", { name: "Git 커밋 이메일", exact: true }).fill("runtime@example.invalid");
-  const interval = page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true });
-  for (const invalid of ["", "0", "1.5", "1441"]) {
-    await interval.fill(invalid);
-    assert.equal(await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).isDisabled(), true);
-  }
-  await interval.fill("1");
   await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".git-status")?.textContent === "Git 원격 저장 완료");
   assert.equal(git("--git-dir", bare, "show", "main:Home.md"), original);
@@ -113,31 +110,28 @@ try {
   await page.locator(".save-status").filter({ hasText: "모든 변경사항 저장됨" }).waitFor();
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), edited);
   assert.match(await page.locator(".git-status").innerText(), /대기/);
-  let uploaded = false;
-  for (let i = 0; i < 75; i++) {
-    if (git("--git-dir", bare, "show", "main:Home.md") === edited) { uploaded = true; break; }
-    await page.waitForTimeout(1000);
-  }
-  assert.equal(uploaded, true, "one-minute automatic backup must reach the bare remote");
-  report.checks.push("repository entered in settings; initial push and actual one-minute automatic commit/push preserve saved Markdown");
-  await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
-  await interval.fill(""); await interval.pressSequentially("17");
-  assert.equal(await interval.inputValue(), "17");
-  await page.getByRole("button", { name: "Git 설정 적용", exact: true }).click();
-  await page.waitForFunction(() => {
-    const button = document.querySelector(".settings-actions .primary-button");
-    return button && !button.disabled && document.querySelector(".git-status")?.textContent === "Git 원격 저장 완료";
-  });
-  assert.equal(Object.values(JSON.parse(await readFile(`${profile}/git-backup.json`, "utf8")))[0].interval, 1020);
-  await page.screenshot({ path: "output/playwright/git-minute-settings.png" });
+  assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "1");
   await app.close(); app = await launch(); await setup();
   assert.equal(await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontSize), "19px");
   assert.ok((await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontFamily)).includes(bodyFont));
-  report.checks.push("font preferences persist across app restart");
-  await page.getByRole("button", { name: "글꼴 및 Git 설정", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('[aria-label="Git 저장소 주소"]')?.value === "https://backup.test/runtime.git");
-  assert.equal(await page.getByRole("spinbutton", { name: "Git 자동 저장 간격 (분)", exact: true }).inputValue(), "17");
-  report.checks.push("arbitrary 17-minute interval can be typed, applied and restored after restart");
+  assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "1");
+  report.checks.push("local autosave and font preferences persist; same-day restart does not add an automatic commit");
+  await app.close();
+  const records = JSON.parse(await readFile(`${profile}/git-backup.json`, "utf8"));
+  const missed = new Date(); missed.setDate(missed.getDate() - 2);
+  const missedDay = `${missed.getFullYear()}-${String(missed.getMonth()+1).padStart(2,"0")}-${String(missed.getDate()).padStart(2,"0")}`;
+  for (const record of Object.values(records)) record.lastBackupDay = missedDay;
+  await writeFile(`${profile}/git-backup.json`, JSON.stringify(records));
+  app = await launch(); await setup();
+  await page.waitForFunction(() => document.querySelector(".git-status")?.textContent === "Git 원격 저장 완료");
+  assert.equal(git("--git-dir", bare, "show", "main:Home.md"), edited);
+  assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "2");
+  assert.equal(Object.values(JSON.parse(await readFile(`${profile}/git-backup.json`, "utf8")))[0].schedule, "daily");
+  report.checks.push("missed previous-day backup is uploaded in the background on startup; stored schedule is daily");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "Git 백업", exact: true }).click();
+  assert.equal(await page.locator(".settings-tabs [aria-current=page]").innerText(), "Git 백업");
+  await page.screenshot({ path: "output/playwright/git-daily-settings.png", animations: "disabled" });
   await rename(bare, bare + ".offline");
   await page.getByRole("button", { name: "지금 Git 저장", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".git-status")?.classList.contains("error"));
@@ -150,6 +144,12 @@ try {
   assert.equal(await page.getByRole("button", { name: "지금 Git 저장", exact: true }).isDisabled(), true);
   assert.equal(Object.values(JSON.parse(await readFile(`${profile}/git-backup.json`, "utf8")))[0].enabled, false);
   report.checks.push("Git configuration persists; offline error leaves local content intact; manual retry and persistent disconnect work");
+  await page.getByRole("button", { name: "연결하고 자동 저장 시작", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".git-status")?.textContent === "Git 일일 백업 대기 중");
+  assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "2");
+  await page.getByRole("button", { name: "자동 저장 끄기", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".git-status")?.textContent === "Git 자동 저장 꺼짐");
+  report.checks.push("same-day re-enable shows the correct waiting state without adding another commit");
   assert.deepEqual(report.errors, []); assert.deepEqual(report.remoteRequests, []);
   await writeFile("output/playwright/settings-runtime.json", JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));

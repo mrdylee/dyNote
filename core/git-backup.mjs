@@ -20,16 +20,15 @@ export function validateGitConfig(input) {
   const authorName = input?.authorName ?? "", authorEmail = input?.authorEmail ?? "";
   if (![authorName, authorEmail].every((v) => typeof v === "string" && v.length < 250 && !/[\x00-\x1f\x7f<>]/.test(v)) || (authorEmail && !/^[^\s@]+@[^\s@]+$/.test(authorEmail)))
     throw new Error("커밋 작성자 이름과 이메일을 확인해 주세요.");
-  const interval = Number.isInteger(input.interval) && input.interval >= 60 && input.interval <= 86400 && input.interval % 60 === 0 ? input.interval : 600;
-  return { remote, branch, authorName, authorEmail, interval, push: input.push !== false };
+  return { remote, branch, authorName, authorEmail, schedule: "daily", push: input.push !== false };
 }
 
-export function runGit(root, args, { input, env = process.env, allow = [0] } = {}) {
+export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8" } = {}) {
   const gitEnv = { ...env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"]) delete gitEnv[key];
   return new Promise((resolve, reject) => {
     const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, "-c", "core.autocrlf=false", "-c", "submodule.recurse=false", ...args], {
-      cwd: root, windowsHide: true, timeout: 60000, maxBuffer: 16 * 1024 * 1024,
+      cwd: root, windowsHide: true, timeout: 60000, maxBuffer: 32 * 1024 * 1024, encoding,
       env: { ...gitEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes", GIT_LITERAL_PATHSPECS: "1" },
     }, (error, stdout, stderr) => {
       const code = error?.code ?? 0;
@@ -104,13 +103,13 @@ export class GitBackup {
     return paths;
   }
 
-  async sync(input) {
+  async sync(input, { commit = true, revision, onCommit = async () => {} } = {}) {
     const config = validateGitConfig(input);
     await this.assertReady(config);
     const paths = await this.safePaths(), author = [];
     if (config.authorName) author.push("-c", `user.name=${config.authorName}`);
     if (config.authorEmail) author.push("-c", `user.email=${config.authorEmail}`);
-    if (paths.length) {
+    if (commit && paths.length) {
       const identity = await this.git([...author, "var", "GIT_AUTHOR_IDENT"], { allow: [0, 128] });
       if (identity.code) throw new Error("커밋 작성자 이름과 이메일을 입력하거나 Git 사용자 설정을 완료해 주세요.");
       const input = paths.join("\0") + "\0";
@@ -118,16 +117,24 @@ export class GitBackup {
       if ((await this.git(["diff", "--cached", "--name-only", "-z"])).stdout)
         await this.git([...author, "commit", "--no-gpg-sign", "--only", "-m", `Dynote backup ${new Date().toISOString()}`, "--pathspec-from-file=-", "--pathspec-file-nul"], { input });
     }
-    const head = (await this.git(["rev-parse", "--verify", "HEAD"], { allow: [0, 128] })).stdout.trim();
+    const head = revision ?? (await this.git(["rev-parse", "--verify", "HEAD"], { allow: [0, 128] })).stdout.trim();
+    if (revision) {
+      if (!/^[a-f0-9]{40,64}$/.test(revision)) throw new Error("잘못된 백업 기록입니다.");
+      if ((await this.git(["merge-base", "--is-ancestor", revision, "HEAD"], { allow: [0, 1] })).code)
+        throw new Error("전송 대기 백업의 Git 이력이 변경되었습니다. Git 상태를 확인해 주세요.");
+    }
+    if (commit) await onCommit(head);
     if (!head) return { phase: "ready", message: "Git에 저장할 문서가 없습니다." };
     if (!config.push) return { phase: "committed", message: "Git 로컬 커밋 완료 · 원격 업로드 꺼짐", commit: head };
     const remote = await this.remoteHead(config);
     if (remote && remote !== head) {
       await this.git(["fetch", "--no-tags", "--no-recurse-submodules", "--", config.remote, `refs/heads/${config.branch}`]);
-      const ancestor = await this.git(["merge-base", "--is-ancestor", remote, "HEAD"], { allow: [0, 1] });
+      if (revision && !(await this.git(["merge-base", "--is-ancestor", head, remote], { allow: [0, 1] })).code)
+        return { phase: "synced", message: "대기 백업의 원격 저장 확인 · 새 원격 변경은 Git에서 가져와 주세요.", commit: head, lastSuccess: new Date().toISOString() };
+      const ancestor = await this.git(["merge-base", "--is-ancestor", remote, head], { allow: [0, 1] });
       if (ancestor.code) throw new Error("원격에 다른 기기의 변경사항이 있습니다. Git에서 통합한 뒤 다시 시도해 주세요. 로컬 문서와 커밋은 보존됩니다.");
     }
-    await this.git(["push", "--porcelain", "--no-verify", "--recurse-submodules=no", "--", config.remote, `HEAD:refs/heads/${config.branch}`]);
+    await this.git(["push", "--porcelain", "--no-verify", "--recurse-submodules=no", "--", config.remote, `${head}:refs/heads/${config.branch}`]);
     return { phase: "synced", message: "Git 원격 저장 완료", commit: head, lastSuccess: new Date().toISOString() };
   }
 
