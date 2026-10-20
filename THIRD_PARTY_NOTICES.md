@@ -28,6 +28,17 @@ SOFTWARE.
 
 Other dependencies retain their licenses in their installed packages. Obsidian proprietary code and assets are not included.
 
+## GitHub Copilot integration
+
+`@github/copilot-sdk` 1.0.23 and its matching platform runtime (Copilot 1.0.100)
+are installed dependencies, published by GitHub under the MIT license. The SDK
+license is retained in `licenses/copilot-sdk/LICENSE`; dependency licenses in
+the installed packages remain with the application.
+Source and documentation: https://github.com/github/copilot-sdk.
+Use of GitHub's hosted Copilot service requires the user's own authorized
+account and is subject to its plan and service terms. No Obsidian code is used
+for this integration.
+
 ## Canvas and Bases (v0.3.0)
 
 - React Flow (`@xyflow/react` 12.12.0), https://github.com/xyflow/xyflow — MIT, Copyright (c) 2019-2025 webkid GmbH. Used as an installed UI library, with its packaged LICENSE retained.

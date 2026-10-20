@@ -48,6 +48,9 @@ import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
+import CopilotPanel from "./CopilotPanel.jsx";
+import { applyProposal } from "../core/copilot.mjs";
+import { isolateHistory } from "@codemirror/commands";
 import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
 
@@ -183,6 +186,9 @@ export default function App() {
   const [editorJump, setEditorJump] = useState(null);
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
+  const [rightTab, setRightTab] = useState("copilot");
+  const [editorSelection, setEditorSelection] = useState(null);
+  const editorView = useRef(null);
   const [status, setStatus] = useState("saved");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -247,6 +253,7 @@ export default function App() {
   );
 
   const install = useCallback((snapshot) => {
+    setEditorSelection(null);
     clearTimeout(timer.current);
     setVault(snapshot);
     if (!snapshot.id) { setSettingsTab("vault"); setModal("settings"); }
@@ -971,6 +978,13 @@ export default function App() {
                 </div>
               )}
               <IconButton
+                label="Copilot 채팅 열기"
+                active={right && rightTab === "copilot"}
+                onClick={() => { setRight(true); setRightTab("copilot"); }}
+              >
+                <Sparkles size={16} />
+              </IconButton>
+              <IconButton
                 label="문서 정보 패널"
                 active={right}
                 onClick={() => setRight(!right)}
@@ -1052,6 +1066,8 @@ export default function App() {
                     <Editor
                       key={note.path}
                       fontSettings={fonts}
+                      editorRef={editorView}
+                      onSelection={setEditorSelection}
                       note={note}
                       notes={model.notes}
                       onChange={change}
@@ -1130,14 +1146,27 @@ export default function App() {
           </footer>
         </main>
         {right && (
-          <aside className="context-panel">
-            <div className="context-tabs">
-              <span className="selected">
+          <aside className={`context-panel ${rightTab === "copilot" ? "with-copilot" : ""}`}>
+            <div className="context-tabs" role="tablist" aria-label="오른쪽 패널">
+              <button role="tab" aria-selected={rightTab === "info"} className={rightTab === "info" ? "selected" : ""} onClick={() => setRightTab("info")}>
                 <List size={14} />
                 문서 정보
-              </span>
-              <Link2 size={15} />
+              </button>
+              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />Copilot</button>
             </div>
+            <CopilotPanel key={vault.id ?? "missing"} api={api} vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
+              selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
+              onReview={() => { if (mode === "read") setMode("edit"); }}
+              onApply={async (proposal) => {
+                if (busy) throw new Error("저장 작업이 끝난 뒤 다시 적용해 주세요.");
+                const content = applyProposal(proposal.target, { vaultId: vault.id, ...note }, proposal.content);
+                const view = editorView.current;
+                if (view && !view.state.readOnly) {
+                  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });
+                } else changeFile(note.path, content);
+                await flush();
+              }} />
+            <div className="document-info" hidden={rightTab !== "info"}>
             {note && (
               <section className="context-section">
                 <div className="section-label">
@@ -1310,6 +1339,7 @@ export default function App() {
                 그래프 열기
                 <ChevronRight size={14} />
               </button>
+            </div>
             </div>
           </aside>
         )}

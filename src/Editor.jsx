@@ -37,6 +37,8 @@ export default function Editor({
   jump,
   readOnly = false,
   fontSettings,
+  onSelection,
+  editorRef,
 }) {
   const host = useRef(null);
   const editor = useRef(null);
@@ -49,7 +51,7 @@ export default function Editor({
   const readonly = useRef(new Compartment());
   const rendering = useRef(new Compartment());
   const latest = useRef(null);
-  latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink };
+  latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
   const liveExtensions = () => livePreview({
     getContext: () => ({ path: latest.current.note.path, vaultId: latest.current.vaultId, attachments: latest.current.attachments }),
     onLink: (target, kind) => latest.current.onLink?.(target, kind),
@@ -132,11 +134,27 @@ export default function Editor({
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !syncing.current)
               callback.current(update.state.doc.sliceString(0, update.state.doc.length, lineBreak.current));
+            if (update.selectionSet || update.docChanged) {
+              const { from, to } = update.state.selection.main;
+              if (from === to) {
+                latest.current.onSelection?.(null);
+                return;
+              }
+              const doc = update.state.doc, eol = lineBreak.current;
+              latest.current.onSelection?.({
+                path: latest.current.note.path,
+                source: doc.sliceString(0, doc.length, eol),
+                from: doc.sliceString(0, from, eol).length,
+                to: doc.sliceString(0, to, eol).length,
+              });
+            }
           }),
         ],
       }),
     });
     editor.current = view;
+    if (editorRef) editorRef.current = view;
+    latest.current.onSelection?.(null);
     async function importFiles(files, target) {
       const path = latest.current.note.path;
       try {
@@ -162,6 +180,7 @@ export default function Editor({
     return () => {
       view.destroy();
       editor.current = null;
+      if (editorRef?.current === view) editorRef.current = null;
     };
   }, []);
   useEffect(() => {

@@ -18,6 +18,7 @@ import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
+import { CopilotController } from "./copilot-controller.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -47,6 +48,7 @@ let vaultError = "";
 let restoring = false;
 let activeMutations = 0;
 let gitBackup;
+let copilot;
 
 function validateSender(event) {
   if (
@@ -66,6 +68,7 @@ function checkVault(args) {
 }
 
 async function selectVault(root) {
+  await copilot?.cancel();
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
   await registry.select(selected.root);
@@ -107,6 +110,13 @@ app
       onStatus: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status); },
     });
     if (vault) await gitBackup.open(vault);
+    copilot = new CopilotController({
+      directory: path.join(app.getPath("userData"), "copilot"),
+      openExternal: (url) => shell.openExternal(url),
+      onEvent: (event) => {
+        if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
+      },
+    });
     protocol.handle("notes", async (request) => {
       try {
         const url = new URL(request.url);
@@ -222,6 +232,11 @@ app
       console.error("Load failed:", code, text),
     );
     for (const [name, action] of Object.entries({
+      "copilot-status": () => copilot.status(),
+      "copilot-login": () => copilot.login(),
+      "copilot-cancel-login": () => copilot.cancelLogin(),
+      "copilot-send": (args) => { checkVault(args); return copilot.send(args); },
+      "copilot-cancel": (args) => copilot.cancel(args?.requestId),
       snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
       "select-vault": (args) => {
@@ -342,7 +357,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone"].includes(name);
-        const readOnly = ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -391,4 +406,8 @@ app
     app.exit(1);
   });
 
-app.on("window-all-closed", () => { gitBackup?.close(); app.quit(); });
+app.on("window-all-closed", async () => {
+  gitBackup?.close();
+  await Promise.race([copilot?.close(), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  app.quit();
+});

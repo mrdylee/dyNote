@@ -1,9 +1,11 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile, access } from "node:fs/promises";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import { extractFile, listPackage } from "@electron/asar";
 import assert from "node:assert/strict";
 
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
+const packageRoot = process.env.DYNOTE_PACKAGE_OUT || `release/v${version}`;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function files(directory) {
   const result = [];
@@ -21,9 +23,12 @@ for (const [platform, relative] of [
   ["darwin-arm64", "Dynote-darwin-arm64/Dynote.app/Contents/Resources/app.asar"],
   ["win32-x64", "Dynote-win32-x64/resources/app.asar"],
 ]) {
-  const archive = `release/v${version}/${relative}`;
+  const archive = `${packageRoot}/${relative}`;
   const contents = listPackage(archive);
-  assert.ok(!contents.some((name) => name.endsWith(".node") || name.includes("graph-simulation.wasm")));
+  assert.ok(!contents.some((name) => name.includes("graph-simulation.wasm")));
+  const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
+  await access(path.join(`${archive}.unpacked`, runtime, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"));
+  await access(path.join(`${archive}.unpacked`, runtime, "runtime.node"));
   assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src)\//.test(name)));
   for (const file of sources)
     assert.deepEqual(extractFile(archive, file), await readFile(file), `${platform}: ${file}`);
@@ -33,8 +38,7 @@ for (const [platform, relative] of [
   const wasm = contents.find((name) => /^\/dist\/assets\/graph-.*\.wasm$/.test(name));
   assert.ok(wasm);
   assert.ok(contents.some((name) => /^\/dist\/assets\/graph.worker-.*\.js$/.test(name)));
-  report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extractFile(archive, wasm.slice(1))), nativeNodeAddonsIncluded: false });
+  report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extractFile(archive, wasm.slice(1))), copilotRuntimeIncluded: true });
 }
-assert.equal(report.packages[0].asarSha256, report.packages[1].asarSha256);
-await writeFile(`docs/verification/dynote-v${version}-release-package.json`, JSON.stringify(report, null, 2) + "\n");
+await writeFile(process.env.DYNOTE_PACKAGE_OUT ? "docs/verification/copilot-package.json" : `docs/verification/dynote-v${version}-release-package.json`, JSON.stringify(report, null, 2) + "\n");
 console.log(JSON.stringify(report, null, 2));

@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "Real SDK starts from this Electron app and reports authentication state",
+    "Current-note context, live streaming and model selection work through IPC",
+    "Selected text alone is sent; reviewed apply preserves CRLF; editor undo restores original bytes",
+    "Remounting the editor clears stale selections before any context can be sent",
+    "A response cannot overwrite text typed after the request",
+    "Stop retains the draft; no-context requests exclude notes; note switching clears chat; composer fits 1050x700",
+    "Applying an AI proposal respects the existing disk revision check and preserves external edits"
+  ],
+  "errors": [],
+  "liveModelResponseVerified": false,
+  "liveAccountLoginVerified": false,
+  "runtime": {
+    "packaged": true,
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.9.0"
+  },
+  "sdkRuntimeStarted": true,
+  "authenticated": false
+}

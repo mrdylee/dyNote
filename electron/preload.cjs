@@ -4,6 +4,16 @@ contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
     snapshot: () => call("snapshot"),
+    copilotStatus: () => call("copilot-status"),
+    copilotLogin: () => call("copilot-login"),
+    copilotCancelLogin: () => call("copilot-cancel-login"),
+    copilotSend: (args) => call("copilot-send", args),
+    copilotCancel: (args) => call("copilot-cancel", args),
+    onCopilotEvent: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:copilot-event", listener);
+      return () => ipcRenderer.removeListener("notes:copilot-event", listener);
+    },
     pickVault: () => call("pick-vault"),
     vaults: () => call("vaults"),
     selectVault: (args) => call("select-vault", args),
