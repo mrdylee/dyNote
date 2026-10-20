@@ -29,7 +29,9 @@ export class CopilotController {
       }
       return new CopilotClient({
         connection,
-        mode: "empty", baseDirectory: directory, workingDirectory: path.join(directory, "workspace"),
+        // Empty mode forcibly disables the OS credential store in SDK 1.0.23.
+        // Keep desktop sign-in enabled; sessionOptions restricts all AI sessions.
+        mode: "copilot-cli", baseDirectory: directory, workingDirectory: path.join(directory, "workspace"),
         env: runtimeEnvironment(), useLoggedInUser: true, logLevel: "error", enableRemoteSessions: false,
       });
     });
@@ -87,6 +89,7 @@ export class CopilotController {
       if (!status.models.some((model) => model.id === args.model))
         throw new Error(status.error || "선택한 모델을 사용할 수 없습니다. 연결 상태를 새로 확인해 주세요.");
       job.session = await client.createSession(sessionOptions(args.model, args.mode));
+      await job.session.rpc.options.update({ installedPlugins: [] });
       if (job.canceled) return;
       unsubscribe = job.session.on((event) => {
         if (job.canceled || job.failure) return;
@@ -153,6 +156,7 @@ export class CopilotController {
       client = await this.client();
       if (job.canceled) return;
       job.session = await client.createSession(sessionOptions(null, "chat"));
+      await job.session.rpc.options.update({ installedPlugins: [] });
       if (job.canceled) return;
       const login = job.session.rpc.accounts.login;
       const begun = await login.begin({ kind: "githubDotCom" });
