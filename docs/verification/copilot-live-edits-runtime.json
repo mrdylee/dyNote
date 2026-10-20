@@ -1,0 +1,21 @@
+{
+  "checks": [
+    "Two cumulative tool edits appear before done, green pending lines; disk unchanged until Keep; Undo preserves original CRLF",
+    "Keep writes exact CRLF content through real vault API",
+    "Stop retains completed draft batches and enables Keep/Undo without saving disk",
+    "Live selection edit cannot overwrite unshared prefix/suffix",
+    "Typing stops further AI application; destructive Undo disabled; Keep preserves user edits; late tool output ignored",
+    "Draft follows its target across tabs and survives normal app close/restart outside vault/Git",
+    "External revision conflict blocks Keep; recovery note preserves current/AI/original text without overwriting disk",
+    "New note previews in center editor before done; Keep creates it atomically",
+    "Disk change before the first batch retains the original revision; Keep cannot overwrite external content",
+    "First-batch create collision preserves the AI recovery draft and the existing disk file",
+    "Response errors retain completed batches for explicit Undo",
+    "Immediate request flushes unsaved text before live edits; another request waits for pending drafts",
+    "Closing right panel stops generation while center draft and Undo remain accessible"
+  ],
+  "errors": [],
+  "model": "deterministic; actual noteTools, editor, vault and journal",
+  "windowsNative": false,
+  "packaged": true
+}

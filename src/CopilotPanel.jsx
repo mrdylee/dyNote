@@ -16,7 +16,7 @@ const markdown = new MarkdownIt({ html: false, breaks: true });
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[이미지: ${tokens[index].content}]`);
 const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
-export default function CopilotPanel({ api, vaultId, note, notes = [], selection, busy, onApply, onReview, visible }) {
+export default function CopilotPanel({ api, vaultId, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive }) {
   const label = "Copilot";
   const accountLabel = "GitHub";
   const ai = {
@@ -46,7 +46,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
   const previousPath = useRef(note?.path);
   const checkedConnection = useRef(false);
   const latest = useRef(null);
-  latest.current = { note, notes, vaultId, onApply, busy };
+  latest.current = { note, notes, vaultId, onApply, busy, liveEdits, onBeginLive };
   const refresh = async () => {
     setChecking(true); setError("");
     try {
@@ -81,11 +81,13 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
         const proposal = event.proposal;
         // Only the renderer has the complete document when sharing a selection.
         if (proposal.kind === "edit" && proposal.path === request.target?.path) proposal.target = request.target;
-        setProposals((old) => [...old, proposal]);
+        if (request.mode === "agent") latest.current.liveEdits.stage(proposal, request.requestId);
+        else setProposals((old) => [...old, proposal]);
       }
       if (event.type === "error") setError(event.error);
       if (event.type === "canceled") setError("응답을 중지했습니다. 질문을 수정해 다시 보낼 수 있습니다.");
       if (["done", "error", "canceled"].includes(event.type)) {
+        if (request.mode === "agent") latest.current.liveEdits.finish(request.requestId);
         if (event.type !== "done") { setProposals([]); setReview(null); }
         pending.current = null;
         setRunning(false);
@@ -94,7 +96,11 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     return () => {
       mounted.current = false;
       unsubscribe();
-      if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
+      if (pending.current) {
+        ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
+        latest.current.liveEdits.stop();
+        latest.current.liveEdits.finish(pending.current.requestId);
+      }
       if (loginPending.current) ai.cancelLogin().catch(() => {});
     };
   }, []);
@@ -127,7 +133,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
-  const canSend = connection.authenticated && model && prompt.trim() && !checking && !authBusy && !busy && !applying && vaultId;
+  const canSend = connection.authenticated && model && prompt.trim() && !checking && !authBusy && !busy && !applying && vaultId && liveEdits.ready && !liveEdits.blocked();
   const send = async (event) => {
     event?.preventDefault();
     if (pending.current || running || !canSend) return;
@@ -143,12 +149,15 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       pending.current = { ...args, target, inputPrompt: prompt };
+      if (mode === "agent") await latest.current.onBeginLive(requestId);
+      if (!mounted.current) { latest.current.liveEdits.stop(); await latest.current.liveEdits.finish(requestId); return; }
       setMessages((old) => [...old,
         { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },
         { id: requestId, role: "assistant", content: "", complete: false, mode },
       ]);
       await invoke(ai.send(args));
     } catch (e) {
+      if (pending.current?.mode === "agent") latest.current.liveEdits.finish(pending.current.requestId);
       pending.current = null; setRunning(false); setError(e.message);
     }
   };
@@ -204,6 +213,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
         <button disabled={running || applying} onClick={() => setProposals((old) => old.filter((p) => p.id !== proposal.id))}>버리기</button>
       </div>)}
     </div>
+    {!!liveEdits.drafts.length && <div className="copilot-pending-list"><strong>미확정 문서 {liveEdits.drafts.length}개</strong>{liveEdits.drafts.map((draft) => <button key={draft.path} onClick={() => onReview(draft.path)}>{draft.path}</button>)}<small>가운데 편집기에서 유지하거나 되돌려 주세요.</small></div>}
     {error && !review && <p className="copilot-error" role="alert">{error}</p>}
     <form className="copilot-composer" onSubmit={send}>
       <div className="copilot-context-row">
@@ -233,7 +243,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
           <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
           {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select></label>}
-          {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message))}><Square size={15} />중지</button>
+          {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => { liveEdits.stop(); invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message)); }}><Square size={15} />중지</button>
             : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!canSend}><ArrowUp size={16} /></button>}
         </div>
       </div>

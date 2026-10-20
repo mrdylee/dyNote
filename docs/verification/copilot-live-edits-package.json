@@ -1,0 +1,15 @@
+{
+  "platform": "darwin-arm64",
+  "asarSha256": "ee7943f2fe84ec4a9d913af9a5a36250e615e723f2f1ee1ede393fc53553d722",
+  "matchedSourceAndBundleFiles": 204,
+  "copilotRuntimeIncluded": true,
+  "windowsNative": false,
+  "installedPath": "/Applications/Dynote.app",
+  "backupPath": "/Users/james_black/work/project/REA/open-notes/output/installed-before-live-edits-20261020/Dynote.app",
+  "installedAsarMatches": true,
+  "installedLaunchVerified": true,
+  "existingVaultOpened": true,
+  "copilotAccountRestored": true,
+  "modelSelectionRestored": "Auto",
+  "unsentPromptBeforeRestart": false
+}

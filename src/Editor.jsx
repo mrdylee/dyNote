@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import { EditorState, Compartment } from "@codemirror/state";
+import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
   lineNumbers,
   highlightActiveLine,
   drawSelection,
+  Decoration,
 } from "@codemirror/view";
 import {
   defaultKeymap,
@@ -22,6 +23,7 @@ import {
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { suggestNotes } from "../core/knowledge.mjs";
+import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 
@@ -39,6 +41,7 @@ export default function Editor({
   fontSettings,
   onSelection,
   editorRef,
+  pendingOriginal,
 }) {
   const host = useRef(null);
   const editor = useRef(null);
@@ -48,8 +51,10 @@ export default function Editor({
   // file's line endings, including when all existing newlines are deleted.
   lineBreak.current = note.content.match(/\r\n|\r|\n/)?.[0] ?? lineBreak.current;
   const syncing = useRef(false);
+  const wasPending = useRef(false);
   const readonly = useRef(new Compartment());
   const rendering = useRef(new Compartment());
+  const pendingMarks = useRef(new Compartment());
   const latest = useRef(null);
   latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
   const liveExtensions = () => livePreview({
@@ -64,6 +69,7 @@ export default function Editor({
         doc: note.content,
         extensions: [
           lineNumbers(),
+          pendingMarks.current.of([]),
           readonly.current.of(EditorState.readOnly.of(readOnly)),
           history(),
           drawSelection(),
@@ -211,10 +217,23 @@ export default function Editor({
       syncing.current = true;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: note.content },
+        annotations: Transaction.addToHistory.of(pendingOriginal === undefined && !wasPending.current),
       });
       syncing.current = false;
     }
-  }, [note.path, note.content]);
+    wasPending.current = pendingOriginal !== undefined;
+  }, [note.path, note.content, pendingOriginal]);
+  useEffect(() => {
+    const view = editor.current;
+    if (!view) return;
+    const range = pendingOriginal === undefined ? null : changedRange(pendingOriginal.replace(/\r\n|\r/g, "\n"), view.state.doc.toString());
+    const marks = [];
+    if (range) {
+      const first = view.state.doc.lineAt(range.from).number, last = view.state.doc.lineAt(Math.min(range.to, view.state.doc.length)).number;
+      for (let number = first; number <= last; number++) marks.push(Decoration.line({ class: "cm-copilot-pending" }).range(view.state.doc.line(number).from));
+    }
+    view.dispatch({ effects: pendingMarks.current.reconfigure(EditorView.decorations.of(Decoration.set(marks))) });
+  }, [pendingOriginal, note.content]);
   useEffect(() => {
     if (!jump || jump.path !== note.path) return;
     let fragment;

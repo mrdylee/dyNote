@@ -3,5 +3,6 @@
   "liveModelVerified": true,
   "syntheticContextOnly": true,
   "modelReadAndDrafted": true,
+  "cumulativeBatchesBeforeDone": 2,
   "vaultFilesWritten": false
 }

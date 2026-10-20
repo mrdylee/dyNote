@@ -1,0 +1,188 @@
+const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import assert from "node:assert/strict";
+const profile = await mkdtemp(`${tmpdir()}/dynote-live-edits-`), vaultRoot = `${profile}/vault`;
+await mkdir(vaultRoot);
+const original = "# Home\r\n\r\noriginal\r\nend";
+await writeFile(`${vaultRoot}/Home.md`, original);
+await writeFile(`${vaultRoot}/Ref.md`, "# Reference\nreference");
+await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
+const report = { checks: [], errors: [], model: "deterministic; actual noteTools, editor, vault and journal", windowsNative: false };
+const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile, HOME: profile, GH_TOKEN: "", GITHUB_TOKEN: "", COPILOT_GITHUB_TOKEN: "" } });
+let app = await launch(), page;
+async function setup() {
+  page = await app.firstWindow(); page.setDefaultTimeout(12000);
+  page.on("pageerror", (e) => report.errors.push(e.message));
+  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  report.packaged = await app.evaluate(({ app }) => app.isPackaged);
+  await app.evaluate(({ ipcMain, app }) => {
+    const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
+    const { noteTools } = require(`${app.getAppPath()}/core/copilot-agent.mjs`);
+    globalThis.liveRequests = [];
+    ipcMain.removeHandler("notes:copilot-status");
+    ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: "auto", name: "Auto" }] } }));
+    ipcMain.removeHandler("notes:copilot-send");
+    ipcMain.handle("notes:copilot-send", (event, args) => {
+      globalThis.liveRequests.push(args);
+      globalThis.liveEmit = (type, data = {}) => event.sender.send("notes:copilot-event", { requestId: args.requestId, type, ...data });
+      globalThis.liveTools = noteTools({ args, canceled: () => false, emit: globalThis.liveEmit });
+      return { ok: true, value: { requestId: args.requestId } };
+    });
+    ipcMain.removeHandler("notes:copilot-cancel");
+    ipcMain.handle("notes:copilot-cancel", () => { globalThis.liveEmit?.("canceled"); return { ok: true }; });
+  });
+  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
+  await page.getByLabel("Copilot 모델").selectOption("auto");
+}
+async function ask(text = "append") {
+  await page.getByLabel("Copilot 질문").fill(text);
+  await page.getByRole("button", { name: "Copilot 보내기" }).click();
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  await app.evaluate(() => globalThis.liveTools.find((t) => t.name === "dynote_read_note").handler({ path: globalThis.liveRequests.at(-1).context.path }));
+}
+async function edit(content) {
+  const result = await app.evaluate((_, content) => globalThis.liveTools.find((t) => t.name === "dynote_edit_note").handler({ path: globalThis.liveRequests.at(-1).context.path, operation: "append", content }), content);
+  assert.equal(result.resultType, "success");
+}
+async function done() {
+  await app.evaluate(() => globalThis.liveEmit("done", { content: "변경을 확인해 주세요." }));
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor({ state: "hidden" });
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+}
+async function waitText(text) { await page.waitForFunction((text) => document.querySelector(".cm-content")?.textContent.includes(text), text); }
+async function resolve(name) {
+  await page.getByRole("button", { name, exact: true }).click();
+  await page.getByLabel("Copilot 실시간 변경").waitFor({ state: "hidden" });
+}
+try {
+  await setup();
+  await page.locator('.file-row[title="Home.md"]').click();
+  await ask(); await edit("\nA"); await waitText("A");
+  assert.equal(await page.getByRole("button", { name: "Copilot 응답 중지" }).isVisible(), true);
+  assert.ok(await page.locator(".cm-copilot-pending").count());
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), original);
+  await edit("\nB"); await waitText("B");
+  assert.match(await page.locator(".cm-content").innerText(), /A\nB/);
+  assert.equal(await page.getByLabel("Copilot 질문").isVisible(), true);
+  await mkdir("output/playwright", { recursive: true });
+  await page.screenshot({ path: "output/playwright/copilot-live-edits.png" });
+  await done(); await resolve("변경 되돌리기");
+  await page.locator(".cm-content").press("ControlOrMeta+z");
+  assert.equal((await page.locator(".cm-line").allTextContents()).join("\n"), original.replaceAll("\r\n", "\n"));
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), original);
+  report.checks.push("Two cumulative tool edits appear before done, green pending lines; disk unchanged until Keep; Undo preserves original CRLF");
+  await ask(); await edit("\nKept"); await waitText("Kept"); await done(); await resolve("변경 유지");
+  const kept = original + "\r\nKept";
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), kept);
+  report.checks.push("Keep writes exact CRLF content through real vault API");
+  await ask(); await edit("\nStopped"); await waitText("Stopped");
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  assert.match(await page.locator(".cm-content").innerText(), /Stopped/);
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), kept);
+  await resolve("변경 되돌리기");
+  report.checks.push("Stop retains completed draft batches and enables Keep/Undo without saving disk");
+  // Capture a real selection using CodeMirror's public editor view.
+  await page.getByRole("button", { name: "편집 보기", exact: true }).click();
+  const editor = page.locator(".cm-content");
+  await editor.click(); await editor.press("ControlOrMeta+Home"); await editor.press("ArrowDown"); await editor.press("ArrowDown"); await editor.press("Home"); await editor.press("Shift+End");
+  await page.getByLabel("Copilot 전달 범위").selectOption("selection");
+  await ask();
+  assert.equal((await app.evaluate(() => globalThis.liveRequests.at(-1))).context.content, "original");
+  await edit(" SELECTED"); await waitText("SELECTED"); await done(); await resolve("변경 유지");
+  const selected = kept.replace("original", "original SELECTED");
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), selected);
+  await page.getByLabel("Copilot 전달 범위").selectOption("document");
+  report.checks.push("Live selection edit cannot overwrite unshared prefix/suffix");
+  await ask(); await edit("\nDraft before typing"); await waitText("Draft before typing");
+  await editor.click(); await editor.press("ControlOrMeta+End"); await editor.pressSequentially(" USER");
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor({ state: "hidden" });
+  assert.equal(await page.getByRole("button", { name: "변경 되돌리기", exact: true }).isDisabled(), true);
+  await edit("\nLATE AI");
+  assert.doesNotMatch(await editor.innerText(), /LATE AI/);
+  await resolve("변경 유지");
+  const userVersion = selected + "\r\nDraft before typing USER";
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), userVersion);
+  report.checks.push("Typing stops further AI application; destructive Undo disabled; Keep preserves user edits; late tool output ignored");
+  await ask(); await edit("\nRecover after restart"); await waitText("Recover after restart"); await done();
+  await page.locator('.file-row[title="Ref.md"]').click();
+  assert.equal(await page.getByLabel("Copilot 실시간 변경").count(), 0);
+  await page.locator(".copilot-pending-list").getByRole("button", { name: "Home.md", exact: true }).click();
+  await waitText("Recover after restart");
+  await app.evaluate(({ session }) => session.defaultSession.flushStorageData());
+  await app.close(); app = await launch(); await setup();
+  await page.locator(".copilot-pending-list").getByRole("button", { name: "Home.md", exact: true }).click();
+  await waitText("Recover after restart");
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), userVersion);
+  await resolve("변경 되돌리기");
+  report.checks.push("Draft follows its target across tabs and survives normal app close/restart outside vault/Git");
+  await ask(); await edit("\nConflicting draft"); await waitText("Conflicting draft"); await done();
+  await writeFile(`${vaultRoot}/Home.md`, "external version");
+  await page.getByRole("button", { name: "변경 유지", exact: true }).click();
+  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), "external version");
+  await resolve("복구본 저장");
+  const snapshot = await page.evaluate(() => window.notes.snapshot());
+  const recovered = snapshot.value.notes.find((n) => n.path.startsWith("Copilot 복구"));
+  assert.match(recovered.content, /Conflicting draft/);
+  assert.match(recovered.content, /## 원본/);
+  assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), "external version");
+  report.checks.push("External revision conflict blocks Keep; recovery note preserves current/AI/original text without overwriting disk");
+  await page.locator('.file-row[title="Home.md"]').click(); await ask();
+  await app.evaluate(() => globalThis.liveTools.find((t) => t.name === "dynote_create_note").handler({ path: "Created.md", content: "# Created live" }));
+  await waitText("Created live");
+  assert.equal((await page.evaluate(() => window.notes.snapshot())).value.notes.some((n) => n.path === "Created.md"), false);
+  await done(); await resolve("변경 유지");
+  assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# Created live");
+  report.checks.push("New note previews in center editor before done; Keep creates it atomically");
+  await ask();
+  await writeFile(`${vaultRoot}/Created.md`, "# External before first batch");
+  await edit("\nFirst batch conflict");
+  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  await page.getByRole("button", { name: "변경 유지", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# External before first batch");
+  await resolve("복구본 저장");
+  const firstConflict = (await page.evaluate(() => window.notes.snapshot())).value.notes.filter((n) => n.path.startsWith("Copilot 복구")).find((n) => n.content.includes("First batch conflict"));
+  assert.ok(firstConflict);
+  report.checks.push("Disk change before the first batch retains the original revision; Keep cannot overwrite external content");
+  await ask();
+  await writeFile(`${vaultRoot}/Collision.md`, "# Created externally");
+  await app.evaluate(() => globalThis.liveTools.find((t) => t.name === "dynote_create_note").handler({ path: "Collision.md", content: "# AI collision draft" }));
+  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  await resolve("복구본 저장");
+  assert.equal(await readFile(`${vaultRoot}/Collision.md`, "utf8"), "# Created externally");
+  assert.ok((await page.evaluate(() => window.notes.snapshot())).value.notes.some((n) => n.path.startsWith("Copilot 복구") && n.content.includes("# AI collision draft")));
+  report.checks.push("First-batch create collision preserves the AI recovery draft and the existing disk file");
+  await page.locator('.file-row[title="Created.md"]').click();
+  await ask(); await edit("\nBefore error"); await waitText("Before error");
+  await app.evaluate(() => globalThis.liveEmit("error", { error: "Synthetic model failure" }));
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  assert.match(await page.locator(".cm-content").innerText(), /Before error/);
+  await resolve("변경 되돌리기");
+  report.checks.push("Response errors retain completed batches for explicit Undo");
+  await page.locator(".cm-content").click();
+  await page.locator(".cm-content").press("ControlOrMeta+End");
+  await page.locator(".cm-content").pressSequentially(" DIRTY");
+  await ask(); await edit("\nAfter flush"); await waitText("After flush"); await done();
+  assert.match((await app.evaluate(() => globalThis.liveRequests.at(-1))).context.content, /DIRTY$/);
+  assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# External before first batch DIRTY");
+  await page.getByLabel("Copilot 질문").fill("must wait");
+  assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), true);
+  await resolve("변경 되돌리기");
+  report.checks.push("Immediate request flushes unsaved text before live edits; another request waits for pending drafts");
+  await ask(); await edit("\nPanel closed draft"); await waitText("Panel closed draft");
+  await page.getByRole("button", { name: "문서 정보 패널", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  assert.equal(await page.getByLabel("Copilot 채팅", { exact: true }).count(), 0);
+  await resolve("변경 되돌리기");
+  report.checks.push("Closing right panel stops generation while center draft and Undo remain accessible");
+  assert.deepEqual(report.errors, []);
+} finally {
+  await app.evaluate(({ BrowserWindow }) => { setTimeout(() => BrowserWindow.getAllWindows().forEach((w) => w.destroy()), 30); }).catch(() => {});
+  await app.close();
+  await writeFile("docs/verification/copilot-live-edits-runtime.json", JSON.stringify(report, null, 2) + "\n");
+}
+console.log(JSON.stringify(report, null, 2));

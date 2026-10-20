@@ -29,35 +29,48 @@ GitHub.com sign-in, not the SDK's Enterprise Cloud or Entra login paths.
 - **Edit (수정 제안):** asks for replacement Markdown for the selected scope. Review
   **변경 내용 확인**, then click **문서에 적용**. The normal editor undo command
   can undo this edit. Applying uses local autosave and the existing Git schedule.
-- **Agent (문서 작업)** (Copilot): reads the current snapshot, then prepares
-  append/prepend/replacement or new-note proposals using Dynote tools. Ask
+- **Agent (문서 작업)** (Copilot): reads the current snapshot, then applies each
+  completed append/prepend/replacement or new-note tool operation to a live draft. Ask
   “현재 문서 끝에 시험 체크리스트를 추가해 줘” or “참고 문서를 요약해서 새 문서로 만들어 줘”.
-  Review each proposal, then apply or discard it. New notes open in the center
-  editor. Existing document edits support the normal editor undo command.
+  The center editor shows changes in green before the answer finishes. This is
+  completed-tool streaming, not token-by-token text animation. **변경 유지** saves
+  the draft; **변경 되돌리기** discards it. Use these buttons to resolve Agent
+  changes. **원본·초안 비교** shows the original and AI draft. New notes also
+  preview in the center editor before Keep creates the file.
 - **참고 문서:** search by name and attach up to five Markdown notes.
 - **보관함 검색·읽기 허용:** off by default. When enabled, the Agent can search
   note names/content and read additional vault notes. Search snippets and read
   content are transmitted to Copilot. Tool progress lists the work performed.
 
-Agent mode stages changes; it never writes files autonomously. New-note creation
+Agent mode stages changes; it never writes note files autonomously. New-note creation
 rejects existing paths. Markdown replies render formatting and code blocks;
 remote images and navigation links are not activated. Markdown tables render in the chat. Completed fenced `mermaid` blocks render as sanitized SVG diagrams; while streaming they remain code. Invalid diagrams stay as readable source with a syntax hint.
 
 **Enter** sends the question; **Shift+Enter** inserts a newline on Windows and macOS. IME composition Enter does not send. Agent/Ask/Edit and model selection (including Auto when available) are compact controls below the input. **중지** cancels an active response and keeps
-the prompt. Agent mode retains conversation/proposals when switching notes;
+the prompt. Completed Agent edits remain available after Stop or an error.
+Agent mode retains conversation/drafts when switching notes;
 Ask/edit mode clears them. Switching vaults or changing the context scope starts
 a new conversation. Closing the right panel cancels
-its pending operation. Conversations are not restored after reopening.
+its pending operation; pending drafts remain accessible in the center editor.
+Conversations are not restored after reopening.
 
-If the buffer changed while Copilot was answering, request a new proposal.
-External disk changes still trigger Dynote's normal conflict protection: they
-are not silently replaced. Keep/copy the unsaved draft and resolve the conflict
-before refreshing.
+Pending Agent drafts are journalled in local app storage, outside the vault and
+Git, and recovered when the same vault reopens. Resolve them before sending
+another request, changing vaults, reloading, renaming, deleting or restoring notes.
+Ordinary notes retain local autosave. Keep uses the existing Git backup schedule.
+Typing in a pending draft stops further AI application and preserves your edits.
+Destructive Undo is disabled in that case; choose Keep or **복구본 저장**.
+If a disk revision conflicts, Keep cannot overwrite it. **복구본 저장** creates
+a separate note containing the current draft, AI draft and original, and restores
+the source view from disk. The recovery journal is limited to 2 MiB; if storage
+fails, the app reports it and retains the in-memory draft. Resolve it before closing.
+For Edit mode, changed buffers still require a new proposal.
 
 Context is limited to 64 KiB, prompts to 8 KiB, retained dialogue to 32 KiB and
 answers to 128 KiB. Oversized input is rejected, not silently shortened.
 Attached notes have a combined 128 KiB limit. An Agent request allows up to
-24 tool calls, 256 KiB of reads and five proposals totaling up to 256 KiB.
+24 tool calls, 256 KiB of reads and five distinct draft documents. Cumulative
+emitted draft content totals at most 256 KiB, including repeated edits.
 Model availability, quota and organization policy are controlled by GitHub.
 Requests use the connected account's Copilot allowance. This is cloud inference;
 the chosen text and dialogue are transmitted to Copilot when sent.
@@ -71,8 +84,8 @@ generic permission requests, no configuration/skill/hook
 discovery, no host Git context or shared session store. Dynote exposes no
 arbitrary filesystem or command tools to the model.
 The four tools use `skipPermission` because they only read explicitly permitted
-snapshots or stage drafts. Actual writes still require the panel's reviewed apply
-action and go through the vault's path, exclusive-create and revision checks.
+snapshots or stage drafts. Actual note writes still require Keep (Agent) or
+reviewed Apply (Edit), and use the vault's path, exclusive-create and revision checks.
 
 Desktop sign-in uses the SDK's `copilot-cli` client mode because SDK 1.0.23
 forcibly disables the OS keychain in `empty` mode. Dynote explicitly sets the
@@ -93,7 +106,10 @@ permissions, streaming, cancellation, OAuth-state handling and cleanup.
 `tests/copilot-agent.test.mjs` covers note-tool access and request limits.
 `scripts/verify-copilot-tools.mjs` verifies the native SDK offered-tool list and
 dispatch without inference. `scripts/verify-copilot-agent-runtime.mjs` checks
-Electron UI/storage with deterministic inference. The opt-in
+attachments, safe replies and multiple pending documents in Electron.
+`scripts/verify-copilot-live-edits.mjs` checks live batches, scoped edits,
+Keep/Undo/Stop, user typing, disk conflicts, restart and panel-close recovery
+with deterministic inference and real vault writes. The opt-in
 `scripts/verify-copilot-agent-live.mjs` checks actual model tool use with synthetic
 text only; it requires an explicitly selected, already-connected profile.
 `scripts/verify-copilot-runtime.mjs` exercises real Electron, the actual bundled

@@ -80,3 +80,22 @@ test("reference text is scoped; duplicate current path cannot expand selection",
   assert.match((await f.call("read_note", { path: "Ref.md" })).textResultForLlm, /attached buffer/);
   assert.throws(() => request({ references: [{ path: current.path, content: "extra" }] }), /중복/);
 });
+test("successive edits stream cumulative drafts with a stable identity and original baseline", async () => {
+  const f = fixture();
+  await f.call("read_note", { path: "Current.md" });
+  assert.equal((await f.call("edit_note", { path: "Current.md", operation: "append", content: "\nA" })).resultType, "success");
+  assert.equal((await f.call("edit_note", { path: "Current.md", operation: "append", content: "\nB" })).resultType, "success");
+  assert.match((await f.call("read_note", { path: "Current.md" })).textResultForLlm, /A\\nB/);
+  const drafts = f.events.filter((e) => e.type === "proposal").map((e) => e.proposal);
+  assert.equal(drafts[0].id, drafts[1].id);
+  assert.equal(drafts[1].content, current.content + "\nA\nB");
+  assert.equal(drafts[1].target.original, current.content);
+});
+test("new note can be read and extended before acceptance without becoming an existing-note edit", async () => {
+  const f = fixture();
+  await f.call("create_note", { path: "New.md", content: "# New" });
+  await f.call("read_note", { path: "New.md" });
+  assert.equal((await f.call("edit_note", { path: "New.md", operation: "append", content: "\nNext" })).resultType, "success");
+  assert.equal(f.events.filter((e) => e.type === "proposal").at(-1).proposal.kind, "create");
+  assert.equal((await f.call("create_note", { path: "New.md", content: "duplicate" })).resultType, "failure");
+});

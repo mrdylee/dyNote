@@ -49,6 +49,8 @@ import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
+import useCopilotEdits from "./useCopilotEdits.jsx";
+import { overlayNotes } from "./copilotEdits.mjs";
 import { applyProposal } from "../core/copilot.mjs";
 import { isolateHistory } from "@codemirror/commands";
 import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
@@ -216,7 +218,18 @@ export default function App() {
   const queue = useRef(null);
   const timer = useRef(null);
   const preview = useRef(null);
-  const model = useMemo(() => buildKnowledge(raw), [raw]);
+  const edits = useCopilotEdits({ api, vaultId: vault?.id, notes: raw, onError: setError,
+    onOpen: (path) => { openNote(path); setMode("edit"); },
+    onSaved: (saved, removedPath) => {
+      for (const item of saved) revisions.current.set(item.path, item.revision);
+      setRaw((old) => [...old.filter((n) => n.path !== removedPath && !saved.some((item) => item.path === n.path)), ...saved]);
+    },
+  });
+  const editsRef = useRef(edits); editsRef.current = edits;
+  const effectiveNotes = useMemo(() => overlayNotes(raw, edits.drafts), [raw, edits.drafts]);
+  const model = useMemo(() => buildKnowledge(effectiveNotes), [effectiveNotes]);
+  const pendingEdit = edits.drafts.find((draft) => draft.path === active);
+  const [compareEdit, setCompareEdit] = useState(false);
   const note = model.notes.find((n) => n.path === active);
   const structured = documents.find((d) => d.path === active);
   const results = useMemo(
@@ -287,7 +300,8 @@ export default function App() {
     );
   }, []);
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (allowDrafts = false) => {
+    if (!allowDrafts && editsRef.current.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
     clearTimeout(timer.current);
     if (!queue.current?.dirty) return;
     setStatus("saving");
@@ -314,7 +328,8 @@ export default function App() {
       .catch((err) => setError(err.message));
     return api.onBeforeClose(async () => {
       try {
-        await flush();
+        await editsRef.current.close();
+        await flush(true);
         api.confirmClose();
       } catch {
         /* The draft stays in the open window. */
@@ -336,6 +351,7 @@ export default function App() {
     changeFile(note.path, content);
   };
   const changeFile = (path, content) => {
+    if (edits.edit(path, content)) return;
     const source = [...raw, ...documents].find((n) => n.path === path);
     if (!source || source.content === content || busy) return;
     queue.current.set({ path, content, revision: revisions.current.get(path) ?? source.revision });
@@ -343,7 +359,7 @@ export default function App() {
     if (documentKind(path)) setDocuments(update); else setRaw(update);
     setStatus("dirty");
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => flush().catch(() => {}), 700);
+    timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
   };
 
   const pickFolder = async () => {
@@ -383,6 +399,7 @@ export default function App() {
 
   const reload = async () => {
     try {
+      if (edits.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
       install(await invoke(api.snapshot()));
       setModal(null);
     } catch (err) {
@@ -479,7 +496,7 @@ export default function App() {
     }
   };
   const openFile = (path) => {
-    if ([...raw, ...documents].some((n) => n.path === path)) openNote(path);
+    if ([...effectiveNotes, ...documents].some((n) => n.path === path)) openNote(path);
     else if ((vault.attachments ?? []).some((n) => n.path === path)) openAttachment(path);
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
@@ -1047,6 +1064,19 @@ export default function App() {
               </div>
             ) : note ? (
               <div className={`document-content ${mode}`}>
+                {pendingEdit && <section className="copilot-live-banner" aria-label="Copilot 실시간 변경">
+                  <div><strong>Copilot · {edits.running ? "작성 중" : "미확정 변경"}</strong><span>노트 파일은 유지할 때 저장됩니다.</span></div>
+                  {pendingEdit.userEdited && <p>직접 편집하여 AI 추가 반영을 멈췄습니다. 현재 초안을 유지하거나 복구본으로 저장해 주세요.</p>}
+                  {pendingEdit.conflict && <p role="alert">{pendingEdit.conflict}</p>}
+                  <div className="copilot-live-actions">
+                    <button disabled={edits.running || edits.working} onClick={() => edits.resolve(active, "keep")}>변경 유지</button>
+                    <button disabled={edits.running || edits.working || pendingEdit.userEdited} onClick={() => edits.resolve(active, "undo")}>변경 되돌리기</button>
+                    {edits.running && <button onClick={edits.stop}>작성 중지</button>}
+                    <button onClick={() => setCompareEdit(!compareEdit)}>원본·초안 비교</button>
+                    {(pendingEdit.userEdited || pendingEdit.conflict) && <button disabled={edits.running || edits.working} onClick={() => edits.resolve(active, "recover")}>복구본 저장</button>}
+                  </div>
+                  {compareEdit && <div className="copilot-live-comparison"><details open><summary>원본</summary><pre>{pendingEdit.original || "(새 문서)"}</pre></details><details open><summary>AI 초안</summary><pre>{pendingEdit.aiContent}</pre></details></div>}
+                </section>}
                 <div className="document-topline">
                   <span className="document-icon">
                     <FileText size={23} strokeWidth={1.5} />
@@ -1065,6 +1095,7 @@ export default function App() {
                   {mode !== "read" && (
                     <Editor
                       key={note.path}
+                      pendingOriginal={pendingEdit?.original}
                       fontSettings={fonts}
                       editorRef={editorView}
                       onSelection={setEditorSelection}
@@ -1077,7 +1108,7 @@ export default function App() {
                       attachments={vault.attachments}
                       onLink={followEditorLink}
                       jump={editorJump}
-                      readOnly={busy}
+                      readOnly={busy || edits.working}
                     />
                   )}
                   {(mode === "read" || mode === "split") && (
@@ -1128,7 +1159,7 @@ export default function App() {
                 <span className="status-dot" />
               )}
               <span>
-                {status === "saved"
+                {pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
                   ? "모든 변경사항 저장됨"
                   : status === "saving"
                     ? "저장 중…"
@@ -1156,7 +1187,8 @@ export default function App() {
             </div>
             <CopilotPanel key={vault.id ?? "missing"} api={api}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
-              notes={raw}
+              notes={raw} liveEdits={edits}
+              onBeginLive={async (requestId) => { await flush(); edits.begin(requestId); }}
               selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
               onReview={(path) => { openNote(path); setMode("edit"); }}
               onApply={async (proposal) => {

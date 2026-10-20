@@ -3,11 +3,11 @@ import { validNotePath } from "./vault.mjs";
 import { MAX_ANSWER } from "./copilot.mjs";
 
 // These tools read bounded snapshots or stage drafts. Only the renderer's
-// reviewed apply action writes through the existing vault/revision API.
+// Keep action writes through the existing vault/revision API.
 export function noteTools({ args, getNotes, emit, canceled }) {
   const supplied = new Map(args.references.map((note) => [note.path, note]));
   if (args.context.path) supplied.set(args.context.path, args.context);
-  const read = new Map(), proposed = new Set();
+  const read = new Map(), proposed = new Map();
   let snapshot, calls = 0, readBytes = 0, draftBytes = 0;
   const active = () => { if (canceled()) throw new Error("요청이 중지되었습니다."); };
   const pathOf = (path) => {
@@ -41,14 +41,17 @@ export function noteTools({ args, getNotes, emit, canceled }) {
   const stage = (kind, path, content, target) => {
     active();
     if (typeof content !== "string" || !content.trim() || Buffer.byteLength(content) > MAX_ANSWER) throw new Error("수정안은 비어 있지 않은 128 KiB 이내의 Markdown이어야 합니다.");
-    if (proposed.has(path)) throw new Error("이 문서는 이미 수정안을 만들었습니다. 다음 요청에서 다시 수정해 주세요.");
-    if (proposed.size >= 5 || draftBytes + Buffer.byteLength(content) > 262144) throw new Error("한 요청의 수정안 한도에 도달했습니다.");
+    const previous = proposed.get(path);
+    if ((!previous && proposed.size >= 5) || draftBytes + Buffer.byteLength(content) > 262144) throw new Error("한 요청의 수정안 한도에 도달했습니다.");
     draftBytes += Buffer.byteLength(content);
-    proposed.add(path);
-    const proposal = { id: randomUUID(), kind, path, content, ...(target ? { target } : {}) };
+    const proposal = { id: previous?.id ?? randomUUID(), kind: previous?.kind ?? kind, path, content, ...((previous?.target ?? target) ? { target: previous?.target ?? target } : {}) };
+    proposed.set(path, proposal);
+    const latest = { ...supplied.get(path), ...read.get(path), path, content };
+    supplied.set(path, latest);
+    read.set(path, latest);
     emit("proposal", { proposal });
     emit("tool", { message: `${kind === "create" ? "새 문서" : "수정안"} 준비 · ${path}` });
-    return { path, status: "awaiting_user_review", saved: false };
+    return { path, status: "previewing_in_editor", saved: false };
   };
   const pathSchema = { type: "string", description: "Vault-relative Markdown path, e.g. Projects/Plan.md" };
   return [
@@ -75,7 +78,7 @@ export function noteTools({ args, getNotes, emit, canceled }) {
       emit("tool", { message: `검색 · ${query} · ${matches.length}개 (최대 20개)` });
       return { matches, limit: 20 };
     }),
-    tool("edit_note", "Stage a reviewed change to a previously read note. replace supplies the complete replacement; append/prepend adds content to the supplied scope. Does not save.", {
+    tool("edit_note", "Update the live draft of a previously read note. Sequential edits use the latest draft. replace supplies the complete replacement; append/prepend adds content to the supplied scope. Does not save.", {
       path: pathSchema, operation: { type: "string", enum: ["replace", "append", "prepend"] }, content: { type: "string" },
     }, ["path", "operation", "content"], ({ path, operation, content }) => {
       pathOf(path);
@@ -85,7 +88,7 @@ export function noteTools({ args, getNotes, emit, canceled }) {
       const replacement = operation === "append" ? note.content + content : operation === "prepend" ? content + note.content : content;
       return stage("edit", path, replacement, { vaultId: args.vaultId, path, original: note.content, from: 0, to: note.content.length, before: note.content });
     }),
-    tool("create_note", "Stage a new Markdown note for user review. The user chooses Apply to create it. Existing files will never be overwritten.", {
+    tool("create_note", "Stage a new Markdown note for user review. The user chooses Keep to save it. Existing files will never be overwritten.", {
       path: pathSchema, content: { type: "string" },
     }, ["path", "content"], ({ path, content }) => {
       pathOf(path);
