@@ -2,19 +2,19 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.4.1은 설치 글꼴 목록을 끝까지 스크롤하고 이름으로 검색할 수 있도록 수정한 프리릴리스입니다. [Live Preview 1단계](docs/LIVE-PREVIEW.md), 기본 10분 간격의 Git 자동 저장, 그래프·Canvas·Bases 기본 기능을 포함합니다. [릴리스 변경사항](docs/RELEASE-NOTES-0.4.1.md)과 [검증 기록](docs/RELEASE-REVIEW-0.4.1.md)을 확인하세요.
+v0.6.0 프리릴리스는 **오른쪽 그래프 설정 패널**을 추가합니다. 필터·색상 그룹·방향 화살표·표시/장력 조절·시간순 애니메이션을 지원합니다. [변경사항과 검증 범위](docs/RELEASE-NOTES-0.6.0.md)를 확인하세요.
 
-현재 소스에는 **설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅 패널**이 추가되어 있습니다. 아래 설정 설명은 이 미게시 변경을 기준으로 하며, v0.4.1 다운로드에는 아직 포함되지 않습니다.
+설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
 ## 실행
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.4.1/Dynote-darwin-arm64/Dynote.app`
+`release/v0.6.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.4.1/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.6.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -40,6 +40,8 @@ npm start
 - 한글 전체 검색과 빠른 문서 전환 (`⌘/Ctrl K`, `⌘/Ctrl P`)
 - `[[문서]]`, `[[경로/문서|표시 이름]]`, 제목 링크, 백링크
 - 문서 연결 그래프: WASM·Worker 물리 배치, GPU 표시, 점 드래그, 이동·확대/축소, 문서 클릭
+- 오른쪽 그래프 설정: 태그·첨부 파일·미해결 링크·미연결 노트 필터, 우선순위 색상 그룹, 화살표, 이름 표시 시점·노드 크기·선 두께·장력 조절, 시간순 재생
+- 그래프 검색은 이름/경로, `path:`, `file:`, `tag:`, 인용 구문, `-제외`를 AND로 결합합니다. Obsidian의 본문·정규식·OR 검색 문법 전체를 지원하지는 않습니다.
 - 개요와 태그, 변경 전 복구 사본, 외부 수정 충돌 감지
 - 수동 저장 `⌘/Ctrl S`, 새 문서 `⌘/Ctrl N`
 - 로컬 PNG·JPEG·GIF·WebP 표시, 이미지 붙여넣기·파일 드롭·파일 선택으로 가져오기

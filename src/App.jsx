@@ -1031,8 +1031,10 @@ export default function App() {
                 vaultId={vault.id}
                 notes={model.notes}
                 edges={model.edges}
+                attachments={vault.attachments}
+                documents={documents}
                 active={active}
-                onOpen={openNote}
+                onOpen={openFile}
               />
             ) : structured && !attachment ? (
               structured.kind === "canvas" ? <CanvasEditor key={`${vault.id}:${structured.path}`} document={structured}

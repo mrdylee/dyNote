@@ -1157,18 +1157,18 @@ kbd {
 }
 .graph-view {
   height: 100%;
-  min-height: 580px;
+  min-height: 0;
   position: relative;
   background: white;
   display: flex;
   flex-direction: column;
 }
 .graph-heading {
-  padding: 38px 42px 0;
+  padding: 18px 25px 4px;
   pointer-events: none;
 }
 .graph-heading h1 {
-  font-size: 23px;
+  font-size: 20px;
   color: #584668;
   letter-spacing: -0.6px;
   font-weight: 600;
@@ -1629,29 +1629,6 @@ kbd {
   background: #ffffff20;
   color: white;
 }
-.graph-filters {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-}
-.graph-filters > input,
-.graph-filters select {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: white;
-  padding: 6px 8px;
-  font-size: 12px;
-}
-.graph-filters label {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
 .structured-create-actions { display: flex; gap: 6px; padding: 8px 14px; }
 .structured-create-actions button { flex: 1; border: 1px solid #e1e6ed; border-radius: 6px; padding: 7px; color: #52627a; background: #fff; font-size: 12px; }
 .canvas-editor, .bases-view { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; background: #fff; }
@@ -1686,13 +1663,47 @@ kbd {
 
 .graph-stage { flex: 1; min-height: 260px; overflow: hidden; position: relative; }
 .graph-stage canvas { display: block; touch-action: none; outline-offset: -3px; }
-.graph-settings { pointer-events: auto; margin: 12px 0; font-size: 12px; color: #78628d; }
-.graph-settings summary { cursor: pointer; }
-.graph-settings > div { display: flex; flex-wrap: wrap; gap: 12px 20px; padding-top: 12px; }
-.graph-settings label { display: flex; align-items: center; gap: 8px; }
-.graph-settings input { width: 90px; accent-color: #9473ba; }
-.graph-settings output { min-width: 34px; }
-.graph-settings button { border: 1px solid #e9e0f1; border-radius: 5px; padding: 4px 10px; }
+/* Keep graph settings in their own scroll area, including short windows. */
+.graph-body { display: flex; flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.graph-body .graph-stage { min-width: 0; min-height: 0; }
+.graph-settings-panel { width: 268px; flex: 0 0 268px; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--border); background: #fcfbfd; font-size: 12px; color: #685c74; }
+.graph-panel-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 12px 14px; background: #fcfbfd; border-bottom: 1px solid var(--border); }
+.graph-panel-header strong { flex: 1; font-weight: 600; }
+.graph-panel-header button, .graph-group-actions button { display: grid; place-items: center; padding: 5px; border-radius: 4px; }
+.graph-settings-panel button:hover, .graph-settings-open:hover { background: #f0eaf6; }
+.graph-settings-panel button:disabled { opacity: 0.35; cursor: default; }
+.graph-setting-section { border-bottom: 1px solid var(--border); }
+.graph-section-title { display: flex; align-items: center; gap: 7px; padding: 13px 14px; width: 100%; text-align: left; font-weight: 600; }
+.graph-section-content { display: flex; flex-direction: column; gap: 13px; padding: 0 14px 17px; }
+.graph-section-content > input, .graph-section-content select, .graph-group input:not([type=color]) { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: white; padding: 7px 8px; font: inherit; color: inherit; }
+.graph-section-content small { font-size: 10px; line-height: 1.5; color: #9b8ba8; }
+.graph-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; }
+.graph-toggle input[type=checkbox] { appearance: none; width: 32px; height: 18px; flex-shrink: 0; border-radius: 12px; background: #ddd5e5; position: relative; cursor: pointer; margin: 0; }
+.graph-toggle input[type=checkbox]::after { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; }
+.graph-toggle input[type=checkbox]:checked { background: #9473ba; }
+.graph-toggle input[type=checkbox]:checked::after { left: 16px; }
+.graph-toggle select { width: 60px; }
+.graph-range { display: flex; flex-direction: column; gap: 9px; }
+.graph-range > span { display: flex; justify-content: space-between; }
+.graph-range output { color: #9b8ba8; font-variant-numeric: tabular-nums; }
+.graph-range input { width: 100%; margin: 0; accent-color: #9473ba; }
+.graph-wide-button { border: 1px solid #dfd4eb; border-radius: 5px; padding: 8px; display: flex; gap: 5px; align-items: center; justify-content: center; background: #f2edf7; }
+.graph-group { display: flex; flex-direction: column; gap: 4px; }
+.graph-group > div { display: flex; align-items: center; gap: 5px; }
+.graph-group input[type=color] { width: 28px; height: 28px; flex-shrink: 0; padding: 1px; border: 0; background: transparent; cursor: pointer; }
+.graph-group-actions { justify-content: flex-end; }
+.graph-settings-open { position: absolute; top: 10px; right: 16px; display: flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: white; color: #78628d; font-size: 12px; }
+.graph-footer { position: relative; flex-shrink: 0; padding-right: 155px; border-top: 1px solid #f3eff6; }
+.graph-document-picker > * { min-width: 0; }
+.graph-notice { margin: 0; padding: 6px 25px; font-size: 11px; color: #78628d; }
+@media (max-width: 1000px) {
+  .graph-settings-panel { width: 230px; flex-basis: 230px; }
+  .graph-heading { padding: 12px 20px 0; }
+  .graph-heading h1 { margin: 6px 0; }
+  .graph-footer { padding-right: 0; }
+  .graph-footer .graph-controls { right: 10px; bottom: 10px; }
+  .graph-legend { flex-wrap: wrap; padding-right: 150px; }
+}
 .graph-document-picker { display: flex; gap: 8px; padding: 8px 25px 0; }
 .graph-document-picker input, .graph-document-picker select { border: 1px solid #e9e0f1; border-radius: 5px; padding: 6px; font-size: 12px; max-width: 260px; }
 .graph-error { color: #ac344c; padding: 12px 25px; font-size: 13px; }

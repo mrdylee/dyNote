@@ -54,7 +54,7 @@ try {
   await page.getByRole("button", { name: "그래프 보기", exact: true }).click();
   await page.waitForFunction(() => window.graphProbe.settled === true, null, { timeout: 20000 });
   assert.equal(await page.locator(".graph-stage canvas").count(), 1);
-  assert.match(await page.locator(".graph-legend").innerText(), new RegExp(`${count}개 문서`));
+  assert.match(await page.locator(".graph-legend").innerText(), new RegExp(`${count + 3}개 노드`));
   assert.equal(errors.length, 0, errors.join("\n"));
   report.checks.push("notes://app WASM Worker WebGL load", "node and edge counts");
   report.startup = await page.evaluate(() => ({ graphToFirstWorkerFrameMs: window.graphProbe.firstFrame - window.graphProbe.started, graphToFirstRenderMs: window.graphProbe.firstRender - window.graphProbe.started, workerFrames: window.graphProbe.frames }));
@@ -103,7 +103,7 @@ try {
   assert.equal(await page.getByRole("status").filter({ hasText: "표시할 문서 없음" }).count(), 1);
   report.checks.push("empty filter keeps its status and produces no Worker frames");
   await page.getByRole("textbox", { name: "그래프 경로 필터" }).fill("Note-00044.md");
-  await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("1개 문서 · 0개 연결"));
+  await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("1개 노드 · 0개 연결"));
   await page.getByRole("status").filter({ hasText: "배치 완료" }).waitFor({ timeout: 10000 });
   const box = await page.locator(".graph-stage canvas").boundingBox();
   const x = box.x + box.width / 2, y = box.y + box.height / 2;
@@ -122,10 +122,11 @@ try {
   await page.locator(".graph-stage canvas").waitFor({ state: "detached" }); report.checks.push("node click opens note");
   for (let i = 0; i < 3; i++) {
     await page.getByRole("button", { name: "그래프 보기", exact: true }).click();
+    await page.getByRole("textbox", { name: "그래프 경로 필터" }).fill("");
     await page.getByRole("checkbox", { name: "현재 문서 주변", exact: true }).check();
-    await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("5개 문서 · 4개 연결"));
+    await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("5개 노드 · 4개 연결"));
     await page.getByRole("checkbox", { name: "나가는 링크", exact: true }).uncheck();
-    await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("3개 문서 · 2개 연결"));
+    await page.waitForFunction(() => document.querySelector(".graph-legend")?.textContent.includes("3개 노드 · 2개 연결"));
     await page.getByRole("checkbox", { name: "나가는 링크", exact: true }).check();
     await page.getByRole("combobox", { name: "그래프 문서 열기", exact: true }).selectOption("group-000/Note-00044.md");
     await page.locator(".graph-stage canvas").waitFor({ state: "detached" });
