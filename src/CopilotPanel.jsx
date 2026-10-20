@@ -15,20 +15,20 @@ const markdown = new MarkdownIt({ html: false, breaks: true });
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[이미지: ${tokens[index].content}]`);
 const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
-export default function CopilotPanel({ api, provider = "copilot", onProviderChange, vaultId, note, notes = [], selection, busy, onApply, onReview, visible }) {
-  const label = provider === "codex" ? "Codex" : "Copilot";
-  const accountLabel = provider === "codex" ? "ChatGPT" : "GitHub";
+export default function CopilotPanel({ api, vaultId, note, notes = [], selection, busy, onApply, onReview, visible }) {
+  const label = "Copilot";
+  const accountLabel = "GitHub";
   const ai = {
-    status: api[`${provider}Status`], login: api[`${provider}Login`],
-    cancelLogin: api[`${provider}CancelLogin`], send: api[`${provider}Send`],
-    cancel: api[`${provider}Cancel`], onEvent: api[`on${label}Event`],
+    status: api.copilotStatus, login: api.copilotLogin,
+    cancelLogin: api.copilotCancelLogin, send: api.copilotSend,
+    cancel: api.copilotCancel, onEvent: api.onCopilotEvent,
   };
   const [connection, setConnection] = useState(disconnected);
   const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState(null);
-  const [model, setModel] = useState(() => { try { return localStorage.getItem(`dynote.${provider}.model`) ?? ""; } catch { return ""; } });
+  const [model, setModel] = useState(() => { try { return localStorage.getItem("dynote.copilot.model") ?? ""; } catch { return ""; } });
   const [scope, setScope] = useState("document");
-  const [mode, setMode] = useState(provider === "copilot" ? "agent" : "chat");
+  const [mode, setMode] = useState("agent");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState([]);
   const [running, setRunning] = useState(false);
@@ -98,7 +98,7 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
     };
   }, []);
   useEffect(() => {
-    try { if (model) localStorage.setItem(`dynote.${provider}.model`, model); } catch { /* Keep the choice in memory. */ }
+    try { if (model) localStorage.setItem("dynote.copilot.model", model); } catch { /* Keep the choice in memory. */ }
   }, [model]);
   useEffect(() => {
     if (visible && !checkedConnection.current) {
@@ -109,7 +109,7 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
   useEffect(() => {
     if (previousPath.current === note?.path) return;
     previousPath.current = note?.path;
-    if (provider === "copilot" && mode === "agent") return;
+    if (mode === "agent") return;
     if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
     pending.current = null;
     setRunning(false); setMessages([]); setProposals([]); setReview(null); setError("");
@@ -133,11 +133,11 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
       const { context, target } = captureContext({ vaultId, note, scope, selection });
       const requestId = crypto.randomUUID();
       const history = messages.filter((m) => m.complete && m.mode !== "edit").map(({ role, content }) => ({ role, content }));
-      const attached = provider === "copilot" ? references.filter((path) => path !== context.path).map((path) => {
+      const attached = references.filter((path) => path !== context.path).map((path) => {
         const found = notes.find((n) => n.path === path);
         if (!found) throw new Error(`첨부 문서가 없어졌습니다: ${path}`);
         return { path, content: found.content };
-      }) : [];
+      });
       const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       pending.current = { ...args, target };
@@ -171,14 +171,11 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
 
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-connection">
-      <label className="copilot-model">서비스<select aria-label="AI 서비스" value={provider} disabled={checking || running || applying || authBusy} onChange={(e) => onProviderChange(e.target.value)}>
-        <option value="copilot">GitHub Copilot</option><option value="codex">OpenAI Codex</option>
-      </select></label>
-      <div className="copilot-account"><GitBranch size={15} /><strong>{connection.authenticated ? connection.login || `${accountLabel} 연결됨` : provider === "codex" ? "OpenAI Codex" : "GitHub Copilot"}</strong>
+      <div className="copilot-account"><GitBranch size={15} /><strong>{connection.authenticated ? connection.login || `${accountLabel} 연결됨` : "GitHub Copilot"}</strong>
         <button title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || applying || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""} /></button>
       </div>
       {!connection.authenticated && !authBusy && <div className="copilot-login">
-        <p>사용 중인 {provider === "codex" ? "ChatGPT" : "Copilot"} 계정으로<br />노트에 관해 이야기해 보세요.</p>
+        <p>사용 중인 Copilot 계정으로<br />노트에 관해 이야기해 보세요.</p>
         <button className="primary-button" disabled={checking} onClick={login}>{accountLabel}로 연결</button>
         <button className="text-action" disabled={checking} onClick={refresh}>이미 연결한 계정 확인</button>
       </div>}
@@ -216,12 +213,12 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
           <option value="none">문서 없음</option><option value="document" disabled={!note}>현재 문서</option><option value="selection" disabled={!note}>선택 영역</option>
         </select></label>
         <label>작업<select aria-label={`${label} 작업`} value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
-          {provider === "copilot" && <option value="agent">Agent · 문서 작업</option>}
+          <option value="agent">Agent · 문서 작업</option>
           <option value="chat">질문하기</option><option value="edit" disabled={scope === "none" || !note}>수정 제안</option>
         </select></label>
       </div>
       <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "현재 문서는 보내지 않습니다" : `${scope === "selection" ? "선택 영역" : "현재 문서"} · ${note?.path ?? "문서를 열어 주세요"}`}</div>
-      {provider === "copilot" && <div className="copilot-attachments">
+      <div className="copilot-attachments">
         <button type="button" disabled={running || applying} onClick={() => setAttachmentsOpen(!attachmentsOpen)}><Paperclip size={12} />참고 문서 {references.length}/5</button>
         {references.map((path) => <button type="button" className="attachment-chip" key={path} disabled={running} title="첨부 제거" onClick={() => setReferences((old) => old.filter((p) => p !== path))}>{path} ×</button>)}
         {attachmentsOpen && <div className="copilot-attachment-picker">
@@ -230,14 +227,14 @@ export default function CopilotPanel({ api, provider = "copilot", onProviderChan
         </div>}
         {mode === "agent" && <label className="copilot-vault-access"><input type="checkbox" checked={vaultAccess} disabled={running} onChange={(e) => setVaultAccess(e.target.checked)} />보관함 검색·읽기 허용</label>}
         {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 Copilot에 전송됩니다.</small>}
-      </div>}
+      </div>
       <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
       <div className="copilot-send-row"><span>선택한 내용과 대화가 {label}에 전송됩니다.</span>
         {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message))}><Square size={15} />중지</button>
           : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!connection.authenticated || !model || !prompt.trim() || checking || authBusy || busy || applying || !vaultId}><ArrowUp size={16} /></button>}
       </div>
-      <small className="copilot-allowance">계정의 {provider === "codex" ? "ChatGPT / Codex" : "Copilot"} 사용량 한도가 적용됩니다.</small>
+      <small className="copilot-allowance">계정의 Copilot 사용량 한도가 적용됩니다.</small>
     </form>
     {review && <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label={`${label} 수정안 확인`} className="modal wide copilot-review">
       <div className="modal-heading"><h2>수정안 확인</h2><button disabled={applying} onClick={() => setReview(null)}>닫기</button></div>

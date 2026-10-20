@@ -11,15 +11,27 @@ await writeFile(`${vaultRoot}/Home.md`, original);
 await writeFile(`${vaultRoot}/Ref.md`, "# 참고\n배터리 시험");
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
 const report = { checks: [], errors: [], modelTransport: "deterministic fixture; real note tools, renderer and vault", liveModelVerified: false };
-const app = await electron.launch({
+const launch = () => electron.launch({
   executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,
   args: process.env.DYNOTE_EXECUTABLE ? [] : ["."],
   env: { ...process.env, OPEN_NOTES_DATA: profile, HOME: profile, GH_TOKEN: "", GITHUB_TOKEN: "", COPILOT_GITHUB_TOKEN: "" },
 });
+let app = await launch();
 try {
-  const page = await app.firstWindow();
+  let page = await app.firstWindow();
+  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.evaluate(() => localStorage.setItem("dynote.ai.provider", "codex"));
+  await app.evaluate(({ session }) => session.defaultSession.flushStorageData());
+  await app.close();
+  app = await launch();
+  page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   page.on("pageerror", (e) => report.errors.push(e.message));
+  assert.equal(await page.evaluate(() => localStorage.getItem("dynote.ai.provider")), "codex");
+  assert.deepEqual(await page.evaluate(() => Object.keys(window.notes).filter((name) => /codex/i.test(name))), []);
+  assert.equal(await page.getByLabel("AI 서비스").count(), 0);
+  report.checks.push("Legacy Codex preference opens Copilot; Codex renderer API and service selector are removed");
+  report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, electron: process.versions.electron }));
   await app.evaluate(async ({ ipcMain, app }) => {
     const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
     const { noteTools } = require(`${app.getAppPath()}/core/copilot-agent.mjs`);

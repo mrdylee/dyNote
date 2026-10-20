@@ -19,7 +19,6 @@ import { GitHistory } from "../core/git-history.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
-import { CodexController } from "./codex-controller.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -50,7 +49,6 @@ let restoring = false;
 let activeMutations = 0;
 let gitBackup;
 let copilot;
-let codex;
 
 function validateSender(event) {
   if (
@@ -71,7 +69,6 @@ function checkVault(args) {
 
 async function selectVault(root) {
   await copilot?.cancel();
-  await codex?.cancel();
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
   await registry.select(selected.root);
@@ -122,13 +119,6 @@ app
       openExternal: (url) => shell.openExternal(url),
       onEvent: (event) => {
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
-      },
-    });
-    codex = new CodexController({
-      directory: path.join(app.getPath("userData"), "codex"),
-      openExternal: (url) => shell.openExternal(url),
-      onEvent: (event) => {
-        if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:codex-event", event);
       },
     });
     protocol.handle("notes", async (request) => {
@@ -251,11 +241,6 @@ app
       "copilot-cancel-login": () => copilot.cancelLogin(),
       "copilot-send": (args) => { checkVault(args); return copilot.send(args); },
       "copilot-cancel": (args) => copilot.cancel(args?.requestId),
-      "codex-status": () => codex.status(),
-      "codex-login": () => codex.login(),
-      "codex-cancel-login": () => codex.cancelLogin(),
-      "codex-send": (args) => { checkVault(args); return codex.send(args); },
-      "codex-cancel": (args) => codex.cancel(args?.requestId),
       snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
       "select-vault": (args) => {
@@ -376,7 +361,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone"].includes(name);
-        const readOnly = name.startsWith("copilot-") || name.startsWith("codex-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -427,6 +412,6 @@ app
 
 app.on("window-all-closed", async () => {
   gitBackup?.close();
-  await Promise.race([Promise.allSettled([copilot?.close(), codex?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  await Promise.race([Promise.allSettled([copilot?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
   app.quit();
 });

@@ -187,7 +187,6 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [rightTab, setRightTab] = useState("copilot");
-  const [aiProvider, setAiProvider] = useState(() => { try { return localStorage.getItem("dynote.ai.provider") === "codex" ? "codex" : "copilot"; } catch { return "copilot"; } });
   const [editorSelection, setEditorSelection] = useState(null);
   const editorView = useRef(null);
   const [status, setStatus] = useState("saved");
@@ -1155,8 +1154,7 @@ export default function App() {
               </button>
               <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />AI 채팅</button>
             </div>
-            <CopilotPanel key={`${vault.id ?? "missing"}:${aiProvider}`} api={api} provider={aiProvider}
-              onProviderChange={(value) => { setAiProvider(value); try { localStorage.setItem("dynote.ai.provider", value); } catch { /* Keep the choice in memory. */ } }}
+            <CopilotPanel key={vault.id ?? "missing"} api={api}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
               notes={raw}
               selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}

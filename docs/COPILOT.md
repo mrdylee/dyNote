@@ -1,6 +1,6 @@
 # Copilot in Dynote
 
-Open **AI 채팅** in the right panel and select **GitHub Copilot**. The sparkle button in the document
+Open **AI 채팅** in the right panel to use **GitHub Copilot**. The sparkle button in the document
 toolbar opens it again when the panel is closed. The document outline and
 backlinks remain available under **문서 정보**.
 
@@ -41,8 +41,7 @@ GitHub.com sign-in, not the SDK's Enterprise Cloud or Entra login paths.
 
 Agent mode stages changes; it never writes files autonomously. New-note creation
 rejects existing paths. Markdown replies render formatting and code blocks;
-remote images and navigation links are not activated. Codex continues to offer
-Ask and replacement proposals; these custom note tools are Copilot-specific.
+remote images and navigation links are not activated.
 
 Ctrl/Cmd+Enter sends the question. **중지** cancels an active response and keeps
 the prompt. Agent mode retains conversation/proposals when switching notes;

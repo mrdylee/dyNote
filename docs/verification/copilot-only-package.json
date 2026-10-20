@@ -1,0 +1,8 @@
+{
+  "platform": "darwin-arm64",
+  "unpublishedDevelopmentBuild": true,
+  "version": "0.4.1",
+  "matchedFiles": 204,
+  "codexBridgeAndRuntimeRemoved": true,
+  "asarSha256": "3db730ea55d111b6c240f0047239df40c4a2da271287695272a51a882aef5eb4"
+}
