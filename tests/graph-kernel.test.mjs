@@ -22,6 +22,21 @@ test("springs reduce both too long and too short link error", async () => {
     assert.ok(Math.abs(distance(k.positions()) - 100) < Math.abs(length - 100));
   }
 });
+test("holding a pinned node does not accumulate velocity for its release", async () => {
+  const released = [];
+  for (const heldSteps of [0, 1, 100]) {
+    const k = await make([0, 0]);
+    k.pin(0, 1000, 500);
+    for (let i = 0; i < heldSteps; i++) k.step(0.3, { center: 0.5, repel: 0, link: 0 });
+    assert.deepEqual([...k.positions()], [1000, 500]);
+    k.unpin(0); k.step(0.3, { center: 0.5, repel: 0, link: 0 });
+    released.push([...k.positions()]);
+    k.dispose();
+  }
+  assert.deepEqual(released[1], released[0]);
+  assert.deepEqual(released[2], released[0]);
+  assert.ok(released[0][0] < 1000);
+});
 test("overlaps separate and clustered/hub/isolated inputs remain finite", async () => {
   for (const mode of ["overlap", "hub", "isolated"]) {
     const n = 300, p = new Float32Array(n * 2), links = [];

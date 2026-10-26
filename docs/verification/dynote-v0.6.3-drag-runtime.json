@@ -1,0 +1,43 @@
+{
+  "packaged": true,
+  "checks": [
+    "stationary drag keeps physics active",
+    "held node follows pointer",
+    "release retains changed arrangement",
+    "release does not open note",
+    "released graph stops scheduling",
+    "pointercancel and lostpointercapture release active pins"
+  ],
+  "before": [
+    115.68702697753906,
+    -43.239986419677734,
+    -116.67776489257812,
+    65.41620635986328
+  ],
+  "pin": {
+    "index": 0,
+    "x": -15.828702290852865,
+    "y": -83.74522336324056
+  },
+  "held": {
+    "frames": 329,
+    "points": [
+      -15.828701972961426,
+      -83.74522399902344,
+      -150.55979919433594,
+      133.7972412109375
+    ]
+  },
+  "after": {
+    "frames": 500,
+    "points": [
+      -9.782788276672363,
+      -85.85539245605469,
+      -142.58621215820312,
+      133.60488891601562
+    ],
+    "releases": 1
+  },
+  "rotation": 0.5892067131491106,
+  "errors": []
+}

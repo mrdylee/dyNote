@@ -36,7 +36,7 @@ const outputs = await packager({
   out: process.env.DYNOTE_PACKAGE_OUT || `release/v${metadata.version}`,
   overwrite: true,
   asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi}/**" },
-  ignore: /^\/(src|tests|docs|release|assembly|scripts|output|node_modules\/@napi-rs)(\/|$)/,
+  ignore: /^\/(?:(src|tests|docs|release|assembly|scripts|output|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
   afterPrune: [async ({ buildPath }) => installTargetRuntime(buildPath)],
 });
 console.log(outputs.join("\n"));

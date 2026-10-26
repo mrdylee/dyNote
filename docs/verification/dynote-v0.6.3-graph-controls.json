@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "tag/asset/missing/orphan toggles and orphan-after-query counts",
+    "ordered color groups, actual arrow rendering, seven sliders, finite replay, no idle renders, no physics reset on appearance edits",
+    "vault settings retained across unmount/remount",
+    "settings restored after renderer reload",
+    "bottom force slider reachable in short window",
+    "reset restores all control defaults",
+    "name visibility changes canvas without resetting physics; off state persists; legacy 0 and 0.1 migrate through actual UI"
+  ],
+  "errors": [],
+  "packaged": true
+}

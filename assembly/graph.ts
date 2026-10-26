@@ -122,7 +122,10 @@ export function step(alpha: f32, center: f32, repel: f32, spring: f32, distance:
     unchecked(velocity[2 * i] += fx); unchecked(velocity[2 * i + 1] += fy);
   }
   for (let i = 0; i < count; i++) {
-    if (unchecked(pinned[i]) != 0) continue;
+    if (unchecked(pinned[i]) != 0) {
+      unchecked(velocity[2 * i] = 0); unchecked(velocity[2 * i + 1] = 0);
+      continue;
+    }
     const vx = Mathf.max(-500, Mathf.min(500, unchecked(velocity[2 * i]) * damping));
     const vy = Mathf.max(-500, Mathf.min(500, unchecked(velocity[2 * i + 1]) * damping));
     unchecked(velocity[2 * i] = vx); unchecked(velocity[2 * i + 1] = vy);
