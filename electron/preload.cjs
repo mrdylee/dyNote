@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld(
       return () => ipcRenderer.removeListener("notes:open-settings", listener);
     },
     createNote: (args) => call("create", args),
+    openOrCreateNote: (args) => call("open-or-create", args),
     saveNote: (args) => call("save", args),
     createDocument: (args) => call("create-document", args),
     saveDocument: (args) => call("save-document", args),

@@ -279,7 +279,19 @@ export class Vault {
   }
 
   create(relative, initialContent) {
+    return this.#enqueue(() => this.#create(relative, initialContent));
+  }
+
+  openOrCreate(relative, initialContent) {
     return this.#enqueue(async () => {
+      if (!validNotePath(relative)) throw new Error("허용되지 않는 Markdown 경로입니다.");
+      try { return await this.#read(relative); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      return this.#create(relative, initialContent, true);
+    });
+  }
+
+  async #create(relative, initialContent, openExisting = false) {
       if (!validNotePath(relative))
         throw new Error("허용되지 않는 Markdown 경로입니다.");
       const content = initialContent === undefined ? `# ${path.basename(relative, ".md")}\n\n` : initialContent;
@@ -289,6 +301,7 @@ export class Vault {
       try {
         await writeFile(target, content, { flag: "wx", mode: 0o600 });
       } catch (error) {
+        if (error.code === "EEXIST" && openExisting) return this.#read(relative);
         if (error.code === "EEXIST")
           throw new Error("같은 이름의 문서가 이미 있습니다.");
         throw error;
@@ -300,7 +313,6 @@ export class Vault {
         revision: digest(Buffer.from(content)),
         metadata: { size: Buffer.byteLength(content), mtime: stat.mtimeMs, ctime: stat.birthtimeMs },
       };
-    });
   }
 
   save(relative, content, expectedRevision) {

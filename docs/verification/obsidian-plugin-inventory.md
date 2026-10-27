@@ -65,3 +65,21 @@ For each accepted workflow, record a requirement ID, original Obsidian input/act
 ## Decisions still required
 
 The user has been asked whether the goal is native equivalent features, original-plugin execution, or both; and whether the target is the personal vault's eleven configured community plugins plus core functions, the test vault's core functions, or a named subset. These answers determine the architecture and implementation plan. No approved design or implementation completion is asserted here.
+
+## 2026-10-27 approved direction and controlled runtime follow-up
+
+The user selected native equivalents covering all eleven configured community plugins plus core functionality. This resolves the earlier architecture/target questions; it does not reduce the overall scope to the first implementation slice.
+
+A separate Obsidian profile and synthetic vault were created under ignored `output/research/obsidian-native-fixture/`. Only `main.js`, `manifest.json` and `styles.css` were copied from installed plugins; no personal `data.json`, notes, credentials or sync configuration were copied. The owned test instance loaded all eleven plugin IDs. Its initial runtime inventory registered 358 commands; enabling all five periodic families in this fixture then registered the corresponding periodic commands.
+
+Actual original command execution opened daily `2026-10-27.md`, weekly `2026-W44.md`, monthly `2026-10.md`, quarterly `2026-Q4.md`, yearly `2026.md`, Calendar and Recent Files. Existing daily opening reused the file; period notes were created when missing. Recorded files: `runtime-inventory.json`, `runtime-behavior.json`, `runtime-plugins.png`. This establishes these representative commands, not every command of every plugin. The owned instance was closed after observation.
+
+Additional program-only REA references, with partial semantic coverage and zero parse failures:
+
+- Calendar: `ev_b9ab5d57e72feed233b98bedbd8f585cb9a6c58fcc19a9fd8d83fc274fa978d8`.
+- Periodic Notes: `ev_6ccb31ae1c359300ac9a44828497022437a2d0d01e67ce4dcce74048c0d25734`.
+- Diarian: `ev_19831a25fe5b3088732773e63e3afd22d80842bdd4cf4ce005ae1b7eb12ebbcc`.
+- Mermaid: `ev_03b9704ee67a92ebded7a34b332f80611de91dfa6db69f91a548028e3b1c044b`.
+- Outliner/Markmind/Enhancing/PDF++/Git/Update Tracker: `ev_e8cf41d1b44b328a6a2bed7aea38c29552b7c4b782a5c7c2eb8abac18d8f3654`; exact source hashes and command contexts retained in ignored `output/research/plugin-equivalence-detail.json`.
+
+Important remaining scope: Diarian includes ratings, timestamps, on-this-day, importer/converter; Recent Files has exclusion settings; Markmind rich includes persisted JSON and export/annotation workflows; PDF++ edits real PDF annotations/pages; Git includes staging/diff/branches/remotes. A calendar, basic mindmap or PDF page viewer alone must not be called complete plugin equivalence.

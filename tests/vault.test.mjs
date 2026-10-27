@@ -141,3 +141,14 @@ test("rejects Windows device names and trailing-dot directory aliases", async (t
     await assert.rejects(store.create(relative), /경로/);
   }
 });
+
+test('JOURNAL-01 concurrent open-or-create returns one file without overwriting existing content', async (t) => {
+  const { store, root } = await fixture(t);
+  assert.equal(typeof store.openOrCreate, 'function', 'exclusive open-or-create exists');
+  const [a,b]=await Promise.all([store.openOrCreate('Daily/2026-10-27.md','first'),store.openOrCreate('Daily/2026-10-27.md','second')]);
+  assert.equal(a.content,'first'); assert.equal(b.content,'first'); assert.equal(a.revision,b.revision);
+  assert.equal(await readFile(join(root,'Daily/2026-10-27.md'),'utf8'),'first');
+  const saved=await store.save(a.path,'edited',a.revision);
+  assert.equal((await store.openOrCreate(a.path,'template')).content,saved.content);
+  await assert.rejects(store.openOrCreate('../escape.md','bad'),/경로/);
+});

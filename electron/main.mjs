@@ -287,6 +287,10 @@ app
         checkVault(args);
         return vault.create(args.path, args.content);
       },
+      "open-or-create": (args) => {
+        checkVault(args);
+        return vault.openOrCreate(args.path, args.content);
+      },
       save: (args) => {
         checkVault(args);
         return vault.save(args.path, args.content, args.revision);

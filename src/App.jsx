@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import {
   BookOpen,
+  Bookmark,
+  CalendarDays,
+  History,
+  Terminal,
   Check,
   CheckCheck,
   ChevronDown,
@@ -55,6 +59,10 @@ import { applyProposal } from "../core/copilot.mjs";
 import { isolateHistory } from "@codemirror/commands";
 import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
+import JournalPanel from "./JournalPanel.jsx";
+import NavigationPanel from "./NavigationPanel.jsx";
+import { normalizeNavigation, navigationAction, reconcileNavigation } from "../core/navigation.mjs";
+import { periodicNote, renderTemplate, localDate } from "../core/periodic-notes.mjs";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -63,6 +71,10 @@ const invoke = async (result) => {
   return response.value;
 };
 const shortcut = navigator.platform.includes("Mac") ? "⌘" : "Ctrl";
+const stored = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+};
+const persist = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Remain usable during this session. */ } };
 
 function IconButton({ label, children, onClick, active = false, ...props }) {
   return (
@@ -199,6 +211,11 @@ export default function App() {
   useEffect(() => api?.onOpenSettings(() => { if (!busy) setModal("settings"); }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
+  const [commandQuery, setCommandQuery] = useState("");
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [navigation, setNavigation] = useState(normalizeNavigation(null));
+  const navigationRef = useRef(navigation);
+  const [journalPreferences, setJournalPreferences] = useState({});
   const [attachment, setAttachment] = useState(null);
   const [fileTarget, setFileTarget] = useState(null);
   const [propertiesDraft, setPropertiesDraft] = useState("");
@@ -283,6 +300,12 @@ export default function App() {
       null;
     setActive(initial);
     setTabs(initial ? [initial] : []);
+    const navigation = reconcileNavigation(stored(`dynote.navigation.${snapshot.id}`, null), [...snapshot.notes, ...(snapshot.documents ?? [])].map(n => n.path));
+    const visited = initial ? navigationAction(navigation, { type: "visit", path: initial }) : navigation;
+    navigationRef.current = visited;
+    setNavigation(visited);
+    persist(`dynote.navigation.${snapshot.id}`, visited);
+    setJournalPreferences(stored(`dynote.journal.${snapshot.id}`, {}));
     setError(snapshot.warnings.join(" · "));
     setStatus("saved");
     queue.current = new SaveQueue(
@@ -338,6 +361,10 @@ export default function App() {
   }, [install, flush]);
 
   const openNote = useCallback((path) => {
+    const next = navigationAction(navigationRef.current, { type: "visit", path });
+    navigationRef.current = next;
+    setNavigation(next);
+    persist(`dynote.navigation.${currentVault.current}`, next);
     setActive(path);
     setEditorJump(null);
     setAttachment(null);
@@ -345,6 +372,32 @@ export default function App() {
     setSection((old) => (old === "graph" ? "files" : old));
     setModal(null);
   }, []);
+
+  const updateNavigation = (action) => {
+    const next = navigationAction(navigationRef.current, action);
+    navigationRef.current = next; setNavigation(next);
+    persist(`dynote.navigation.${vault.id}`, next);
+  };
+  const updateJournalPreferences = (value) => {
+    setJournalPreferences(value); persist(`dynote.journal.${vault.id}`, value);
+  };
+  const createPeriodic = async (target) => {
+    const vaultId = vault.id;
+    setBusy(true);
+    try {
+      await flush();
+      const templatePath = journalPreferences[target.period]?.template;
+      const template = templatePath ? effectiveNotes.find(n => n.path === templatePath) : null;
+      if (templatePath && !template) throw new Error("템플릿을 찾을 수 없습니다. 일지 설정을 확인해 주세요.");
+      const content = template ? renderTemplate(template.content, target) : `# ${target.title}\n\n`;
+      const created = await invoke(api.openOrCreateNote({ vaultId, path: target.path, content }));
+      if (currentVault.current !== vaultId) return;
+      revisions.current.set(created.path, created.revision);
+      setRaw(old => [...old.filter(n => n.path !== created.path), created]);
+      openNote(created.path); setMode("edit"); setError("");
+    } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
+    finally { setBusy(false); }
+  };
 
   const change = (content) => {
     if (!note || content === note.content) return;
@@ -420,6 +473,8 @@ export default function App() {
         else if (key === "n") {
           setNewName("");
           setModal("new");
+        } else if (key === "p") {
+          setCommandQuery(""); setCommandIndex(0); setModal("commands");
         } else {
           setSwitchQuery("");
           setModal("switch");
@@ -532,6 +587,7 @@ export default function App() {
             revision,
           }),
         );
+        updateNavigation({ type: "rename", from: fileTarget.path, to: newName.trim() });
         install(snapshot);
         if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim());
         else await openAttachment(newName.trim());
@@ -540,6 +596,7 @@ export default function App() {
           api.trashFile({ vaultId: vault.id, path: fileTarget.path, revision }),
         );
         setLastTrash({ ...item, vaultId: vault.id });
+        updateNavigation({ type: "remove", path: fileTarget.path });
         install(await invoke(api.snapshot()));
       }
       setModal(null);
@@ -648,6 +705,32 @@ export default function App() {
       );
   };
 
+  const insertTemplate = (path) => {
+    const template = effectiveNotes.find(n => n.path === path), view = editorView.current;
+    if (!template || !note || !view || view.state.readOnly || busy || edits.blocked()) return;
+    const target = { ...periodicNote("daily", localDate()), title: note.path.split("/").at(-1).replace(/\.md$/i, "") };
+    const insert = renderTemplate(template.content, target);
+    const { from, to } = view.state.selection.main;
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.replace(/\r\n|\r/g, "\n").length }, scrollIntoView: true });
+    setModal(null); view.focus();
+  };
+  const commands = [
+    { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
+    { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
+    ...[["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
+    { id: "bookmark", label: "현재 문서 북마크 전환", disabled: !note && !structured, run: () => { updateNavigation({ type: "bookmark", path: active }); setModal(null); } },
+    { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
+    ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
+    { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
+    { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
+    { id: "settings", label: "설정 열기", run: () => setModal("settings") },
+  ];
+  const commandResults = commands.filter(c => c.label.toLowerCase().includes(commandQuery.toLowerCase()));
+  const runCommand = (command) => {
+    if (!command || command.disabled || busy || (!vault?.id && command.id !== "settings")) return;
+    Promise.resolve().then(command.run).catch(err => setError(err.message));
+  };
+
   if (!vault)
     return (
       <div className="loading-screen">
@@ -698,6 +781,10 @@ export default function App() {
             <BookOpen size={22} />
           </button>
           <div className="rail-nav">
+            <IconButton label="명령 팔레트" disabled={busy} onClick={() => { setCommandQuery(""); setCommandIndex(0); setModal("commands"); }}><Terminal size={20}/></IconButton>
+            <IconButton label="최근 파일" active={section === "recent"} onClick={() => setSection("recent")}><History size={20}/></IconButton>
+            <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
+            <IconButton label="달력과 일지" active={section === "journal"} onClick={() => setSection("journal")}><CalendarDays size={20}/></IconButton>
             <IconButton
               label="파일 목록"
               active={section === "files"}
@@ -786,7 +873,9 @@ export default function App() {
               </IconButton>
             </div>
           </div>
-          {section === "search" ? (
+          {section === "journal" ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} busy={busy}/>
+          : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
+          : section === "search" ? (
             <div className="search-panel">
               <input
                 id="vault-search"
@@ -925,6 +1014,7 @@ export default function App() {
             <div className="toolbar-actions">
               {section !== "graph" && (note || structured) && (
                 <>
+                  <IconButton label="현재 문서 북마크" active={navigation.bookmarks.includes(active)} disabled={busy} onClick={() => updateNavigation({ type: "bookmark", path: active })}><Bookmark size={15}/></IconButton>
                   <button
                     className="text-action"
                     disabled={busy || !note}
@@ -1493,6 +1583,23 @@ export default function App() {
           처리 중…
         </div>
       )}
+      {modal === "commands" && <Modal title="명령 팔레트" wide onClose={() => setModal(null)}>
+        <input className="native-command-input" autoFocus aria-label="명령 검색" placeholder="실행할 명령을 검색하세요…" value={commandQuery}
+          onChange={e => { setCommandQuery(e.target.value); setCommandIndex(0); }}
+          onKeyDown={e => {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault(); setCommandIndex(i => Math.max(0, Math.min(commandResults.length - 1, i + (e.key === "ArrowDown" ? 1 : -1))));
+            } else if (e.key === "Enter") { e.preventDefault(); runCommand(commandResults[commandIndex]); }
+          }}/>
+        <div className="native-command-results">{commandResults.map((command, index) => <button key={command.id} className={index === commandIndex ? "selected" : ""}
+          disabled={busy || command.disabled || (!vault.id && command.id !== "settings")} onMouseMove={() => setCommandIndex(index)} onClick={() => runCommand(command)}>{command.label}</button>)}
+          {!commandResults.length && <p className="muted">일치하는 명령이 없습니다.</p>}</div>
+        <p className="muted">↑ ↓ 선택 · Enter 실행 · Esc 닫기 · 문서 이동 {shortcut} K</p>
+      </Modal>}
+      {modal === "template" && <Modal title="템플릿 삽입" onClose={() => setModal(null)}>
+        <p>선택한 문서 내용을 현재 선택 영역에 삽입합니다.</p>
+        <div className="native-command-results">{model.notes.filter(n => n.path !== active).map(template => <button disabled={busy || edits.blocked()} key={template.path} onClick={() => insertTemplate(template.path)}>{template.path}</button>)}</div>
+      </Modal>}
       {modal === "new" && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>
           <form onSubmit={createNote}>

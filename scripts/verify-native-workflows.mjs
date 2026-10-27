@@ -1,0 +1,74 @@
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import assert from 'node:assert/strict';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
+const fixture=await mkdtemp(`${tmpdir()}/dynote-native-`), profile=`${fixture}/profile`, vault=`${fixture}/vault`;
+await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${vault}/A.md`,'# Alpha\n\nOriginal\n');
+await writeFile(`${vault}/Template.md`,'# {{title}}\r\n\r\nDate: {{date:YYYY-MM-DD}}\r\n');
+let app,page;const errors=[];
+const start=async()=>{
+ app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+ page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();
+};
+const palette=async(query)=>{
+ await page.keyboard.press('Meta+p'); await page.getByRole('textbox',{name:'명령 검색'}).fill(query);await page.keyboard.press('Enter');
+};
+const disk=async(file,expected)=>{
+ for(let i=0;i<60;i++){try{if((await readFile(`${vault}/${file}`,'utf8'))===expected)return;}catch{}await page.waitForTimeout(50);}
+ assert.equal(await readFile(`${vault}/${file}`,'utf8'),expected);
+};
+try {
+ await start();
+ await page.getByRole('button',{name:'현재 문서 북마크',exact:true}).click();
+ await palette('달력과 일지');
+ await page.getByRole('button',{name:'일지 설정',exact:true}).click();
+ await page.getByRole('textbox',{name:'일지 저장 폴더'}).fill('Daily');
+ await page.getByRole('combobox',{name:'일지 템플릿'}).selectOption('Template.md');
+ await page.getByLabel('일지 날짜',{exact:true}).fill('2024-02-29');
+ await page.getByRole('button',{name:'선택한 날짜의 일지 만들기',exact:true}).click();
+ await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
+ await disk('Daily/2024-02-29.md','# 2024-02-29\r\n\r\nDate: 2024-02-29\r\n');
+ await page.getByRole('textbox',{name:'Markdown 편집기'}).fill('# Edited\nDo not overwrite\n');
+ await page.keyboard.press('Meta+s');
+ await disk('Daily/2024-02-29.md','# Edited\r\nDo not overwrite\r\n');
+ await page.getByRole('button',{name:'일지 열기',exact:true}).click();
+ assert.equal((await page.locator('.cm-content .cm-line').allTextContents()).join('\n'),'# Edited\nDo not overwrite\n');
+ await page.getByRole('button',{name:'현재 문서 북마크',exact:true}).click();
+ await palette('최근 파일');
+ assert.ok(await page.getByRole('region',{name:'최근 파일'}).getByRole('button',{name:/2024-02-29/}).count());
+ await page.screenshot({path:'output/playwright/native-journal.png'});
+ await app.close();app=null;await start();
+ await palette('북마크');
+ await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/2024-02-29/}).click();
+ await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+ assert.match((await page.locator('.cm-content .cm-line').allTextContents()).join('\n'),/Do not overwrite/);
+ await palette('달력과 일지');await page.getByRole('button',{name:'일지 설정',exact:true}).click();
+ assert.equal(await page.getByRole('textbox',{name:'일지 저장 폴더'}).inputValue(),'Daily');
+ assert.equal(await page.getByRole('combobox',{name:'일지 템플릿'}).inputValue(),'Template.md');
+ await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).waitFor();await page.keyboard.press('Escape');
+ await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('A.md');await page.keyboard.press('Enter');
+ await palette('템플릿 삽입');await page.getByRole('dialog',{name:'템플릿 삽입'}).getByRole('button',{name:'Template.md',exact:true}).click();
+ await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
+ assert.match((await page.locator('.cm-line').allTextContents()).join('\n'),/Date:/);
+ await page.keyboard.press('Meta+z');await page.keyboard.press('Meta+s');await disk('A.md','# Alpha\n\nOriginal\n');
+ await palette('북마크');await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/2024-02-29/}).click();
+ await page.getByRole('button',{name:'이름·이동',exact:true}).click();await page.getByLabel('보관함 안의 새 경로').fill('Daily/Renamed.md');
+ await page.getByRole('button',{name:'이동·링크 갱신',exact:true}).click();await page.getByRole('dialog',{name:'파일 이름 변경·이동'}).waitFor({state:'hidden'});
+ await palette('북마크');assert.equal(await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/Renamed/}).count(),1);
+ assert.equal(await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/2024-02-29/}).count(),0);
+ await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/Renamed/}).click();await page.getByRole('button',{name:'휴지통',exact:true}).click();
+ await page.getByRole('dialog',{name:'휴지통으로 이동'}).getByRole('button',{name:'휴지통으로 이동',exact:true}).click();await page.getByRole('dialog',{name:'휴지통으로 이동'}).waitFor({state:'hidden'});
+ await palette('북마크');assert.equal(await page.getByRole('region',{name:'북마크'}).getByRole('button',{name:/Renamed/}).count(),0);
+ await app.close();app=null;
+ const second=`${fixture}/second-vault`;await mkdir(second);await writeFile(`${second}/Only Second.md`,'# Second vault\n');
+ await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:second}));await start();
+ await palette('북마크');assert.equal(await page.getByRole('region',{name:'북마크'}).getByRole('button').count(),0);
+ await palette('최근 파일');assert.equal(await page.getByRole('region',{name:'최근 파일'}).getByRole('button').count(),1);
+ await palette('달력과 일지');await page.getByRole('button',{name:'일지 설정',exact:true}).click();assert.equal(await page.getByRole('textbox',{name:'일지 저장 폴더'}).inputValue(),'');
+ assert.deepEqual(errors,[]);
+ const report={checks:['keyboard palette separate from document switcher','calendar creates dated template note','existing note preserves edits and CRLF','recent file navigation','bookmark restart persistence','per-period preferences persist','template insertion is one undo step','rename/delete reconcile bookmarks','second vault isolates navigation and preferences'],errors};
+ await writeFile('output/playwright/native-workflows.json',JSON.stringify(report,null,2));console.log(report);
+} finally {if(app)await app.close();await rm(fixture,{recursive:true,force:true});}
