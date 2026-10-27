@@ -50,6 +50,8 @@ export function installMarkdownExtensions(
       const visited = env.visited ?? [];
       if (!note)
         return `<span class="unresolved">삽입할 문서 없음 · ${escape(label)}</span>`;
+      if (env.compactPreview)
+        return `<a href="#" data-note="${escape(target)}">노트 · ${escape(label)}</a>`;
       if (visited.includes(note.path) || visited.length >= 4)
         return `<span class="embed-limit">순환/깊이 제한 · ${escape(label)}</span>`;
       return `<section class="note-embed" data-embed="${escape(note.path)}"><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true })}</section>`;

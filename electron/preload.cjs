@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld(
     snapshot: () => call("snapshot"),
     checkUpdates: (args) => call("check-updates", args),
     openWebViewer: (args) => call("open-web-viewer", args),
+    previewComposition: (args) => call("composer-preview", args),
+    applyComposition: (args) => call("composer-apply", args),
     copilotStatus: () => call("copilot-status"),
     copilotLogin: () => call("copilot-login"),
     copilotCancelLogin: () => call("copilot-cancel-login"),

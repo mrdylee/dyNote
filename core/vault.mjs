@@ -18,6 +18,11 @@ import { rewriteCanvas } from "./canvas.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const MAX_BYTES = 8 * 1024 * 1024;
+const documentRevision = (snapshot) => digest(JSON.stringify({
+  documents: [...snapshot.notes, ...snapshot.documents].map(file => [file.path, file.revision]).sort((a, b) => a[0].localeCompare(b[0])),
+  attachments: snapshot.attachments.map(file => file.path).sort(),
+  warnings: [...snapshot.warnings].sort(),
+}));
 
 export function validFilePath(value) {
   return (
@@ -137,6 +142,74 @@ export class Vault {
   }
 
   captureFiles() { return this.#enqueue(() => this.#captureFiles()); }
+
+  documentSnapshot() {
+    return this.#enqueue(async () => { const snapshot = await this.#snapshot(); return { ...snapshot, revision: documentRevision(snapshot) }; });
+  }
+
+  applyDocumentChanges(changes, expectedRevision) {
+    return this.#enqueue(async () => {
+      const before = await this.#snapshot();
+      if (before.warnings.length) throw new Error(`읽을 수 없는 문서를 먼저 확인해 주세요: ${before.warnings[0]}`);
+      if (documentRevision(before) !== expectedRevision) throw new Error("미리보기 이후 문서가 변경되었습니다. 다시 확인해 주세요.");
+      const current = new Map([...before.notes, ...before.documents].map(file => [file.path, file]));
+      const names = new Map(), seen = new Set();
+      for (const name of [...current.keys(), ...before.attachments.map(file => file.path), ...changes.map(change => change.path)]) {
+        if (!validFilePath(name)) throw new Error("잘못된 문서 경로입니다.");
+        const parts = name.split("/");
+        for (let i = 1; i <= parts.length; i++) {
+          const prefix = parts.slice(0, i).join("/"), key = prefix.normalize("NFC").toLowerCase();
+          if (names.has(key) && names.get(key) !== prefix) throw new Error("대소문자 또는 유니코드 표기만 다른 경로가 있습니다.");
+          names.set(key, prefix);
+        }
+      }
+      for (const change of changes) {
+        if ((!validNotePath(change.path) && !documentKind(change.path)) || seen.has(change.path)) throw new Error("잘못되었거나 중복된 문서 경로입니다.");
+        seen.add(change.path);
+        if (change.content !== null) {
+          if (typeof change.content !== "string" || Buffer.byteLength(change.content) > MAX_BYTES) throw new Error("문서는 8MB 이하여야 합니다.");
+          if (documentKind(change.path)) validateDocument(change.path, change.content);
+        } else if (!current.has(change.path)) throw new Error("삭제할 문서를 찾을 수 없습니다.");
+      }
+      await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });
+      const recoveryRoot = await realpath(this.recoveryRoot);
+      if (recoveryRoot === this.root || recoveryRoot.startsWith(this.root + path.sep)) throw new Error("복구 사본은 보관함 밖에 보관해야 합니다.");
+      const recoveryPath = path.join(recoveryRoot, "compose", randomUUID());
+      await mkdir(path.join(recoveryPath, "files"), { recursive: true, mode: 0o700 });
+      for (const change of changes) {
+        const file = current.get(change.path); if (!file) continue;
+        const backup = path.join(recoveryPath, "files", file.path);
+        await mkdir(path.dirname(backup), { recursive: true, mode: 0o700 });
+        await writeFile(backup, file.content, { flag: "wx", mode: 0o600 });
+      }
+      await writeFile(path.join(recoveryPath, "manifest.json"), JSON.stringify({ createdAt: new Date().toISOString(), revision: expectedRevision, files: changes.map(change => ({ path: change.path, revision: current.get(change.path)?.revision ?? null })) }), { flag: "wx", mode: 0o600 });
+      if (documentRevision(await this.#snapshot()) !== expectedRevision) throw new Error(`복구 사본 생성 중 문서가 변경되었습니다. 복구 사본: ${recoveryPath}`);
+      const readCurrent = (name) => this.#read(name).catch(error => { if (error.code !== "ENOENT") throw error; return null; });
+      const applied = [];
+      try {
+        for (const change of changes) {
+          const previous = current.get(change.path);
+          if ((await readCurrent(change.path))?.revision !== previous?.revision) throw new Error(`적용 중 문서가 변경되었습니다: ${change.path}`);
+          if (change.content === null) await unlink(await this.#file(change.path));
+          else if (previous) await this.#save(change.path, change.content, previous.revision);
+          else await writeFile(await this.#file(change.path, true), change.content, { flag: "wx", mode: 0o600 });
+          applied.push(change);
+        }
+        return { recoveryPath, snapshot: await this.#snapshot() };
+      } catch (error) {
+        for (const change of applied.reverse()) {
+          try {
+            const actual = await readCurrent(change.path), previous = current.get(change.path);
+            if (actual?.revision !== (change.content === null ? undefined : digest(Buffer.from(change.content)))) continue;
+            if (!previous) await unlink(await this.#file(change.path));
+            else if (actual) await this.#save(change.path, previous.content, actual.revision);
+            else await writeFile(await this.#file(change.path, true), previous.content, { flag: "wx", mode: 0o600 });
+          } catch { /* Preserve external edits and the recovery copies. */ }
+        }
+        throw new Error(`${error.message} 복구 사본: ${recoveryPath}`);
+      }
+    });
+  }
 
   async #captureFiles() {
     const files = [];

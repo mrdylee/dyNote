@@ -72,6 +72,8 @@ import MermaidTools from "./MermaidTools.jsx";
 import MindmapEditor from "./MindmapEditor.jsx";
 import AudioRecorder from "./AudioRecorder.jsx";
 import AudioViewer from "./AudioViewer.jsx";
+import ComposerDialog from "./ComposerDialog.jsx";
+import NoteHover from "./NoteHover.jsx";
 import { convertMindmap } from "../core/mindmap.mjs";
 import { pdfBacklinks } from "../core/pdf-links.mjs";
 
@@ -220,7 +222,14 @@ export default function App() {
   const audioActive = useRef(false);
   const [audioNotice, setAudioNotice] = useState("");
   const [webUrl, setWebUrl] = useState("");
+  const [compositionRecovery, setCompositionRecovery] = useState(null);
+  const [hover, setHover] = useState(null);
+  const hoverTimer = useRef(null), hoverClose = useRef(null), hoverAnchor = useRef(null);
   const [modal, setModal] = useState(null);
+  useEffect(() => {
+    clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); hoverAnchor.current = null; setHover(null);
+    return () => { clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); };
+  }, [active, vault?.id, modal]);
   const [settingsTab, setSettingsTab] = useState("vault");
   useEffect(() => api?.onOpenSettings(() => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) setModal("settings"); }), [busy]);
   const [newName, setNewName] = useState("");
@@ -744,6 +753,25 @@ export default function App() {
         setError(err.message),
       );
   };
+  const showLinkPreview = (event) => {
+    const anchor = event.target.closest?.("a[data-note], [data-live-target]");
+    if (!anchor || hoverAnchor.current === anchor || modal) return;
+    clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current);
+    const resolved = resolveLink(anchor.dataset.note ?? anchor.dataset.liveTarget, active, model.notes, { kind: anchor.dataset.liveKind ?? "wiki" });
+    if (resolved.status !== "resolved") { setHover(null); return; }
+    hoverAnchor.current = anchor;
+    hoverTimer.current = setTimeout(() => {
+      if (!anchor.isConnected) return;
+      const bounds = anchor.getBoundingClientRect();
+      setHover({ path: resolved.path, position: { left: Math.max(12, Math.min(bounds.left, window.innerWidth - 372)), top: Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - 320)) } });
+    }, 350);
+  };
+  const closeLinkPreview = (event) => {
+    const anchor = event.target.closest?.("a[data-note], [data-live-target]");
+    if (!anchor || anchor.contains(event.relatedTarget)) return;
+    clearTimeout(hoverTimer.current); hoverAnchor.current = null;
+    hoverClose.current = setTimeout(() => setHover(null), 200);
+  };
 
   const insertTemplate = (path) => {
     const template = effectiveNotes.find(n => n.path === path), view = editorView.current;
@@ -799,6 +827,9 @@ export default function App() {
     { id: "on-this-day", label: "과거 같은 날의 기록", run: () => { setHistoryDate(localDate()); setModal("onThisDay"); } },
     { id: "audio", label: "음성 녹음", disabled: edits.blocked(), run: () => { setAudioNotice(""); setModal("audio"); } },
     { id: "web", label: "웹 뷰어 열기", run: () => { setError(""); setModal("web"); } },
+    { id: "extract-selection", label: "선택 영역을 새 문서로 추출", disabled: !note || editorSelection?.path !== active || edits.blocked(), run: () => setModal("compose-extract") },
+    { id: "extract-heading", label: "제목 단위로 새 문서 추출", disabled: !note?.headings.length || edits.blocked(), run: () => setModal("compose-extract-heading") },
+    { id: "merge-note", label: "현재 문서를 다른 문서와 합치기", disabled: !note || edits.blocked(), run: () => setModal("compose-merge") },
     ...periodicCommands,
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
@@ -1195,7 +1226,8 @@ export default function App() {
               </button>
             </div>
           )}
-          <div className="document-area">
+          {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
+          <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "graph" ? (
               <Graph
                 key={vault.id}
@@ -1681,6 +1713,25 @@ export default function App() {
           disabled={busy || command.disabled || (!vault.id && command.id !== "settings")} onMouseMove={() => setCommandIndex(index)} onClick={() => runCommand(command)}>{command.label}</button>)}
           {!commandResults.length && <p className="muted">일치하는 명령이 없습니다.</p>}</div>
         <p className="muted">↑ ↓ 선택 · Enter 실행 · Esc 닫기 · 문서 이동 {shortcut} K</p>
+      </Modal>}
+      {hover && model.notes.some(n => n.path === hover.path) && <NoteHover note={model.notes.find(n => n.path === hover.path)} notes={model.notes} vault={vault} position={hover.position}
+        onEnter={() => clearTimeout(hoverClose.current)} onLeave={() => setHover(null)} onOpen={() => { openNote(hover.path); setHover(null); }}/>}
+      {modal?.startsWith("compose-") && note && <Modal title="문서 정리" wide onClose={() => !busy && setModal(null)}>
+        <ComposerDialog key={`${modal}:${note.path}`} kind={modal.slice(8)} source={note} notes={model.notes} selection={editorSelection?.path === active ? editorSelection : null} busy={busy}
+          onPreview={async (input) => {
+            const vaultId = vault.id; setBusy(true);
+            try { await flush(); const result = await invoke(api.previewComposition({ vaultId, input: { ...input, sourceRevision: revisions.current.get(input.sourcePath) } })); if (currentVault.current !== vaultId) throw new Error("보관함이 변경되었습니다."); return result; }
+            finally { setBusy(false); }
+          }}
+          onApply={async (preview) => {
+            const vaultId = vault.id; setBusy(true);
+            try {
+              await flush(); const result = await invoke(api.applyComposition({ vaultId, input: preview.input, revision: preview.revision }));
+              if (currentVault.current !== vaultId) throw new Error("보관함이 변경되었습니다.");
+              if (preview.input.kind === "merge") updateNavigation({ type: "rename", from: preview.input.sourcePath, to: preview.input.targetPath });
+              install(result.snapshot); openNote(preview.input.targetPath); setMode("edit"); setModal(null); setCompositionRecovery(result.recoveryPath);
+            } finally { setBusy(false); }
+          }}/>
       </Modal>}
       {modal === "template" && <Modal title="템플릿 삽입" onClose={() => setModal(null)}>
         <p>선택한 문서 내용을 현재 선택 영역에 삽입합니다.</p>
