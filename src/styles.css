@@ -1744,7 +1744,7 @@ kbd {
 .settings-tabs button[aria-current="page"] { color: #5142ac; background: #f0edfc; font-weight: 600; }
 .settings-tabs + .settings-section { border-top: 0; margin-top: 0; }
 .vault-settings-list { padding: 0; list-style: none; }
-.vault-settings-list li { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin: 14px 0; }
+.vault-settings-list li { border: 1px solid #d9dfeb; border-radius: 8px; padding: 14px; margin: 14px 0; }
 .vault-settings-list p { overflow-wrap: anywhere; font-size: 12px; }
 .vault-settings-list small { color: #5142ac; margin-left: 8px; }
 .daily-backup-info { padding: 14px; background: #f7f6fc; border-radius: 8px; margin-top: 16px; }
@@ -1861,3 +1861,9 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .note-hover > strong { font-size: 14px; }
 .note-hover .note-hover-body { padding: 8px 0; font-size: 12px; max-height: 220px; overflow: hidden; pointer-events: none; }
 .note-hover > button { font-size: 12px; padding: 6px 10px; border: 1px solid #d8dfea; border-radius: 5px; }
+
+.pdf-annotation-tools {margin: 10px 0; padding: 12px; border: 1px solid #d9dfeb; border-radius: 8px;}
+.pdf-annotation-tools label {display: inline-flex; flex-direction: column; gap: 5px; margin: 8px 12px 8px 0;}
+.pdf-annotation-tools textarea {min-width: 260px; min-height: 64px;}
+.pdf-annotation-tools button {margin: 4px; padding: 6px 9px; border: 1px solid #d9dfeb; border-radius: 5px;}
+.pdf-annotation-tools input, .pdf-annotation-tools select, .pdf-annotation-tools textarea {padding: 5px; border: 1px solid #ccd5e2; border-radius: 4px;}

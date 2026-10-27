@@ -1,0 +1,28 @@
+import {mkdtemp,mkdir,writeFile,readFile,copyFile,rm,readdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import assert from 'node:assert/strict';
+import {getDocument} from 'pdfjs-dist/legacy/build/pdf.mjs';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
+const fixture=await mkdtemp(`${tmpdir()}/dynote-pdf-edit-runtime-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
+await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await copyFile('tests/fixtures/link-target.pdf',`${vault}/manual.pdf`);await writeFile(`${vault}/Note.md`,'# PDF editing\n\n[[manual.pdf#page=2&selection=0,0,0,6|PDF]]\n');
+const original=await readFile(`${vault}/manual.pdf`);
+const annotations=async()=>{const job=getDocument({data:new Uint8Array(await readFile(`${vault}/manual.pdf`)),useSystemFonts:true});try{const pdf=await job.promise;return await(await pdf.getPage(2)).getAnnotations();}finally{await job.destroy();}};
+const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+try{
+ const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const open=async()=>{await page.locator('.markdown-preview a').filter({hasText:'PDF'}).click();await page.waitForFunction(()=>window.getSelection()?.toString()==='Second');};
+ const tools=()=>page.locator('.pdf-annotation-tools');const preview=()=>page.getByRole('button',{name:'PDF 변경 미리보기',exact:true}).click();const save=()=>page.getByRole('button',{name:'미리본 PDF 변경 저장',exact:true}).click();
+ await open();await tools().locator('summary').click();await page.getByRole('textbox',{name:'PDF 주석 메모'}).fill('원본 PDF 강조 😀');await preview();await page.getByRole('region',{name:'PDF 변경 미리보기'}).waitFor();assert.deepEqual(await readFile(`${vault}/manual.pdf`),original);
+ await save();await page.getByLabel('PDF 링크 주석',{exact:true}).waitFor();let items=await annotations(),created=items.find(a=>a.contentsObj?.str==='원본 PDF 강조 😀');assert.equal(created.subtype,'Highlight');const id=created.id;
+ await page.getByRole('button',{name:'문서로 돌아가기',exact:true}).click();await open();await tools().locator('summary').click();await page.getByRole('combobox',{name:'PDF 기존 주석'}).selectOption(id);await page.getByRole('button',{name:'주석 링크 복사',exact:true}).click();assert.equal(await app.evaluate(({clipboard})=>clipboard.readText()),`[[manual.pdf#page=2&annotation=${id}]]`);
+ await page.getByRole('combobox',{name:'PDF 주석 작업'}).selectOption('edit');await page.getByRole('textbox',{name:'PDF 주석 메모'}).fill('Updated 메모');await page.getByLabel('PDF 주석 색상',{exact:true}).fill('#ff0000');await preview();await save();await page.getByLabel('PDF 링크 주석',{exact:true}).waitFor();items=await annotations();assert.equal(items.find(a=>a.id===id).contentsObj.str,'Updated 메모');assert.deepEqual([...items.find(a=>a.id===id).color],[255,0,0]);
+ await page.getByRole('combobox',{name:'PDF 기존 주석'}).selectOption(id);await page.getByRole('combobox',{name:'PDF 주석 작업'}).selectOption('delete');await preview();
+ const beforeExternal=await readFile(`${vault}/manual.pdf`);await writeFile(`${vault}/manual.pdf`,Buffer.concat([beforeExternal,Buffer.from('\n% external')]));await save();await page.getByRole('alert').filter({hasText:'변경'}).waitFor();assert.equal((await annotations()).some(a=>a.id===id),true);
+ await preview();await page.getByRole('alert').filter({hasText:'다시 열어'}).waitFor();
+ await page.getByRole('button',{name:'문서로 돌아가기',exact:true}).click();await open();await tools().locator('summary').click();await page.getByRole('combobox',{name:'PDF 기존 주석'}).selectOption(id);await page.getByRole('combobox',{name:'PDF 주석 작업'}).selectOption('delete');await preview();await save();await page.waitForFunction(()=>document.querySelector('select[aria-label="PDF 기존 주석"]')?.options.length===2&&document.querySelector('.pdf-page')?.getAttribute('aria-busy')==='false');
+ items=await annotations();assert.equal(items.some(a=>a.id===id),false);assert.equal(items.length,1);assert.equal(items[0].contentsObj.str,'Synthetic review');
+ const walk=async directory=>{let result=[];for(const e of await readdir(directory,{withFileTypes:true})){const p=`${directory}/${e.name}`;result.push(...(e.isDirectory()?await walk(p):[p]));}return result;};
+ const backups=(await walk(profile)).filter(p=>p.includes('/pdf/')&&p.endsWith('/original.pdf'));let exact=false;for(const backup of backups)if((await readFile(backup)).equals(original))exact=true;assert.ok(exact);
+ assert.deepEqual(errors,[]);await page.screenshot({path:'output/playwright/native-pdf-editing.png'});const report={checks:['selection geometry produces native PDF highlight','preview preserves source bytes','saved Unicode comment persists after reopen','annotation link copy','comment/color update preserves original annotation','external change refuses deletion','refreshed deletion removes only selected annotation','byte-exact outside-vault original recovery'],errors};await writeFile('output/playwright/native-pdf-editing.json',JSON.stringify(report,null,2));console.log(report);
+}catch(e){const page=app.windows()[0];if(page){console.error((await page.locator('body').innerText()).slice(-2400));await page.screenshot({path:'output/playwright/native-pdf-editing-failure.png'});}await app.evaluate(({app})=>app.exit(0)).catch(()=>{});throw e;}finally{await app.close();await rm(fixture,{recursive:true,force:true});}

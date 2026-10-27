@@ -2,16 +2,19 @@ import {useEffect,useRef,useState} from 'react';
 import {getDocument,GlobalWorkerOptions,TextLayer} from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {parsePdfFragment,pdfWikiLink} from '../core/pdf-links.mjs';
+import PdfAnnotationTools from './PdfAnnotationTools.jsx';
 GlobalWorkerOptions.workerSrc=workerUrl;
 
-export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,onOpenNote,onFollow}) {
+export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,onOpenNote,onFollow,onPreviewEdit,onApplyEdit}) {
   const canvas=useRef(null),textHost=useRef(null),textLayer=useRef(null);
   const [pdf,setPdf]=useState(null),[page,setPage]=useState(1),[scale,setScale]=useState(1.25);
   const [target,setTarget]=useState(null),[selection,setSelection]=useState(null),[annotationRect,setAnnotationRect]=useState(null);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[ready,setReady]=useState(false);
+  const [annotations,setAnnotations]=useState([]),viewportRef=useRef(null);
+  const pdfRects=range=>{const viewport=viewportRef.current,host=textHost.current?.getBoundingClientRect();if(!viewport||!host)return [];return Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0).map(r=>{const a=viewport.convertToPdfPoint(r.left-host.left,r.top-host.top),b=viewport.convertToPdfPoint(r.right-host.left,r.bottom-host.top);return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];});};
   useEffect(()=>{
     let disposed=false;const job=getDocument({data:new Uint8Array(bytes),isEvalSupported:false,enableXfa:false,useSystemFonts:true});
-    setPdf(null);setError('');
+    setPdf(null);setError('');setReady(false);setAnnotations([]);setSelection(null);setAnnotationRect(null);viewportRef.current=null;
     job.promise.then(value=>{if(!disposed)setPdf(value);}).catch(e=>{if(!disposed)setError(e.message);});
     return()=>{disposed=true;job.destroy();};
   },[bytes]);
@@ -22,10 +25,11 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
   useEffect(()=>{
     if(!pdf || page>pdf.numPages)return;
     let cancelled=false,render,layer;
-    setReady(false);setSelection(null);setAnnotationRect(null);
+    setReady(false);setSelection(null);setAnnotationRect(null);setAnnotations([]);
     const run=async()=>{
       const p=await pdf.getPage(page);if(cancelled)return;
       const viewport=p.getViewport({scale}),targetCanvas=canvas.current,host=textHost.current;
+      viewportRef.current=viewport;
       targetCanvas.width=viewport.width;targetCanvas.height=viewport.height;
       host.parentElement.style.width=`${viewport.width}px`;host.parentElement.style.height=`${viewport.height}px`;
       host.style.setProperty('--total-scale-factor',String(scale));host.replaceChildren();
@@ -34,16 +38,16 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       layer=new TextLayer({textContentSource:content,container:host,viewport});textLayer.current=layer;
       await Promise.all([render.promise,layer.render()]);if(cancelled)return;
       setReady(true);
+      const annotations=await p.getAnnotations();if(cancelled)return;setAnnotations(annotations);
       if(target?.page===page && target.selection) {
         const [a,ao,b,bo]=target.selection,first=layer.textDivs[a],last=layer.textDivs[b];
         if(first?.firstChild&&last?.firstChild&&ao<=first.textContent.length&&bo<=last.textContent.length) {
           const range=window.document.createRange();range.setStart(first.firstChild,ao);range.setEnd(last.firstChild,bo);
           const browserSelection=window.getSelection();browserSelection.removeAllRanges();browserSelection.addRange(range);
-          setSelection({range:target.selection,text:browserSelection.toString()});first.scrollIntoView({block:'center',inline:'nearest'});
+          setSelection({range:target.selection,text:browserSelection.toString(),rects:pdfRects(range)});first.scrollIntoView({block:'center',inline:'nearest'});
         } else setMessage('이 문서에서 링크의 선택 영역을 찾을 수 없습니다.');
       }
       if(target?.page===page && target.annotation) {
-        const annotations=await p.getAnnotations();if(cancelled)return;
         const annotation=annotations.find(a=>a.id===target.annotation || a.annotationName===target.annotation);
         if(annotation?.rect){const [x1,y1]=viewport.convertToViewportPoint(annotation.rect[0],annotation.rect[1]),[x2,y2]=viewport.convertToViewportPoint(annotation.rect[2],annotation.rect[3]);setAnnotationRect({left:Math.min(x1,x2),top:Math.min(y1,y2),width:Math.abs(x2-x1),height:Math.abs(y2-y1)});}
         else setMessage('이 페이지에서 링크의 PDF 주석을 찾을 수 없습니다.');
@@ -63,7 +67,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       return [index,before.toString().length];
     };
     const start=locate(range.startContainer,range.startOffset),end=locate(range.endContainer,range.endOffset);
-    setSelection(start&&end?{range:[...start,...end],text:selected.toString()}:null);
+    setSelection(start&&end?{range:[...start,...end],text:selected.toString(),rects:pdfRects(range)}:null);
   };
   const copy=async withSelection=>{
     try{await onCopy(pdfWikiLink(path,page,withSelection?selection?.range:null));setMessage('PDF 링크를 복사했습니다.');}
@@ -81,6 +85,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       </div>
       {message&&<p role="status" className="pdf-message">{message}</p>}
       {selection?.text&&<p className="pdf-selected-text">선택: {selection.text}</p>}
+      {onPreviewEdit&&<PdfAnnotationTools path={path} page={page} selection={selection} annotations={annotations} onPreview={onPreviewEdit} onApply={onApplyEdit} onFollow={onFollow} onCopy={onCopy}/>}
       <div className="pdf-page" aria-busy={!ready}><canvas ref={canvas} aria-label={`PDF ${page}페이지`}/><div ref={textHost} className="native-pdf-text" onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="PDF 텍스트"/>{annotationRect&&<div className="pdf-annotation-target" aria-label="PDF 링크 주석" style={annotationRect}/>}</div>
       <section className="pdf-backlinks" aria-label="PDF 백링크"><h3>이 PDF를 연결한 기록 · {backlinks.length}</h3>{backlinks.map((link,i)=><div key={`${link.notePath}:${i}`}><button onClick={()=>onOpenNote(link.notePath)}>{link.notePath}</button><button onClick={()=>onFollow(link.fragment)}>{link.fragment||'첫 페이지'}</button></div>)}</section>
     </>}

@@ -531,6 +531,31 @@ export class Vault {
     return { ...value, mime: this.#checkAttachment(relative, value.bytes) };
   }
 
+  replacePdf(relative, input, expectedRevision) {
+    return this.#enqueue(async () => {
+      if (attachmentMime(relative) !== "application/pdf" || !(input instanceof Uint8Array)) throw new Error("PDF 데이터가 필요합니다.");
+      const bytes = Buffer.from(input); this.#checkAttachment(relative, bytes);
+      const current = await this.#binary(relative);
+      if (current.revision !== expectedRevision) throw new Error("외부에서 PDF가 변경되었습니다. 다시 확인해 주세요.");
+      await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });
+      const recoveryRoot = await realpath(this.recoveryRoot);
+      if (recoveryRoot === this.root || recoveryRoot.startsWith(this.root + path.sep)) throw new Error("복구 사본은 보관함 밖에 보관해야 합니다.");
+      const directory = path.join(recoveryRoot, "pdf", randomUUID());
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      const recoveryPath = path.join(directory, "original.pdf");
+      await writeFile(recoveryPath, current.bytes, { flag: "wx", mode: 0o600 });
+      await writeFile(path.join(directory, "entry.json"), JSON.stringify({ path: relative, revision: current.revision }), { flag: "wx", mode: 0o600 });
+      const target = await this.#file(relative), temporary = path.join(path.dirname(target), `.dynote-pdf-${randomUUID()}`);
+      try {
+        await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+        if ((await this.#binary(relative)).revision !== current.revision) throw new Error("저장 전 PDF가 변경되었습니다.");
+        if (await this.#file(relative) !== target) throw new Error("PDF 경로가 변경되었습니다.");
+        await rename(temporary, target);
+      } finally { await unlink(temporary).catch(() => {}); }
+      return { recoveryPath, attachment: { path: relative, bytes, revision: digest(bytes), mime: "application/pdf" } };
+    });
+  }
+
   moveFile(from, to, expectedRevision) {
     return this.#enqueue(async () => {
       if (

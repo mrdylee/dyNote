@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 import { Vault } from "../core/vault.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
-import { NoteComposer } from "../core/note-composer.mjs";
 import { demoNotes } from "../core/demo.mjs";
 import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
@@ -256,8 +255,10 @@ app
       },
       "forget-vault": async (args) => { await registry.forget(args?.root); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
       "git-history": (args) => { checkVault(args); return new GitHistory(vault).list(args.month); },
-      "composer-preview": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new NoteComposer(vault).preview(args.input); }); },
-      "composer-apply": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new NoteComposer(vault).apply(args.input, args.revision); }); },
+      "composer-preview": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args); return new NoteComposer(vault).preview(args.input); }); },
+      "composer-apply": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args); return new NoteComposer(vault).apply(args.input, args.revision); }); },
+      "pdf-preview": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { PdfEditor } = await import("../core/pdf-editing.mjs"); checkVault(args); return new PdfEditor(vault).preview(args.input); }); },
+      "pdf-apply": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { PdfEditor } = await import("../core/pdf-editing.mjs"); checkVault(args); return new PdfEditor(vault).apply(args.input, args.revision); }); },
       "git-workspace-status": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new GitWorkspace(vault.root).status(); }); },
       "git-workspace-diff": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new GitWorkspace(vault.root).diff(args.path, args.staged === true); }); },
       "git-workspace-action": (args) => {
@@ -392,8 +393,8 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply"].includes(name);
-        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply", "pdf-apply"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -404,7 +405,7 @@ app
           }
           const id = vault?.id;
           const value = await action(args);
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash", "composer-apply"].includes(name)) gitBackup.markDirty(id);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash", "composer-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

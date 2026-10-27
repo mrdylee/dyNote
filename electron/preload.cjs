@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld(
     openWebViewer: (args) => call("open-web-viewer", args),
     previewComposition: (args) => call("composer-preview", args),
     applyComposition: (args) => call("composer-apply", args),
+    previewPdf: (args) => call("pdf-preview", args),
+    applyPdf: (args) => call("pdf-apply", args),
     copilotStatus: () => call("copilot-status"),
     copilotLogin: () => call("copilot-login"),
     copilotCancelLogin: () => call("copilot-cancel-login"),

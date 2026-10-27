@@ -1257,7 +1257,9 @@ export default function App() {
                 {attachment.mime === "application/pdf" ? (
                   <PdfViewer key={attachment.path} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
                     onCopy={(text) => invoke(api.copyText({ vaultId: vault.id, text }))} onOpenNote={openNote}
-                    onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}/>
+                    onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}
+                    onPreviewEdit={async input => { const vaultId=vault.id; const result=await invoke(api.previewPdf({vaultId,input:{...input,sourceRevision:attachment.revision}})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); return result; }}
+                    onApplyEdit={async preview => { const vaultId=vault.id; const result=await invoke(api.applyPdf({vaultId,input:preview.input,revision:preview.revision})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); setAttachment(old=>old?.path===preview.input.path?{...result.attachment,fragment:`page=${preview.input.page}`+(result.annotationId?`&annotation=${encodeURIComponent(result.annotationId)}`:'')}:old); return result; }}/>
                 ) : attachment.mime.startsWith("audio/") ? <AudioViewer bytes={attachment.bytes} mime={attachment.mime}/> : (
                   <img
                     alt={attachment.path}

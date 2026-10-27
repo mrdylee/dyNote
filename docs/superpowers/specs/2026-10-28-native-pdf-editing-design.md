@@ -1,0 +1,9 @@
+# Native PDF annotation editing
+
+Scope: extend PDF-01 from selection links/read navigation to persisted highlight annotations and annotation content/color/delete. Original PDF++ has a separate explicit PDF editing toggle and writes native Highlight dictionaries with Rect, QuadPoints, Contents, author/color/opacity. Controlled original writing must use the owned synthetic PDF only.
+
+Choose native PDF annotations over a Markdown-only overlay so saved highlights reopen in other readers. Use the MIT pdf-lib package from its official distribution; do not copy bundled plugin implementation. Existing PDF.js renders/reads the saved result. Keep the 25MB attachment limit, validated vault paths and sender isolation. Require explicit preview/save, source-revision recheck and a byte-identical outside-vault recovery copy before atomic replacement. Viewing/copying links never edits bytes. Encrypted or signature-bearing PDFs are refused for this editing slice because rewriting cannot preserve their guarantees. Retain original annotation dictionaries outside the selected annotation; no automatic conversion of Markmind sidecars.
+
+Selection capture converts browser text rectangles through the current PDF viewport to PDF coordinates, including zoom/rotation. Persist a standard Highlight annotation, editable plain-text comment and color; list existing supported annotations, navigate/copy annotation links, edit/delete through preview. Preview identifies file/page/operation and rejects stale source versions. New native annotations must be readable by PDF.js after disk reload; test Unicode contents and recovery bytes.
+
+V-model: original controlled PDF++ write -> standard annotation/parser/revision/recovery tests -> actual Electron select/preview/save/reopen/edit/delete and stale refusal -> existing PDF selection/link regression. Page reorder/extract/merge/outline editing remain separate planned capabilities; do not claim this annotation slice provides them.

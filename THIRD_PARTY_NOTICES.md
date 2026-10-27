@@ -52,3 +52,7 @@ The MIT permission and warranty terms reproduced above apply to the respective M
 - PixiJS 8.22.0, https://github.com/pixijs/pixijs — MIT, Copyright (c) 2013-2023 Mathew Groves, Chad Engler. Its installed LICENSE is retained in the application package.
 - AssemblyScript 0.28.20, https://github.com/AssemblyScript/assemblyscript — Apache-2.0. The independently authored graph kernel is compiled with its standard library/runtime. The compiler's LICENSE and NOTICE are retained in `licenses/assemblyscript/`, including in desktop packages.
 - Obsidian's graph WASM, extracted JavaScript and visual assets are not included.
+
+## Native PDF editing
+
+`pdf-lib` 1.17.1 is an MIT-licensed dependency from [Hopding/pdf-lib](https://github.com/Hopding/pdf-lib). Copyright (c) 2019 Andrew Dillon. Its original license is retained in the installed `node_modules/pdf-lib/LICENSE.md` and packaged dependency. Dynote uses its own annotation workflow; no PDF++ program code is copied into the product. Official API references: [PDFDocument](https://pdf-lib.js.org/docs/api/classes/pdfdocument), [PDFPage](https://pdf-lib.js.org/docs/api/classes/pdfpage).
