@@ -35,3 +35,13 @@ OUTLINE-01 representative source and runtime behavior now matches the controlled
 DIAGRAM-01: native Mermaid dialog supplies twenty independently authored editable diagram families, inserts at the editor selection and distinguishes an existing Mermaid fence. All twenty samples parse with the installed Mermaid parser. This does not claim that every original plugin element preset has been reproduced.
 
 `node --test tests/outliner.test.mjs tests/diagram-tools.test.mjs`: 5 passed. `scripts/verify-editor-tools.mjs` executed actual Mac Electron subtree move/one-step undo, fold/unfold with original disk bytes, twenty-family selection, Mermaid insertion/undo and SVG rendering. No renderer page errors. Evidence: ignored `output/playwright/native-editor-tools.json` and `native-editor-tools.png`.
+
+## Native mindmap slice
+
+Original controlled Markmind execution successfully converted synthetic `Map.md` into separate `Map-rich.md`. The generated document is `tests/fixtures/markmind-rich.md`; it contains no private notes/settings. Markmind uses `mindmapview`, whereas Enhancing Mindmap used `mindmapView` in the controlled run. The fixture temporarily disabled/re-enabled only synthetic plugin instances to select the intended implementation.
+
+MAP-01/02 implemented: parse basic heading/list hierarchy and original rich flat-node JSON; rename/add child/add sibling/delete subtree; collapse/expand; native undo/redo; rich drag coordinate persistence; safe separate-file basic/rich conversion. Basic edits preserve frontmatter, body prose, block IDs and CRLF. Rich edits preserve unknown properties/arrays/styles; malformed/cyclic data reports an error and offers Markdown editing. Deleting rich subtrees with unsupported decorations/relationships is rejected to avoid dangling references.
+
+`tests/mindmap.test.mjs`: 5 passed, including original generated rich fixture, edits/conversions, coordinate validation, malformed/cyclic data and decorated-tree preservation. `scripts/verify-mindmap-tools.mjs` verified actual Mac Electron basic edit/save/undo, rich drag persistence and unknown fields, conversion/source preservation, collision refusal and invalid-rich fallback. No renderer page errors. Output: ignored `output/playwright/native-mindmap.json`, `native-mindmap.png`.
+
+Remaining Markmind/Enhancing features include richer layout/presentation, node clipboard and exports, decorated relationship editing, PDF/EPUB annotation integration, licensed original functions and external AI/translation/GROBID services. Those are not established by this slice.

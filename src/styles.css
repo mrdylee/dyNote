@@ -1807,3 +1807,15 @@ kbd {
 .mermaid-tools label { display: block; margin: 12px 0; font-size: 13px; }
 .mermaid-tools select, .mermaid-tools textarea { display: block; width: 100%; margin-top: 7px; border: 1px solid #ccd4e2; border-radius: 6px; padding: 9px; background: #fff; }
 .mermaid-tools textarea { font-family: var(--editor-font, monospace); resize: vertical; }
+.mindmap-editor { display: flex; flex-direction: column; height: 100%; min-height: 400px; }
+.mindmap-toolbar { display: flex; gap: 6px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid #e4e8ef; }
+.mindmap-toolbar button { border: 1px solid #d9dfeb; border-radius: 5px; padding: 6px 9px; font-size: 12px; }
+.mindmap-label { display: flex; gap: 12px; align-items: center; padding: 8px 14px; }
+.mindmap-label label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.mindmap-label input { border: 1px solid #d1d8e3; border-radius: 5px; padding: 6px; }
+.mindmap-label small { color: #778198; font-size: 11px; }
+.mindmap-stage { flex: 1; min-height: 300px; }
+.mindmap-node { min-width: 160px; max-width: 240px; border: 1px solid #b6a2d8; border-radius: 9px; background: #fff; padding: 14px 18px; box-shadow: 0 2px 9px #29325810; white-space: pre-wrap; overflow-wrap: anywhere; }
+.react-flow__node.selected .mindmap-node { border: 2px solid #9276c6; }
+.mindmap-note { font-size: 11px; color: #778198; padding: 0 14px; }
+.mindmap-error { padding: 24px; }

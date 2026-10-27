@@ -1,0 +1,35 @@
+import {mkdtemp,mkdir,writeFile,readFile,copyFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import assert from 'node:assert/strict';
+import {parseMindmap} from '../core/mindmap.mjs';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
+const fixture=await mkdtemp(`${tmpdir()}/dynote-mindmap-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
+await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+const basic='---\nmindmap-plugin: basic\nowner: keep\n---\n# Root\n\n## Branch\n- Child\n';
+await writeFile(`${vault}/Basic.md`,basic);await copyFile('tests/fixtures/markmind-rich.md',`${vault}/Rich.md`);
+await writeFile(`${vault}/Invalid.md`,'---\nmindmap-plugin: rich\n---\n```json\n{broken}\n```\n');
+const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+try {
+ const page=await app.firstWindow();page.setDefaultTimeout(12000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const go=async path=>{await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:'+path);await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'문서로 이동',exact:true}).waitFor({state:'hidden'});};
+ const save=async()=>{await page.keyboard.press('Meta+s');await page.getByText('모든 변경사항 저장됨',{exact:true}).waitFor();};
+ await page.getByRole('button',{name:'마인드맵 보기',exact:true}).click();await page.getByRole('region',{name:'마인드맵 편집기'}).waitFor();
+ await page.getByRole('textbox',{name:'마인드맵 노드 이름'}).fill('Renamed root');await page.getByRole('button',{name:'이름 적용',exact:true}).click();
+ await page.getByRole('button',{name:'자식 노드 추가',exact:true}).click();await save();
+ let model=parseMindmap(await readFile(`${vault}/Basic.md`,'utf8'));assert.ok(model.nodes.find(n=>n.text==='새 생각'));assert.match(model.metadata.yaml,/owner: keep/);
+ await page.getByRole('button',{name:'실행 취소',exact:true}).click();await save();assert.equal(parseMindmap(await readFile(`${vault}/Basic.md`,'utf8')).nodes.length,3);
+ await go('Rich.md');await page.getByRole('region',{name:'마인드맵 편집기'}).waitFor();
+ const before=await readFile(`${vault}/Rich.md`,'utf8'),nodeBefore=parseMindmap(before).nodes.find(n=>n.text==='First');
+ const card=page.locator('.react-flow__node').filter({has:page.getByText('First',{exact:true})});await card.waitFor();
+ const box=await card.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+60,box.y+box.height/2+40,{steps:8});await page.mouse.up();await save();
+ const after=await readFile(`${vault}/Rich.md`,'utf8'),parsed=parseMindmap(after),nodeAfter=parsed.nodes.find(n=>n.id===nodeBefore.id);
+ assert.ok(Math.abs(nodeAfter.x-nodeBefore.x)>1 || Math.abs(nodeAfter.y-nodeBefore.y)>1);assert.deepEqual(nodeAfter.raw.style,nodeBefore.raw.style);assert.deepEqual(parsed.data.opt,parseMindmap(before).data.opt);
+ await page.getByRole('button',{name:'기본 형식으로 복사',exact:true}).click();await page.getByText('모든 변경사항 저장됨',{exact:true}).waitFor();
+ const converted=await readFile(`${vault}/Rich-basic.md`,'utf8');assert.equal(parseMindmap(converted).kind,'basic');assert.equal(await readFile(`${vault}/Rich.md`,'utf8'),after);
+ await page.screenshot({path:'output/playwright/native-mindmap.png'});
+ await go('Rich.md');await page.getByRole('button',{name:'기본 형식으로 복사',exact:true}).click();await page.getByRole('alert').filter({hasText:'이미'}).waitFor();assert.equal(await readFile(`${vault}/Rich-basic.md`,'utf8'),converted);
+ await go('Invalid.md');await page.getByRole('alert').filter({hasText:'JSON'}).waitFor();await page.getByRole('button',{name:'Markdown으로 열기',exact:true}).click();await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
+ assert.deepEqual(errors,[]);const report={checks:['basic edit/save preserves metadata','native undo','rich coordinates persist after actual drag','rich unknown fields preserved','conversion creates separate file and preserves source','existing conversion target cannot be overwritten','invalid rich falls back to Markdown'],errors};
+ await writeFile('output/playwright/native-mindmap.json',JSON.stringify(report,null,2));console.log(report);
+}catch(e){const page=app.windows()[0];console.error((await page.locator('body').innerText()).slice(0,2400));await page.screenshot({path:'output/playwright/native-mindmap-failure.png'});throw e;}finally{await app.close();await rm(fixture,{recursive:true,force:true});}

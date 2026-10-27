@@ -49,7 +49,7 @@ try {
  assert.equal(await page.getByRole('textbox',{name:'일지 저장 폴더'}).inputValue(),'Daily');
  assert.equal(await page.getByRole('combobox',{name:'일지 템플릿'}).inputValue(),'Template.md');
  await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).waitFor();await page.keyboard.press('Escape');
- await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('A.md');await page.keyboard.press('Enter');
+ await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:A.md');await page.keyboard.press('Enter');
  await palette('템플릿 삽입');await page.getByRole('dialog',{name:'템플릿 삽입'}).getByRole('button',{name:'Template.md',exact:true}).click();
  await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
  assert.match((await page.locator('.cm-line').allTextContents()).join('\n'),/Date:/);

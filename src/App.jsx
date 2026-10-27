@@ -66,6 +66,8 @@ import { periodicNote, renderTemplate, localDate } from "../core/periodic-notes.
 import { runOutlineCommand } from "./editorCommands.mjs";
 import { diagramInsertion } from "../core/diagram-tools.mjs";
 import MermaidTools from "./MermaidTools.jsx";
+import MindmapEditor from "./MindmapEditor.jsx";
+import { convertMindmap } from "../core/mindmap.mjs";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -444,12 +446,13 @@ export default function App() {
       const path = /\.(md|canvas|base)$/i.test(newName.trim())
         ? newName.trim()
         : newName.trim() + ".md";
-      const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId: vault.id, path }));
+      const content = modal === "newMap" ? "---\nmindmap-plugin: basic\n---\n# 새 마인드맵\n\n## 생각\n" : undefined;
+      const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId: vault.id, path, content }));
       revisions.current.set(created.path, created.revision);
       if (documentKind(path)) setDocuments((old) => [...old, created]);
       else setRaw((old) => [...old, created]);
       openNote(created.path);
-      setMode("edit");
+      setMode(modal === "newMap" ? "mindmap" : "edit");
       setNewName("");
       setError("");
     } catch (err) {
@@ -731,6 +734,19 @@ export default function App() {
     view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, annotations: isolateHistory.of("full"), scrollIntoView: true });
     setModal(null); view.focus();
   };
+  const convertMap = async (kind) => {
+    const vaultId = vault.id;
+    setBusy(true);
+    try {
+      await flush();
+      const content = convertMindmap(note.content, kind);
+      const path = note.path.replace(/\.md$/i, `-${kind}.md`);
+      const created = await invoke(api.createNote({ vaultId, path, content }));
+      if (currentVault.current !== vaultId) return;
+      revisions.current.set(path, created.revision); setRaw(old => [...old, created]); openNote(path); setMode("mindmap");
+    } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
+    finally { setBusy(false); }
+  };
   const commands = [
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
@@ -739,8 +755,10 @@ export default function App() {
     { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
     ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
     { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
-    ...[["up", "목록 항목 위로 이동"], ["down", "목록 항목 아래로 이동"], ["indent", "목록 들여쓰기"], ["outdent", "목록 내어쓰기"], ["fold", "목록 접기"], ["unfold", "목록 펼치기"]].map(([action,label]) => ({ id: `outline-${action}`, label, disabled: !note || edits.blocked(), run: () => { setModal(null); if (mode === "read") setMode("edit"); setEditorCommand({ path: active, action }); } })),
+    ...[["up", "목록 항목 위로 이동"], ["down", "목록 항목 아래로 이동"], ["indent", "목록 들여쓰기"], ["outdent", "목록 내어쓰기"], ["fold", "목록 접기"], ["unfold", "목록 펼치기"]].map(([action,label]) => ({ id: `outline-${action}`, label, disabled: !note || edits.blocked(), run: () => { setModal(null); if (!["edit", "live", "split"].includes(mode)) setMode("edit"); setEditorCommand({ path: active, action }); } })),
     { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("mermaid"); } },
+    { id: "mindmap", label: "마인드맵 보기", disabled: !note || edits.blocked(), run: () => { setMode("mindmap"); setModal(null); } },
+    { id: "new-map", label: "새 마인드맵 만들기", run: () => { setNewName("새 마인드맵.md"); setModal("newMap"); } },
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
   ];
@@ -1073,6 +1091,7 @@ export default function App() {
               )}
               {section !== "graph" && !structured && (
                 <div className="view-segments">
+                  <IconButton label="마인드맵 보기" active={mode === "mindmap"} disabled={!note || busy || edits.blocked()} onClick={() => setMode("mindmap")}><Network size={15}/></IconButton>
                   <IconButton
                     label="읽기 보기"
                     active={mode === "read"}
@@ -1173,7 +1192,8 @@ export default function App() {
                   />
                 )}
               </div>
-            ) : note ? (
+            ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || edits.blocked()} onError={setError}/>
+            : note ? (
               <div className={`document-content ${mode}`}>
                 {pendingEdit && <section className="copilot-live-banner" aria-label="Copilot 실시간 변경">
                   <div><strong>Copilot · {edits.running ? "작성 중" : "미확정 변경"}</strong><span>노트 파일은 유지할 때 저장됩니다.</span></div>
@@ -1620,7 +1640,7 @@ export default function App() {
         <div className="native-command-results">{model.notes.filter(n => n.path !== active).map(template => <button disabled={busy || edits.blocked()} key={template.path} onClick={() => insertTemplate(template.path)}>{template.path}</button>)}</div>
       </Modal>}
       {modal === "mermaid" && <Modal title="Mermaid 작성 도구" wide onClose={() => setModal(null)}><MermaidTools disabled={busy || edits.blocked()} onInsert={insertDiagram}/></Modal>}
-      {modal === "new" && (
+      {(modal === "new" || modal === "newMap") && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>
           <form onSubmit={createNote}>
             <label htmlFor="new-note-name">문서 이름</label>
