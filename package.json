@@ -1,7 +1,7 @@
 {
   "name": "dynote",
   "productName": "Dynote",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "description": "An independent local Markdown notebook informed by REA artifact analysis.",
   "author": "Dynote contributors",

@@ -9,7 +9,7 @@ await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 const basic='---\nmindmap-plugin: basic\nowner: keep\n---\n# Root\n\n## Branch\n- Child\n';
 await writeFile(`${vault}/Basic.md`,basic);await copyFile('tests/fixtures/markmind-rich.md',`${vault}/Rich.md`);
 await writeFile(`${vault}/Invalid.md`,'---\nmindmap-plugin: rich\n---\n```json\n{broken}\n```\n');
-const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(12000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const go=async path=>{await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:'+path);await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'문서로 이동',exact:true}).waitFor({state:'hidden'});};
@@ -30,6 +30,6 @@ try {
  await page.screenshot({path:'output/playwright/native-mindmap.png'});
  await go('Rich.md');await page.getByRole('button',{name:'기본 형식으로 복사',exact:true}).click();await page.getByRole('alert').filter({hasText:'이미'}).waitFor();assert.equal(await readFile(`${vault}/Rich-basic.md`,'utf8'),converted);
  await go('Invalid.md');await page.getByRole('alert').filter({hasText:'JSON'}).waitFor();await page.getByRole('button',{name:'Markdown으로 열기',exact:true}).click();await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
- assert.deepEqual(errors,[]);const report={checks:['basic edit/save preserves metadata','native undo','rich coordinates persist after actual drag','rich unknown fields preserved','conversion creates separate file and preserves source','existing conversion target cannot be overwritten','invalid rich falls back to Markdown'],errors};
+ assert.deepEqual(errors,[]);const report={packaged:!!process.env.DYNOTE_EXECUTABLE,checks:['basic edit/save preserves metadata','native undo','rich coordinates persist after actual drag','rich unknown fields preserved','conversion creates separate file and preserves source','existing conversion target cannot be overwritten','invalid rich falls back to Markdown'],errors};
  await writeFile('output/playwright/native-mindmap.json',JSON.stringify(report,null,2));console.log(report);
 }catch(e){const page=app.windows()[0];console.error((await page.locator('body').innerText()).slice(0,2400));await page.screenshot({path:'output/playwright/native-mindmap-failure.png'});throw e;}finally{await app.close();await rm(fixture,{recursive:true,force:true});}

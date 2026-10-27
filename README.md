@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.6.3 프리릴리스는 **그래프 점을 끈 뒤 놓을 때 튕기던 동작**을 수정합니다. 점을 잡고 있는 동안 주변 배치를 계속 계산하고, 놓으면 변경된 배치에서 자연스럽게 안정됩니다. [변경사항과 검증 범위](docs/RELEASE-NOTES-0.6.3.md)를 확인하세요.
+v0.7.0 프리릴리스는 달력·일지, 목록·마인드맵·Mermaid 편집, PDF 주석, Git 작업과 기본 편집 기능을 추가합니다. [변경사항과 검증 범위](docs/RELEASE-NOTES-0.7.0.md)를 확인하세요. v0.6.3의 그래프 드래그 수정도 포함합니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -10,11 +10,11 @@ v0.6.3 프리릴리스는 **그래프 점을 끈 뒤 놓을 때 튕기던 동작
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.6.3/Dynote-darwin-arm64/Dynote.app`
+`release/v0.7.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.6.3/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.7.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -113,9 +113,9 @@ REA의 관찰 범위와 한계: [REA 분석 기록](docs/REA-EVIDENCE.md). Elect
 3. 편집 내용은 먼저 로컬에 저장됩니다. Git 연결을 켜면 이 PC의 현지 시간 밤 11시에 하루 한 번 커밋·푸시합니다. 전날 백업을 놓치면 다음 실행 때 현재 파일을 백그라운드로 백업하며, 그날 백업으로 계산합니다. 변경이 없으면 커밋은 만들지 않습니다. 상태 표시줄에서 원격 저장 상태를 별도로 확인하고 **지금 Git 저장**으로 즉시 업로드할 수 있습니다.
 4. 분기 이력이 갈라지거나 충돌이 있으면 Git 도구에서 먼저 해결합니다. 바이너리 첨부파일의 충돌에서는 두 사본을 모두 보존한 뒤 선택합니다. Dynote는 충돌을 자동 폐기하지 않습니다.
 
-## 개발 브랜치의 네이티브 기능
+## v0.7.0의 네이티브 기능
 
-`feat/native-plugin-features`에는 활성 커뮤니티 플러그인 11개와 기본 플러그인의 주요 기능을 Dynote에 직접 구현했습니다. 아래 내용은 소스 실행 기준이며 위의 v0.6.3 배포 파일에 포함되었다는 의미는 아닙니다. 원본 플러그인 파일을 실행하는 방식은 아닙니다.
+활성 커뮤니티 플러그인 11개와 기본 플러그인의 주요 기능을 Dynote에 직접 구현했습니다. v0.7.0부터 포함하며, 원본 플러그인 파일을 실행하는 방식은 아닙니다.
 
 - 최근 파일·북마크와 명령 팔레트(Cmd/Ctrl+P). 문서 이동은 Cmd/Ctrl+K입니다.
 - 달력, 일간·주간·월간·분기·연간 노트, 폴더·파일명·템플릿·주 기준 설정, 시간 기록·평가·과거 같은 날의 일지.
