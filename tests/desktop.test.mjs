@@ -241,3 +241,14 @@ test("same-note heading links have a rendered anchor target", () => {
   assert.match(html, /id="시험-절차"/);
   assert.match(html, /data-anchor="시험-절차"/);
 });
+
+test('CORE-AUDIO imports typed local recordings without changing their bytes',async t=>{
+ const {store}=await fixture(t);
+ const samples=[['clip.webm','1a45dfa300000000','audio/webm'],['clip.wav','524946460000000057415645','audio/wav'],['clip.mp3','49443304000000000000','audio/mpeg'],['clip.ogg','4f67675300000000','audio/ogg'],['clip.m4a','00000014667479704d34412000000000','audio/mp4']];
+ for(const [name,hex,mime]of samples){const bytes=Buffer.from(hex,'hex'),saved=await store.importAttachment(name,bytes);assert.equal(saved.mime,mime);assert.deepEqual((await store.readAttachment(saved.path)).bytes,bytes);}
+ await assert.rejects(store.importAttachment('fake.webm',png));
+ assert.equal((await store.snapshot()).attachments.length,5);
+ const path=(await store.snapshot()).attachments.find(a=>a.path.endsWith('.webm')).path,current=await store.readAttachment(path);
+ const trashed=await store.trashFile(path,current.revision);await store.restoreTrash(trashed.id);assert.deepEqual((await store.readAttachment(path)).bytes,current.bytes);
+ const oversized=Buffer.alloc(25*1024*1024+1);oversized.set([0x1a,0x45,0xdf,0xa3]);await assert.rejects(store.importAttachment('oversized.webm',oversized),/25MB/);
+});

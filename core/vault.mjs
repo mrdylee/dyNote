@@ -37,7 +37,7 @@ export function validFilePath(value) {
           !/[. ]$/.test(part) &&
           !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part),
       ) &&
-    /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf)$/i.test(value)
+    /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value)
   );
 }
 
@@ -51,6 +51,11 @@ export const attachmentMime = (name) =>
     gif: "image/gif",
     webp: "image/webp",
     pdf: "application/pdf",
+    webm: "audio/webm",
+    wav: "audio/wav",
+    mp3: "audio/mpeg",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
   })[name.split(".").at(-1)?.toLowerCase()];
 
 export class Vault {
@@ -404,7 +409,7 @@ export class Vault {
   #checkAttachment(name, bytes) {
     const mime = attachmentMime(name);
     if (!mime || bytes.length > 25 * 1024 * 1024)
-      throw new Error("25MB 이하의 PNG·JPEG·GIF·WebP·PDF만 지원합니다.");
+      throw new Error("25MB 이하의 이미지·PDF·오디오만 지원합니다.");
     const signatures = {
       "image/png": () =>
         bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")),
@@ -415,6 +420,11 @@ export class Vault {
         bytes.subarray(0, 4).toString() === "RIFF" &&
         bytes.subarray(8, 12).toString() === "WEBP",
       "application/pdf": () => bytes.subarray(0, 5).toString() === "%PDF-",
+      "audio/webm": () => bytes.subarray(0, 4).equals(Buffer.from("1a45dfa3", "hex")),
+      "audio/wav": () => bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WAVE",
+      "audio/mpeg": () => bytes.subarray(0, 3).toString() === "ID3" || (bytes[0] === 255 && (bytes[1] & 224) === 224),
+      "audio/ogg": () => bytes.subarray(0, 4).toString() === "OggS",
+      "audio/mp4": () => bytes.subarray(4, 8).toString() === "ftyp",
     };
     if (!signatures[mime]())
       throw new Error("확장자와 파일 형식이 일치하지 않습니다.");

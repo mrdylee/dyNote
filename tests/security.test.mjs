@@ -55,3 +55,14 @@ test("bundled WASM is allowed without widening vault or traversal access", () =>
   for (const url of ["notes://vault/graph.wasm", "notes://app/%2e%2e%2fgraph.wasm", "notes://app/.hidden/graph.wasm", "notes://app/secret.dll"])
     assert.throws(() => assetPath(url, "/safe/dist"));
 });
+
+test('CORE-AUDIO permits audio only for the exact main application frame',async()=>{
+ const tools=await import('../core/security.mjs');assert.equal(typeof tools.allowAudioPermission,'function');
+ assert.equal(tools.allowAudioPermission('media','notes://app/index.html',true,['audio']),true);
+ for(const [permission,url,main,types] of [['media','https://example.test',true,['audio']],['media','notes://app/index.html',false,['audio']],['media','notes://app/index.html',true,['audio','video']],['media','notes://app/index.html',true,['unknown']],['media','notes://app/index.html',true,[]],['camera','notes://app/index.html',true,['audio']]])assert.equal(tools.allowAudioPermission(permission,url,main,types),false);
+});
+test('CORE-WEB only permits credential-free HTTP/HTTPS viewer URLs',async()=>{
+ const tools=await import('../core/security.mjs');assert.equal(typeof tools.safeWebViewerUrl,'function');
+ assert.equal(tools.safeWebViewerUrl('https://example.test/page'),'https://example.test/page');
+ for(const url of ['javascript:alert(1)','file:///private/note.md','mailto:test@example.test','https://user:secret@example.test','data:text/html,hello'])assert.throws(()=>tools.safeWebViewerUrl(url));
+});

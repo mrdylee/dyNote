@@ -81,3 +81,15 @@ Runtime verification found an ESM/CommonJS date-instance mismatch: Node tests re
 `tests/journal-details.test.mjs`: 4 passed. Actual `scripts/verify-journal-details.mjs` checked timestamp/one-step undo, rating normalization and save/reopen, original word/character fixture, past-day navigation and next-existing-daily command. `scripts/verify-native-workflows.mjs` also passed the added renderer week-year regression and all prior navigation/journal cases. No renderer page errors. Ignored output: `native-journal-details.json` and screenshots under `output/playwright/`.
 
 Diarian bulk import/date conversion and alternate journal/calendar views remain open. Mixed-language segmentation beyond the original fixture is native behavior, not a claim of identical counting in every language.
+
+## Native audio and web viewer
+
+CORE-AUDIO: explicit microphone start, stop/save/cancel, active modal/app-close guard, stale/late stream cleanup, local WebM attachment and note embed, Blob audio playback. WebM/WAV/MP3/Ogg/M4A signatures are validated under the existing 25MB attachment bound; trash/restore retains bytes. Audio permission is limited to the exact main note frame and audio-only requests; camera/unknown/subframes/remote pages remain denied. Packaging includes macOS microphone usage text; actual packaged OS consent remains unverified.
+
+Actual `scripts/verify-audio-runtime.mjs` used Chromium's synthetic audio device flags, never a physical microphone. It verified app/modal close guard, cancel without file creation, a saved 13,499-byte WebM sample with EBML header, Markdown link persistence and audio metadata loading without autoplay or speaker playback. No renderer errors. This is software-input proof, not physical microphone/Windows proof.
+
+CORE-WEB: explicit HTTP/HTTPS URL entry opens an isolated native child window. Its separate in-memory session has no note preload/bridge or Node integration, sandbox/context isolation stay enabled, remote permissions/downloads/popups and non-web navigation are denied. The main note renderer's network blocking stays in place. Main-child lifecycle listeners are cleaned up.
+
+Actual `scripts/verify-web-viewer.mjs` loaded only a local HTTP fixture and verified remote `window.notes`/`require` absent, microphone denial, actual separate session object and sandbox preferences, file navigation/popup/download prevention, fixed actual hostname title and child close preserving the note window. The title test caught and corrected an Electron event-target mismatch: page title prevention belongs to BrowserWindow. No external accounts/sites were opened.
+
+Ignored evidence: `output/playwright/native-audio.json`, `native-web-viewer.json` and screenshots. These add basic recording/playback and reading-window functionality; audio editing/transcription and a full browser/download manager are not implemented.

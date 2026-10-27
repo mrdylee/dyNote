@@ -70,6 +70,8 @@ import { runOutlineCommand } from "./editorCommands.mjs";
 import { diagramInsertion } from "../core/diagram-tools.mjs";
 import MermaidTools from "./MermaidTools.jsx";
 import MindmapEditor from "./MindmapEditor.jsx";
+import AudioRecorder from "./AudioRecorder.jsx";
+import AudioViewer from "./AudioViewer.jsx";
 import { convertMindmap } from "../core/mindmap.mjs";
 import { pdfBacklinks } from "../core/pdf-links.mjs";
 
@@ -215,9 +217,12 @@ export default function App() {
   const [status, setStatus] = useState("saved");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const audioActive = useRef(false);
+  const [audioNotice, setAudioNotice] = useState("");
+  const [webUrl, setWebUrl] = useState("");
   const [modal, setModal] = useState(null);
   const [settingsTab, setSettingsTab] = useState("vault");
-  useEffect(() => api?.onOpenSettings(() => { if (!busy) setModal("settings"); }), [busy]);
+  useEffect(() => api?.onOpenSettings(() => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) setModal("settings"); }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
   const [commandQuery, setCommandQuery] = useState("");
@@ -379,6 +384,7 @@ export default function App() {
       .catch((err) => setError(err.message));
     return api.onBeforeClose(async () => {
       try {
+        if (audioActive.current) { setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요."); return; }
         await editsRef.current.close();
         await flush(true);
         api.confirmClose();
@@ -492,6 +498,9 @@ export default function App() {
   useEffect(() => {
     const handler = (event) => {
       if (busy) return;
+      if (audioActive.current && (event.key === "Escape" || ((event.metaKey || event.ctrlKey) && ["p", "k", "s", "n"].includes(event.key.toLowerCase())))) {
+        event.preventDefault(); setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); return;
+      }
       if (
         (event.metaKey || event.ctrlKey) &&
         ["p", "k", "s", "n"].includes(event.key.toLowerCase())
@@ -788,6 +797,8 @@ export default function App() {
     { id: "timestamp", label: "일지 시간 기록 삽입", disabled: !note || edits.blocked(), run: () => { setModal(null); setMode("edit"); setEditorCommand({ path: active, type: "timestamp", now: new Date().toISOString(), atEnd: !editorView.current }); } },
     { id: "rating", label: "일지 평가", disabled: !note || edits.blocked(), run: () => setModal("rating") },
     { id: "on-this-day", label: "과거 같은 날의 기록", run: () => { setHistoryDate(localDate()); setModal("onThisDay"); } },
+    { id: "audio", label: "음성 녹음", disabled: edits.blocked(), run: () => { setAudioNotice(""); setModal("audio"); } },
+    { id: "web", label: "웹 뷰어 열기", run: () => { setError(""); setModal("web"); } },
     ...periodicCommands,
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
@@ -1215,7 +1226,7 @@ export default function App() {
                   <PdfViewer key={attachment.path} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
                     onCopy={(text) => invoke(api.copyText({ vaultId: vault.id, text }))} onOpenNote={openNote}
                     onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}/>
-                ) : (
+                ) : attachment.mime.startsWith("audio/") ? <AudioViewer bytes={attachment.bytes} mime={attachment.mime}/> : (
                   <img
                     alt={attachment.path}
                     src={attachmentUrl(
@@ -1685,6 +1696,24 @@ export default function App() {
       {modal === "onThisDay" && <Modal title="과거 같은 날의 기록" onClose={() => setModal(null)}>
         <input type="date" aria-label="과거 기록 기준 날짜" value={historyDate} onChange={e => { if (e.target.value) setHistoryDate(e.target.value); }}/>
         <NavigationPanel title="지난 기록" paths={onThisDay(model.notes,historyDate,{...journalPreferences.daily,locale:journalPreferences.locale}).map(n=>n.path)} onOpen={openNote}/>
+      </Modal>}
+      {modal === "audio" && <Modal title="음성 녹음" onClose={() => audioActive.current ? setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요.") : setModal(null)}>
+        {audioNotice && <p role="alert">{audioNotice}</p>}
+        <AudioRecorder onActive={(value) => { audioActive.current = value; if (value) setAudioNotice(""); }} onCancel={() => setModal(null)} onSave={async ({ name, bytes }) => {
+          const vaultId = vault.id;
+          await flush();
+          const saved = await invoke(api.importAttachment({ vaultId, name, bytes }));
+          if (currentVault.current !== vaultId) throw new Error("보관함이 변경되었습니다.");
+          setVault(old => ({ ...old, attachments: [...(old.attachments ?? []), saved] }));
+          if (note) { change(note.content + `\n![[${saved.path}]]\n`); await flush(); }
+          setModal(null); await openAttachment(saved.path);
+        }}/>
+      </Modal>}
+      {modal === "web" && <Modal title="웹 뷰어 열기" onClose={() => !busy && setModal(null)}>
+        <form onSubmit={async (event) => { event.preventDefault(); setBusy(true); setError(""); try { await invoke(api.openWebViewer({ url: webUrl.trim() })); setModal(null); } catch (err) { setError(err.message); } finally { setBusy(false); } }}>
+          <label>웹 주소<input autoFocus aria-label="웹 뷰어 주소" value={webUrl} onChange={e => setWebUrl(e.target.value)} placeholder="https://" disabled={busy}/></label>
+          {error && <p role="alert">{error}</p>}<button className="primary-button" disabled={busy || !webUrl.trim()}>웹 페이지 열기</button>
+        </form>
       </Modal>}
       {(modal === "new" || modal === "newMap") && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>

@@ -1846,3 +1846,6 @@ kbd {
 .release-notes { white-space: pre-wrap; max-height: 280px; overflow: auto; font-family: inherit; font-size: 12px; line-height: 1.6; padding: 12px; background: #f6f7fa; }
 .journal-ratings { display: flex; gap: 9px; flex-wrap: wrap; }
 .journal-ratings button { padding: 9px; color: #b38a22; border: 1px solid #dfe3eb; border-radius: 6px; }
+.audio-actions { display: flex; gap: 12px; margin: 16px 0; }
+.attachment-view > audio { display: block; width: min(600px, 90%); margin: 30px auto; }
+input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px solid #ccd4e2; border-radius: 6px; padding: 10px; margin: 10px 0 16px; }

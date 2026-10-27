@@ -25,6 +25,16 @@ export function allowFontPermission(permission, url, isMainFrame) {
   return permission === "local-fonts" && trustedFrame(url, isMainFrame);
 }
 
+export function allowAudioPermission(permission, url, isMainFrame, types) {
+  return permission === "media" && trustedFrame(url, isMainFrame) && Array.isArray(types) && types.length > 0 && types.every(type => type === "audio");
+}
+
+export function safeWebViewerUrl(input) {
+  const url = new URL(safeExternalUrl(input));
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("HTTP 또는 HTTPS 웹 주소를 입력해 주세요.");
+  return url.href;
+}
+
 export function safeExternalUrl(input) {
   if (typeof input !== "string" || /[\x00-\x20]/.test(input))
     throw new Error("허용되지 않는 외부 주소입니다.");

@@ -13,7 +13,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault } from "../core/vault.mjs";
-import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission } from "../core/security.mjs";
+import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
+import { openWebViewer } from "./web-viewer.mjs";
 import { demoNotes } from "../core/demo.mjs";
 import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
@@ -160,10 +161,10 @@ app
       }
     });
     session.defaultSession.setPermissionRequestHandler(
-      (contents, permission, callback, details) => callback(contents === window?.webContents && allowFontPermission(permission, details.requestingUrl, details.isMainFrame)),
+      (contents, permission, callback, details) => callback(contents === window?.webContents && (allowFontPermission(permission, details.requestingUrl, details.isMainFrame) || allowAudioPermission(permission, details.requestingUrl, details.isMainFrame, details.mediaTypes))),
     );
     session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) =>
-      contents === window?.webContents && ["notes://app", "notes://app/"].includes(origin) && allowFontPermission(permission, details.requestingUrl, details.isMainFrame));
+      contents === window?.webContents && ["notes://app", "notes://app/"].includes(origin) && (allowFontPermission(permission, details.requestingUrl, details.isMainFrame) || allowAudioPermission(permission, details.requestingUrl, details.isMainFrame, [details.mediaType])));
     session.defaultSession.webRequest.onBeforeRequest(
       {
         urls: [
@@ -241,6 +242,7 @@ app
     for (const [name, action] of Object.entries({
       "copilot-status": () => copilot.status(),
       "check-updates": (args) => checkReleaseInformation(app.getVersion(), args?.includePrerelease === true),
+      "open-web-viewer": (args) => openWebViewer(args?.url, window),
       "copilot-login": () => copilot.login(),
       "copilot-cancel-login": () => copilot.cancelLogin(),
       "copilot-send": (args) => { checkVault(args); return copilot.send(args); },
@@ -340,8 +342,8 @@ app
           properties: ["openFile", "multiSelections"],
           filters: [
             {
-              name: "이미지·PDF",
-              extensions: ["png", "jpg", "jpeg", "gif", "webp", "pdf"],
+              name: "이미지·PDF·오디오",
+              extensions: ["png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
             },
           ],
         });
@@ -388,7 +390,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action"].includes(name);
-        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "check-updates", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
