@@ -68,6 +68,7 @@ import { diagramInsertion } from "../core/diagram-tools.mjs";
 import MermaidTools from "./MermaidTools.jsx";
 import MindmapEditor from "./MindmapEditor.jsx";
 import { convertMindmap } from "../core/mindmap.mjs";
+import { pdfBacklinks } from "../core/pdf-links.mjs";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -259,6 +260,7 @@ export default function App() {
   const pendingEdit = edits.drafts.find((draft) => draft.path === active);
   const [compareEdit, setCompareEdit] = useState(false);
   const note = model.notes.find((n) => n.path === active);
+  const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
   const structured = documents.find((d) => d.path === active);
   const results = useMemo(
     () => searchNotes(model.notes, query),
@@ -283,6 +285,7 @@ export default function App() {
                 "data-external",
                 "data-anchor",
                 "data-attachment",
+                "data-attachment-fragment",
                 "data-task-line",
                 "data-embed",
               ],
@@ -551,12 +554,14 @@ export default function App() {
       setBusy(false);
     }
   };
-  const openAttachment = async (path) => {
+  const openAttachment = async (path, fragment = "") => {
+    const vaultId = vault.id;
     try {
       const data = await invoke(
-        api.readAttachment({ vaultId: vault.id, path }),
+        api.readAttachment({ vaultId, path }),
       );
-      setAttachment(data);
+      if (currentVault.current !== vaultId) return;
+      setAttachment({ ...data, fragment });
       setSection("files");
     } catch (err) {
       setError(err.message);
@@ -643,7 +648,7 @@ export default function App() {
     }
     const asset = resolveLink(target, active, vault.attachments ?? [], { kind });
     if (asset.status === "resolved" && vault.attachments?.some((a) => a.path === asset.path)) {
-      openAttachment(asset.path);
+      openAttachment(asset.path, target.split("#").slice(1).join("#"));
       return;
     }
     const resolved = resolveLink(target, active, [...model.notes, ...documents], { kind });
@@ -680,7 +685,7 @@ export default function App() {
     if (!anchor) return;
     event.preventDefault();
     if (anchor.dataset.attachment) {
-      openAttachment(anchor.dataset.attachment);
+      openAttachment(anchor.dataset.attachment, anchor.dataset.attachmentFragment ?? "");
       return;
     }
     if (anchor.dataset.anchor) {
@@ -1179,7 +1184,9 @@ export default function App() {
                   </button>
                 </div>
                 {attachment.mime === "application/pdf" ? (
-                  <PdfViewer key={attachment.path} bytes={attachment.bytes} />
+                  <PdfViewer key={attachment.path} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
+                    onCopy={(text) => invoke(api.copyText({ vaultId: vault.id, text }))} onOpenNote={openNote}
+                    onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}/>
                 ) : (
                   <img
                     alt={attachment.path}

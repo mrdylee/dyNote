@@ -1819,3 +1819,16 @@ kbd {
 .react-flow__node.selected .mindmap-node { border: 2px solid #9276c6; }
 .mindmap-note { font-size: 11px; color: #778198; padding: 0 14px; }
 .mindmap-error { padding: 24px; }
+.pdf-toolbar { flex-wrap: wrap; }
+.pdf-toolbar input { width: 55px; padding: 3px; border: 1px solid #ccd5e2; border-radius: 4px; }
+.pdf-page { position: relative; margin: 12px auto; background: #fff; }
+.pdf-page canvas { display: block; max-width: none; }
+.native-pdf-text { position: absolute; inset: 0; overflow: clip; line-height: 1; transform-origin: 0 0; text-size-adjust: none; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.native-pdf-text :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0 0; user-select: text; }
+.native-pdf-text > span { font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1)) scale(var(--min-font-size-inv)); }
+.native-pdf-text ::selection { background: #9c7adb70; }
+.pdf-annotation-target { position: absolute; background: #ffdd4370; outline: 2px solid #b08b0b; pointer-events: none; }
+.pdf-message, .pdf-selected-text { font-size: 12px; padding: 6px 12px; color: #66528a; }
+.pdf-backlinks { padding: 12px; border-top: 1px solid #e0e4ed; font-size: 12px; }
+.pdf-backlinks > div { display: flex; gap: 12px; padding: 5px 0; }
+.native-pdf-text { --scale-round-x: 1px; --scale-round-y: 1px; }

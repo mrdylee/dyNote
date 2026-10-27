@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld(
     importAttachment: (args) => call("import-attachment", args),
     chooseAttachments: (args) => call("choose-attachments", args),
     readAttachment: (args) => call("read-attachment", args),
+    copyText: (args) => call("copy-text", args),
     moveFile: (args) => call("move-file", args),
     trashFile: (args) => call("trash-file", args),
     restoreTrash: (args) => call("restore-trash", args),

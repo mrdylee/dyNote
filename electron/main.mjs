@@ -7,6 +7,7 @@ import {
   session,
   shell,
   Menu,
+  clipboard,
 } from "electron";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -311,6 +312,12 @@ app
         checkVault(args);
         return vault.readAttachment(args.path);
       },
+      "copy-text": (args) => {
+        checkVault(args);
+        if (typeof args.text !== "string" || args.text.length > 1024 * 1024) throw new Error("복사할 텍스트가 올바르지 않습니다.");
+        clipboard.writeText(args.text);
+        return true;
+      },
       "choose-attachments": async (args) => {
         checkVault(args);
         const result = await dialog.showOpenDialog(window, {
@@ -365,7 +372,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone"].includes(name);
-        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "recovery", "external"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

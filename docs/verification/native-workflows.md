@@ -45,3 +45,13 @@ MAP-01/02 implemented: parse basic heading/list hierarchy and original rich flat
 `tests/mindmap.test.mjs`: 5 passed, including original generated rich fixture, edits/conversions, coordinate validation, malformed/cyclic data and decorated-tree preservation. `scripts/verify-mindmap-tools.mjs` verified actual Mac Electron basic edit/save/undo, rich drag persistence and unknown fields, conversion/source preservation, collision refusal and invalid-rich fallback. No renderer page errors. Output: ignored `output/playwright/native-mindmap.json`, `native-mindmap.png`.
 
 Remaining Markmind/Enhancing features include richer layout/presentation, node clipboard and exports, decorated relationship editing, PDF/EPUB annotation integration, licensed original functions and external AI/translation/GROBID services. Those are not established by this slice.
+
+## Native PDF link slice
+
+PDF-01 read/navigation implemented: selectable PDF.js text layer, numeric page/zoom controls, page and selected-text wiki link copying, incoming text-range restoration, existing PDF annotation rectangle navigation, and Markdown backlinks. Attachment paths and fragments travel separately so a literal `#` in a valid filename remains readable. Original PDF bytes are unchanged by this slice.
+
+Original PDF++ runtime in the isolated fixture selected `page` on the second page and copied `manual.pdf#page=2&selection=0,7,0,11` inside its default callout format. Dynote emits the same page/selection target schema without requiring the original callout preset. Original continuous-view `getState()` reported page 1 while the copied target correctly identified page 2; do not use the first visible page as the selected text's page.
+
+`tests/pdf-links.test.mjs`: 4 passed, covering path/fragment preservation, strict numeric range validation, relative backlinks/fence exclusion and hash-bearing filenames. Actual `scripts/verify-pdf-links.mjs` checked page 2 selection restoration, trusted clipboard output, zoom cancellation, backlink return, original annotation navigation, encoded hash filename navigation and byte-for-byte PDF preservation. No renderer page errors. Output: ignored `output/playwright/native-pdf-links.json`, `native-pdf-links.png`.
+
+Whole suite: 179 passed, zero failed. Build successful. PDF annotation creation/editing, page manipulation, outlines/labels, rectangular selection and Markmind annotation formats remain open; this is not full PDF++ parity.

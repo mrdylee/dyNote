@@ -5,6 +5,7 @@ export function installMarkdownExtensions(
   { resolveLink, renderMarkdown, attachmentUrl },
 ) {
   const escape = md.utils.escapeHtml;
+  const fragment = (target) => target.split("#").slice(1).join("#");
   md.renderer.rules.heading_open = (tokens, index, options, _env, renderer) => {
     tokens[index].attrSet("id", headingId(tokens[index + 1]?.content ?? ""));
     return renderer.renderToken(tokens, index, options);
@@ -43,7 +44,7 @@ export function installMarkdownExtensions(
       if (/\.(?:png|jpe?g|gif|webp)(?:[#|]|$)/i.test(target))
         return image(target, label, env, "wiki");
       if (asset.status === "resolved")
-        return `<a href="#" data-attachment="${escape(asset.path)}">첨부파일 · ${escape(label)}</a>`;
+        return `<a href="#" data-attachment="${escape(asset.path)}" data-attachment-fragment="${escape(fragment(target))}">첨부파일 · ${escape(label)}</a>`;
       const resolved = resolveLink(target, env.from, env.notes);
       const note = env.notes.find((n) => n.path === resolved.path);
       const visited = env.visited ?? [];
@@ -54,7 +55,7 @@ export function installMarkdownExtensions(
       return `<section class="note-embed" data-embed="${escape(note.path)}"><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true })}</section>`;
     }
     if (asset.status === "resolved")
-      return `<a href="#" data-attachment="${escape(asset.path)}">${escape(label)}</a>`;
+      return `<a href="#" data-attachment="${escape(asset.path)}" data-attachment-fragment="${escape(fragment(target))}">${escape(label)}</a>`;
     const resolved = resolveLink(target, env.from, env.notes);
     return `<a href="#" class="wiki-link${resolved.status === "resolved" ? "" : " unresolved"}" data-note="${escape(target)}" title="${escape(target)}">${escape(label)}</a>`;
   };
@@ -75,6 +76,7 @@ export function installMarkdownExtensions(
       const asset = resolveLink(href, env.from, env.attachments ?? [], {
         kind: "markdown",
       });
+      if (asset.status === "resolved") token.attrSet("data-attachment-fragment", fragment(href));
       token.attrSet(
         asset.status === "resolved" ? "data-attachment" : "data-note",
         asset.path ??
