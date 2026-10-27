@@ -1,0 +1,31 @@
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import assert from 'node:assert/strict';
+import {localDate} from '../core/periodic-notes.mjs';
+import {parseMetadata} from '../core/metadata.mjs';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
+const fixture=await mkdtemp(`${tmpdir()}/dynote-journal-details-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
+await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+const today=localDate(),past=String(Number(today.slice(0,4))-2)+today.slice(4),path=`${today}.md`,pastPath=`${past}.md`;
+const body='# Hello world\n\n안녕 세상\n😀\n',source='---\nowner: keep # comment\ndaily rating: {invalid: true}\n---\n'+body;
+await writeFile(`${vault}/${path}`,source);await writeFile(`${vault}/${pastPath}`,'# Earlier journal\n');
+const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+try {
+ const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const palette=async query=>{await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill(query);await page.keyboard.press('Enter');};
+ const save=async()=>{await page.keyboard.press('Meta+s');await page.getByText('모든 변경사항 저장됨',{exact:true}).waitFor();};
+ await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:'+path);await page.keyboard.press('Enter');
+ await page.getByText('4단어',{exact:true}).waitFor();await page.getByText('24자',{exact:true}).waitFor();
+ await palette('일지 시간 기록 삽입');await page.getByRole('textbox',{name:'Markdown 편집기'}).waitFor();
+ assert.match((await page.locator('.cm-content .cm-line').allTextContents()).join('\n'),/— \d{1,2}:\d{2} (오전|오후) —/);
+ await page.keyboard.press('Meta+z');await save();assert.equal(await readFile(`${vault}/${path}`,'utf8'),source);
+ await palette('일지 평가');await page.getByRole('button',{name:'평가 4점',exact:true}).click();await save();
+ const saved=await readFile(`${vault}/${path}`,'utf8');assert.equal(parseMetadata(saved).properties['daily rating'],4);assert.equal(parseMetadata(saved).body,body);assert.match(saved,/owner: keep # comment/);
+ await page.getByText('4단어',{exact:true}).waitFor();await page.getByText('24자',{exact:true}).waitFor();
+ await palette('과거 같은 날의 기록');await page.getByRole('dialog',{name:'과거 같은 날의 기록',exact:true}).getByTitle(pastPath,{exact:true}).click();await page.locator('.breadcrumbs').filter({hasText:past}).waitFor();
+ await palette('다음 일간 일지');await page.locator('.breadcrumbs').filter({hasText:today}).waitFor();
+ await palette('일지 평가');await page.getByText(/현재 평가 4/).waitFor();await page.keyboard.press('Escape');
+ await page.screenshot({path:'output/playwright/native-journal-details.png'});assert.deepEqual(errors,[]);
+ const report={checks:['original mixed-language word and character count excludes YAML','timestamp inserts with original spacing/locale and one-step undo','rating replaces invalid metadata and preserves body/comments','on-this-day opens earlier journal','next daily command uses existing note','rating survives reopen'],errors};await writeFile('output/playwright/native-journal-details.json',JSON.stringify(report,null,2));console.log(report);
+}catch(e){const p=app.windows()[0];if(p){console.error((await p.locator('body').innerText()).slice(-1800));await p.screenshot({path:'output/playwright/native-journal-details-failure.png'});}await app.evaluate(({app})=>app.exit(0)).catch(()=>{});throw e;}finally{await app.close();await rm(fixture,{recursive:true,force:true});}

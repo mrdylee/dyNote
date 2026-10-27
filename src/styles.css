@@ -1844,3 +1844,5 @@ kbd {
 .update-actions, .release-assets { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
 .update-actions > button:not(.primary-button), .release-assets > button { border: 1px solid #d5dce8; border-radius: 5px; padding: 7px 10px; }
 .release-notes { white-space: pre-wrap; max-height: 280px; overflow: auto; font-family: inherit; font-size: 12px; line-height: 1.6; padding: 12px; background: #f6f7fa; }
+.journal-ratings { display: flex; gap: 9px; flex-wrap: wrap; }
+.journal-ratings button { padding: 9px; color: #b38a22; border: 1px solid #dfe3eb; border-radius: 6px; }

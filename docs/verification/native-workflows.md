@@ -69,3 +69,15 @@ UPDATE-01: explicit Dynote release check, current/latest version, plain-text rel
 Actual `scripts/verify-update-information.mjs` made one successful public GitHub release request through the main process. Subsequent controlled-feed UI checks separately verified inert release text, ignore/restore persistence, channel persistence and honest failure state. Controlled-feed results are not live release evidence. No assets were downloaded or installed. Output: ignored `output/playwright/native-git-workspace.json`, `native-updates.json` and screenshots.
 
 Remaining Git scope: partial-hunk staging, blame, remote/upstream management, merge-conflict workflows and deliberately destructive/raw commands. Update information is complete for the defined native slice; automatic platform installation is not implemented.
+
+## Journal details and core word count
+
+JOURNAL-02: native timestamp insertion with current clock/target-day behavior, selectable 1–5 daily rating, past same-day journal list, configurable stamp formats and existing next/previous period commands. Rating edits preserve unrelated YAML/comments/body, and malformed structured rating values do not crash the dialog. Editor commands discard stale document targets and insert stamps as one undo transaction. Periodic navigation is calculated only while the palette is open and memoized across query typing.
+
+Original Diarian used Korean Moment locale and emitted `— 10/27/2026 11:22 오후 —` followed by two newlines in a non-dated empty note. Original core statistics counted the synthetic mixed Korean/English/emoji Markdown as 4 words/24 UTF-16 characters, unchanged after YAML was added. Native statistics exclude YAML accordingly.
+
+Runtime verification found an ESM/CommonJS date-instance mismatch: Node tests registered Korean/UK locales on one Moment instance while the renderer imported another. Native imports now consistently use `moment/moment.js`, shared with locale registration. Actual Electron now verifies both Korean timestamps and the UK week-year boundary `2021-01-01` -> `2020-W53.md`.
+
+`tests/journal-details.test.mjs`: 4 passed. Actual `scripts/verify-journal-details.mjs` checked timestamp/one-step undo, rating normalization and save/reopen, original word/character fixture, past-day navigation and next-existing-daily command. `scripts/verify-native-workflows.mjs` also passed the added renderer week-year regression and all prior navigation/journal cases. No renderer page errors. Ignored output: `native-journal-details.json` and screenshots under `output/playwright/`.
+
+Diarian bulk import/date conversion and alternate journal/calendar views remain open. Mixed-language segmentation beyond the original fixture is native behavior, not a claim of identical counting in every language.

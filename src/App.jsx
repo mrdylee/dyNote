@@ -64,7 +64,8 @@ import "katex/dist/katex.min.css";
 import JournalPanel from "./JournalPanel.jsx";
 import NavigationPanel from "./NavigationPanel.jsx";
 import { normalizeNavigation, navigationAction, reconcileNavigation } from "../core/navigation.mjs";
-import { periodicNote, renderTemplate, localDate } from "../core/periodic-notes.mjs";
+import { periods, periodicNote, periodicEntries, adjacentEntry, renderTemplate, localDate } from "../core/periodic-notes.mjs";
+import { timestampInsertion, rateJournal, onThisDay, wordStatistics } from "../core/journal-details.mjs";
 import { runOutlineCommand } from "./editorCommands.mjs";
 import { diagramInsertion } from "../core/diagram-tools.mjs";
 import MermaidTools from "./MermaidTools.jsx";
@@ -222,9 +223,19 @@ export default function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
   const [editorCommand, setEditorCommand] = useState(null);
+  const [historyDate, setHistoryDate] = useState(localDate);
   useEffect(() => {
-    if (!editorCommand || editorCommand.path !== active || !editorView.current) return;
-    runOutlineCommand(editorView.current, editorCommand.action);
+    if (!editorCommand) return;
+    if (editorCommand.path !== active) { setEditorCommand(null); return; }
+    const view = editorView.current;
+    if (!view) return;
+    if (editorCommand.type === "timestamp" && !view.state.readOnly) {
+      const cursor = editorCommand.atEnd ? view.state.doc.length : view.state.selection.main.head;
+      const date = periodicEntries([{ path: active }], "daily", { ...journalPreferences.daily, locale: journalPreferences.locale })[0]?.date;
+      const edit = timestampInsertion(view.state.doc.toString(), cursor, date, new Date(editorCommand.now), journalPreferences);
+      view.dispatch({ changes: { from: cursor, insert: edit.insert }, selection: { anchor: edit.anchor }, annotations: isolateHistory.of("full"), scrollIntoView: true });
+      view.focus();
+    } else if (editorCommand.type !== "timestamp") runOutlineCommand(view, editorCommand.action);
     setEditorCommand(null);
   }, [editorCommand, mode, active]);
   const [navigation, setNavigation] = useState(normalizeNavigation(null));
@@ -264,6 +275,7 @@ export default function App() {
   const note = model.notes.find((n) => n.path === active);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
   const structured = documents.find((d) => d.path === active);
+  const statistics = useMemo(() => wordStatistics(note?.content ?? ""), [note?.content]);
   const results = useMemo(
     () => searchNotes(model.notes, query),
     [model, query],
@@ -754,6 +766,13 @@ export default function App() {
     } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
     finally { setBusy(false); }
   };
+  const periodicCommands = useMemo(() => modal !== "commands" ? [] : Object.keys(periods).flatMap(period => {
+    const entries = periodicEntries(model.notes, period, { ...journalPreferences[period], locale: journalPreferences.locale });
+    return [[-1,"이전"],[1,"다음"]].map(([direction,label]) => {
+      const target = adjacentEntry(entries, active, direction);
+      return { id: `${period}-${direction}`, label: `${label} ${periods[period]} 일지`, disabled: !target, run: () => openNote(target.path) };
+    });
+  }), [modal === "commands", model.notes, journalPreferences, active, openNote]);
   const commands = [
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
@@ -766,11 +785,16 @@ export default function App() {
     { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("mermaid"); } },
     { id: "mindmap", label: "마인드맵 보기", disabled: !note || edits.blocked(), run: () => { setMode("mindmap"); setModal(null); } },
     { id: "new-map", label: "새 마인드맵 만들기", run: () => { setNewName("새 마인드맵.md"); setModal("newMap"); } },
+    { id: "timestamp", label: "일지 시간 기록 삽입", disabled: !note || edits.blocked(), run: () => { setModal(null); setMode("edit"); setEditorCommand({ path: active, type: "timestamp", now: new Date().toISOString(), atEnd: !editorView.current }); } },
+    { id: "rating", label: "일지 평가", disabled: !note || edits.blocked(), run: () => setModal("rating") },
+    { id: "on-this-day", label: "과거 같은 날의 기록", run: () => { setHistoryDate(localDate()); setModal("onThisDay"); } },
+    ...periodicCommands,
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
     { id: "git-workspace", label: "Git 변경 관리", run: () => { setSettingsTab("git-workspace"); setModal("settings"); } },
     { id: "updates", label: "Dynote 업데이트 확인", run: () => { setSettingsTab("updates"); setModal("settings"); } },
   ];
+  const dailyRating = modal === "rating" && note ? parseMetadata(note.content).properties["daily rating"] : null;
   const commandResults = commands.filter(c => c.label.toLowerCase().includes(commandQuery.toLowerCase()));
   const runCommand = (command) => {
     if (!command || command.disabled || busy || (!vault?.id && command.id !== "settings")) return;
@@ -919,7 +943,7 @@ export default function App() {
               </IconButton>
             </div>
           </div>
-          {section === "journal" ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} busy={busy}/>
+          {section === "journal" ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
           : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
           : section === "search" ? (
             <div className="search-panel">
@@ -1312,7 +1336,8 @@ export default function App() {
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
-              <span>{(note?.content.length ?? structured?.content.length ?? 0).toLocaleString()}자</span>
+              {note && <span>{statistics.words.toLocaleString()}단어</span>}
+              <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
               <span>{structured?.kind ?? "Markdown"}</span>
               <span>UTF-8</span>
             </div>
@@ -1651,6 +1676,16 @@ export default function App() {
         <div className="native-command-results">{model.notes.filter(n => n.path !== active).map(template => <button disabled={busy || edits.blocked()} key={template.path} onClick={() => insertTemplate(template.path)}>{template.path}</button>)}</div>
       </Modal>}
       {modal === "mermaid" && <Modal title="Mermaid 작성 도구" wide onClose={() => setModal(null)}><MermaidTools disabled={busy || edits.blocked()} onInsert={insertDiagram}/></Modal>}
+      {modal === "rating" && note && <Modal title="일지 평가" onClose={() => setModal(null)}>
+        <p>{note.path} · 현재 평가 {Number.isInteger(dailyRating) && dailyRating >= 1 && dailyRating <= 5 ? dailyRating : "없음"}</p>
+        <div className="journal-ratings">{[1,2,3,4,5,null].map(value => <button key={value ?? "none"} aria-label={value ? `평가 ${value}점` : "평가 지우기"} disabled={busy || edits.blocked()} onClick={() => {
+          try { change(rateJournal(note.content,value)); setModal(null); } catch (err) { setError(err.message); }
+        }}>{value ? "★".repeat(value) : "지우기"}</button>)}</div>
+      </Modal>}
+      {modal === "onThisDay" && <Modal title="과거 같은 날의 기록" onClose={() => setModal(null)}>
+        <input type="date" aria-label="과거 기록 기준 날짜" value={historyDate} onChange={e => { if (e.target.value) setHistoryDate(e.target.value); }}/>
+        <NavigationPanel title="지난 기록" paths={onThisDay(model.notes,historyDate,{...journalPreferences.daily,locale:journalPreferences.locale}).map(n=>n.path)} onOpen={openNote}/>
+      </Modal>}
       {(modal === "new" || modal === "newMap") && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>
           <form onSubmit={createNote}>
