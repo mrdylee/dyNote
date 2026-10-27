@@ -17,6 +17,8 @@ import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission } from ".
 import { demoNotes } from "../core/demo.mjs";
 import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
+import { GitWorkspace } from "../core/git-workspace.mjs";
+import { checkReleaseInformation } from "../core/update-information.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
@@ -238,6 +240,7 @@ app
     );
     for (const [name, action] of Object.entries({
       "copilot-status": () => copilot.status(),
+      "check-updates": (args) => checkReleaseInformation(app.getVersion(), args?.includePrerelease === true),
       "copilot-login": () => copilot.login(),
       "copilot-cancel-login": () => copilot.cancelLogin(),
       "copilot-send": (args) => { checkVault(args); return copilot.send(args); },
@@ -250,6 +253,19 @@ app
       },
       "forget-vault": async (args) => { await registry.forget(args?.root); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
       "git-history": (args) => { checkVault(args); return new GitHistory(vault).list(args.month); },
+      "git-workspace-status": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new GitWorkspace(vault.root).status(); }); },
+      "git-workspace-diff": (args) => { checkVault(args); return gitBackup.enqueue(() => { checkVault(args); return new GitWorkspace(vault.root).diff(args.path, args.staged === true); }); },
+      "git-workspace-action": (args) => {
+        checkVault(args);
+        return gitBackup.enqueue(async () => {
+          checkVault(args);
+          if (["create-branch", "switch-branch", "delete-branch"].includes(args.action?.kind) && gitBackup.status().enabled)
+            throw new Error("브랜치를 변경하기 전에 자동 Git 백업을 꺼 주세요.");
+          const status = await new GitWorkspace(vault.root).action(args.action);
+          const snapshot = ["pull", "switch-branch", "create-branch"].includes(args.action.kind) ? await vault.snapshot() : null;
+          return { status, snapshot };
+        });
+      },
       "git-preview": (args) => { checkVault(args); return new GitHistory(vault).preview(args.commit); },
       "git-restore": (args) => {
         checkVault(args);
@@ -371,8 +387,8 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone"].includes(name);
-        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action"].includes(name);
+        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "check-updates", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

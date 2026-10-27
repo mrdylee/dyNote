@@ -1832,3 +1832,15 @@ kbd {
 .pdf-backlinks { padding: 12px; border-top: 1px solid #e0e4ed; font-size: 12px; }
 .pdf-backlinks > div { display: flex; gap: 12px; padding: 5px 0; }
 .native-pdf-text { --scale-round-x: 1px; --scale-round-y: 1px; }
+.git-workspace-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.git-workspace-actions > button, .git-file-list button { padding: 5px 8px; border: 1px solid #d6dce7; border-radius: 5px; }
+.git-file-list { max-height: 240px; overflow: auto; margin: 12px 0; }
+.git-file-list > div { display: flex; gap: 6px; align-items: center; padding: 6px 0; font-size: 12px; }
+.git-file-list > div.selected { background: #f1edfa; }
+.git-file-list > div > button:first-of-type { flex: 1; text-align: left; }
+.git-diff { max-height: 260px; overflow: auto; white-space: pre; padding: 12px; background: #f6f7fa; font-size: 12px; }
+.git-workspace input:not([type=checkbox]), .git-workspace select { padding: 6px; border: 1px solid #ccd5e2; border-radius: 5px; margin: 6px; }
+.git-workspace form { display: flex; gap: 10px; align-items: center; }
+.update-actions, .release-assets { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.update-actions > button:not(.primary-button), .release-assets > button { border: 1px solid #d5dce8; border-radius: 5px; padding: 7px 10px; }
+.release-notes { white-space: pre-wrap; max-height: 280px; overflow: auto; font-family: inherit; font-size: 12px; line-height: 1.6; padding: 12px; background: #f6f7fa; }

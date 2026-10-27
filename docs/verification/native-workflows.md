@@ -55,3 +55,17 @@ Original PDF++ runtime in the isolated fixture selected `page` on the second pag
 `tests/pdf-links.test.mjs`: 4 passed, covering path/fragment preservation, strict numeric range validation, relative backlinks/fence exclusion and hash-bearing filenames. Actual `scripts/verify-pdf-links.mjs` checked page 2 selection restoration, trusted clipboard output, zoom cancellation, backlink return, original annotation navigation, encoded hash filename navigation and byte-for-byte PDF preservation. No renderer page errors. Output: ignored `output/playwright/native-pdf-links.json`, `native-pdf-links.png`.
 
 Whole suite: 179 passed, zero failed. Build successful. PDF annotation creation/editing, page manipulation, outlines/labels, rectangular selection and Markmind annotation formats remain open; this is not full PDF++ parity.
+
+## Native Git workspace and update information
+
+GIT-01 slice: changed/staged file status, per-file staging/unstaging, safe tracked-file diff, staged commit, explicit fetch and clean fast-forward pull, local branch list/create/switch/merged-only delete. Git operations reuse disabled hooks/interactive credential protections, reject parent/worktree repositories and excluded staged files, and serialize through GitController. Native mutations hold the exclusive vault-operation lock. Branch changes require automatic backup to be off. Initial-index unstage uses cached-only removal and preserves newer worktree bytes.
+
+`tests/git-workspace.test.mjs`: 6 real-repository tests covering stage/diff/commit/unstage, excluded staging, branch validation, local bare-remote fetch/pull, dirty/divergent pull preservation, parent repository rejection and unmerged branch protection. Actual `scripts/verify-git-workspace.mjs` confirmed status/stage/diff/commit through the UI and Git HEAD, local branch changes, and dirty-file refusal without byte loss. No renderer page errors. External SSH/HTTPS authentication and Windows runtime are not established by local Git remotes.
+
+The controlled original Obsidian fixture now has its own standalone synthetic `.git` and no remote. Original Git commands staged `Fixture.md` (`M ` in actual index status) and opened the Git view. Earlier read-only plugin startup had displayed the enclosing research repository's branch; no original Git mutation was exercised until the standalone fixture repository was initialized.
+
+UPDATE-01: explicit Dynote release check, current/latest version, plain-text release notes, beta selection, ignored-version restore and canonical official release/asset links. No startup request or automatic installer. `tests/update-information.test.mjs`: 4 passed for version ordering, channel/draft filtering, malformed identifiers, safe URLs and inert text.
+
+Actual `scripts/verify-update-information.mjs` made one successful public GitHub release request through the main process. Subsequent controlled-feed UI checks separately verified inert release text, ignore/restore persistence, channel persistence and honest failure state. Controlled-feed results are not live release evidence. No assets were downloaded or installed. Output: ignored `output/playwright/native-git-workspace.json`, `native-updates.json` and screenshots.
+
+Remaining Git scope: partial-hunk staging, blame, remote/upstream management, merge-conflict workflows and deliberately destructive/raw commands. Update information is complete for the defined native slice; automatic platform installation is not implemented.

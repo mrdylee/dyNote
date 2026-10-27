@@ -52,6 +52,8 @@ import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
+import GitWorkspace from "./GitWorkspace.jsx";
+import UpdateSettings from "./UpdateSettings.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
 import useCopilotEdits from "./useCopilotEdits.jsx";
 import { overlayNotes } from "./copilotEdits.mjs";
@@ -766,6 +768,8 @@ export default function App() {
     { id: "new-map", label: "새 마인드맵 만들기", run: () => { setNewName("새 마인드맵.md"); setModal("newMap"); } },
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
+    { id: "git-workspace", label: "Git 변경 관리", run: () => { setSettingsTab("git-workspace"); setModal("settings"); } },
+    { id: "updates", label: "Dynote 업데이트 확인", run: () => { setSettingsTab("updates"); setModal("settings"); } },
   ];
   const commandResults = commands.filter(c => c.label.toLowerCase().includes(commandQuery.toLowerCase()));
   const runCommand = (command) => {
@@ -1748,7 +1752,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["vault", "보관함"], ["fonts", "글꼴"], ["git", "Git 백업"], ["history", "백업 복원"]].map(([key, label]) =>
+            {[["vault", "보관함"], ["fonts", "글꼴"], ["git", "Git 백업"], ["git-workspace", "Git 변경"], ["history", "백업 복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={settingsTab === key ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
@@ -1765,6 +1769,20 @@ export default function App() {
             }}
             onForget={(root) => invoke(api.forgetVault({ root }))} />}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
+          {settingsTab === "updates" && <UpdateSettings currentVersion={version} onCheck={(includePrerelease) => invoke(api.checkUpdates({ includePrerelease }))} onOpen={openExternal}/>}
+          {settingsTab === "git-workspace" && vault.id && <GitWorkspace key={vault.id} busy={busy} backupEnabled={gitStatus.enabled}
+            onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: vault.id }))}
+            onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: vault.id, path, staged }))}
+            onOpen={(path) => { openFile(path); setModal(null); }}
+            onAction={async (action) => {
+              setBusy(true);
+              try {
+                await flush();
+                const result = await invoke(api.gitWorkspaceAction({ vaultId: vault.id, action }));
+                if (result.snapshot) install(result.snapshot);
+                return result.status;
+              } finally { setBusy(false); }
+            }}/>}
           {["git", "history"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}

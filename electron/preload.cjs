@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
     snapshot: () => call("snapshot"),
+    checkUpdates: (args) => call("check-updates", args),
     copilotStatus: () => call("copilot-status"),
     copilotLogin: () => call("copilot-login"),
     copilotCancelLogin: () => call("copilot-cancel-login"),
@@ -19,6 +20,9 @@ contextBridge.exposeInMainWorld(
     selectVault: (args) => call("select-vault", args),
     forgetVault: (args) => call("forget-vault", args),
     gitHistory: (args) => call("git-history", args),
+    gitWorkspaceStatus: (args) => call("git-workspace-status", args),
+    gitWorkspaceDiff: (args) => call("git-workspace-diff", args),
+    gitWorkspaceAction: (args) => call("git-workspace-action", args),
     previewGit: (args) => call("git-preview", args),
     restoreGit: (args) => call("git-restore", args),
     onOpenSettings: (callback) => {
