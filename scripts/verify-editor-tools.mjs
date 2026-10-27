@@ -1,0 +1,35 @@
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import assert from 'node:assert/strict';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
+const fixture=await mkdtemp(`${tmpdir()}/dynote-editor-tools-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
+await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
+const original='- Parent\n  - Child\n- Sibling\n';
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/List.md`,original);
+const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const errors=[];
+try {
+ const page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+ const editor=page.getByRole('textbox',{name:'Markdown 편집기'});await editor.waitFor();
+ const content=async()=>(await page.locator('.cm-content .cm-line').allTextContents()).join('\n');
+ const palette=async text=>{await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill(text);await page.keyboard.press('Enter');};
+ await editor.click();await page.keyboard.press('Meta+Home');await page.keyboard.press('ArrowRight');
+ await palette('목록 항목 아래로 이동');
+ assert.equal(await content(),'- Sibling\n- Parent\n  - Child\n');
+ await page.keyboard.press('Meta+z');assert.equal(await content(),original);
+ await palette('목록 접기');assert.equal(await page.locator('.cm-foldPlaceholder').count(),1);
+ await palette('목록 펼치기');assert.equal(await page.locator('.cm-foldPlaceholder').count(),0);
+ await page.keyboard.press('Meta+s');assert.equal(await readFile(`${vault}/List.md`,'utf8'),original);
+ await page.keyboard.press('Meta+End');
+ await palette('Mermaid 작성 도구');
+ assert.equal(await page.getByRole('combobox',{name:'Mermaid 도표 종류'}).locator('option').count(),20);
+ await page.getByRole('button',{name:'도표 삽입',exact:true}).click();assert.match(await content(),/```mermaid/);
+ await page.keyboard.press('Meta+z');assert.equal(await content(),original);
+ await palette('Mermaid 작성 도구');await page.getByRole('button',{name:'도표 삽입',exact:true}).click();
+ await page.getByRole('button',{name:'분할 보기',exact:true}).click();await page.locator('.markdown-preview .mermaid-diagram svg').waitFor();
+ await page.screenshot({path:'output/playwright/native-editor-tools.png'});
+ assert.deepEqual(errors,[]);
+ const report={checks:['original Outliner subtree move output','one-step undo','fold/unfold preserve disk bytes','twenty Mermaid families','diagram insertion undo','actual Mermaid SVG rendering'],errors};
+ await writeFile('output/playwright/native-editor-tools.json',JSON.stringify(report,null,2));console.log(report);
+}finally{await app.close();await rm(fixture,{recursive:true,force:true});}

@@ -27,3 +27,11 @@ Actual Mac Electron verification: `scripts/verify-native-workflows.mjs`, using a
 `npm test`: 165 passed, zero failed. `npm run build`: successful; existing large-bundle warning remains.
 
 Ignored output: `output/playwright/native-workflows.json`, `native-journal.png`; unit/build logs in `output/research/`. Windows runtime and packaged-artifact execution are not established by these Mac source-app tests.
+
+## Native editor tools slice
+
+OUTLINE-01 representative source and runtime behavior now matches the controlled original Outliner observations: subtree up/down, indent/outdent, fold/unfold. Commands and Alt+Up/Down are available; Tab/Shift+Tab prefer subtree indentation when applicable. Text edits are one undo step and use existing SaveQueue/revision checks. Fenced examples and YAML list-looking content are excluded. Drag handles, multi-item selection operations and broader compatibility remain unverified.
+
+DIAGRAM-01: native Mermaid dialog supplies twenty independently authored editable diagram families, inserts at the editor selection and distinguishes an existing Mermaid fence. All twenty samples parse with the installed Mermaid parser. This does not claim that every original plugin element preset has been reproduced.
+
+`node --test tests/outliner.test.mjs tests/diagram-tools.test.mjs`: 5 passed. `scripts/verify-editor-tools.mjs` executed actual Mac Electron subtree move/one-step undo, fold/unfold with original disk bytes, twenty-family selection, Mermaid insertion/undo and SVG rendering. No renderer page errors. Evidence: ignored `output/playwright/native-editor-tools.json` and `native-editor-tools.png`.

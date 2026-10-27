@@ -63,6 +63,9 @@ import JournalPanel from "./JournalPanel.jsx";
 import NavigationPanel from "./NavigationPanel.jsx";
 import { normalizeNavigation, navigationAction, reconcileNavigation } from "../core/navigation.mjs";
 import { periodicNote, renderTemplate, localDate } from "../core/periodic-notes.mjs";
+import { runOutlineCommand } from "./editorCommands.mjs";
+import { diagramInsertion } from "../core/diagram-tools.mjs";
+import MermaidTools from "./MermaidTools.jsx";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -213,6 +216,12 @@ export default function App() {
   const [switchQuery, setSwitchQuery] = useState("");
   const [commandQuery, setCommandQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
+  const [editorCommand, setEditorCommand] = useState(null);
+  useEffect(() => {
+    if (!editorCommand || editorCommand.path !== active || !editorView.current) return;
+    runOutlineCommand(editorView.current, editorCommand.action);
+    setEditorCommand(null);
+  }, [editorCommand, mode, active]);
   const [navigation, setNavigation] = useState(normalizeNavigation(null));
   const navigationRef = useRef(navigation);
   const [journalPreferences, setJournalPreferences] = useState({});
@@ -711,7 +720,15 @@ export default function App() {
     const target = { ...periodicNote("daily", localDate()), title: note.path.split("/").at(-1).replace(/\.md$/i, "") };
     const insert = renderTemplate(template.content, target);
     const { from, to } = view.state.selection.main;
-    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.replace(/\r\n|\r/g, "\n").length }, scrollIntoView: true });
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.replace(/\r\n|\r/g, "\n").length }, annotations: isolateHistory.of("full"), scrollIntoView: true });
+    setModal(null); view.focus();
+  };
+  const insertDiagram = (code) => {
+    const view = editorView.current;
+    if (!view || view.state.readOnly || busy || edits.blocked()) return;
+    const { from, to } = view.state.selection.main;
+    const insert = diagramInsertion(view.state.doc.toString(), from, code);
+    view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, annotations: isolateHistory.of("full"), scrollIntoView: true });
     setModal(null); view.focus();
   };
   const commands = [
@@ -722,6 +739,8 @@ export default function App() {
     { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
     ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
     { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
+    ...[["up", "목록 항목 위로 이동"], ["down", "목록 항목 아래로 이동"], ["indent", "목록 들여쓰기"], ["outdent", "목록 내어쓰기"], ["fold", "목록 접기"], ["unfold", "목록 펼치기"]].map(([action,label]) => ({ id: `outline-${action}`, label, disabled: !note || edits.blocked(), run: () => { setModal(null); if (mode === "read") setMode("edit"); setEditorCommand({ path: active, action }); } })),
+    { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("mermaid"); } },
     { id: "save", label: "현재 변경 저장", run: async () => { await flush(); setModal(null); } },
     { id: "settings", label: "설정 열기", run: () => setModal("settings") },
   ];
@@ -1600,6 +1619,7 @@ export default function App() {
         <p>선택한 문서 내용을 현재 선택 영역에 삽입합니다.</p>
         <div className="native-command-results">{model.notes.filter(n => n.path !== active).map(template => <button disabled={busy || edits.blocked()} key={template.path} onClick={() => insertTemplate(template.path)}>{template.path}</button>)}</div>
       </Modal>}
+      {modal === "mermaid" && <Modal title="Mermaid 작성 도구" wide onClose={() => setModal(null)}><MermaidTools disabled={busy || edits.blocked()} onInsert={insertDiagram}/></Modal>}
       {modal === "new" && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>
           <form onSubmit={createNote}>

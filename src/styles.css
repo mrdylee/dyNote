@@ -1804,3 +1804,6 @@ kbd {
 .native-command-input { width: 100%; padding: 12px; border: 1px solid #cbd4e2; border-radius: 7px; }
 .native-command-results { display: flex; flex-direction: column; max-height: 360px; overflow: auto; margin: 10px 0; }
 .native-command-results button { text-align: left; padding: 11px 10px; border-radius: 6px; }
+.mermaid-tools label { display: block; margin: 12px 0; font-size: 13px; }
+.mermaid-tools select, .mermaid-tools textarea { display: block; width: 100%; margin-top: 7px; border: 1px solid #ccd4e2; border-radius: 6px; padding: 9px; background: #fff; }
+.mermaid-tools textarea { font-family: var(--editor-font, monospace); resize: vertical; }

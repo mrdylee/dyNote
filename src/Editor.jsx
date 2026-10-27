@@ -19,6 +19,7 @@ import {
   defaultHighlightStyle,
   syntaxHighlighting,
   bracketMatching,
+  foldGutter,
 } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
@@ -26,6 +27,7 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
+import { outlineFolding, runOutlineCommand } from "./editorCommands.mjs";
 
 export default function Editor({
   note,
@@ -69,6 +71,8 @@ export default function Editor({
         doc: note.content,
         extensions: [
           lineNumbers(),
+          outlineFolding,
+          foldGutter(),
           pendingMarks.current.of([]),
           readonly.current.of(EditorState.readOnly.of(readOnly)),
           history(),
@@ -109,6 +113,10 @@ export default function Editor({
           syntaxHighlighting(defaultHighlightStyle),
           EditorView.lineWrapping,
           keymap.of([
+            { key: "Alt-ArrowUp", run: view => runOutlineCommand(view, "up") },
+            { key: "Alt-ArrowDown", run: view => runOutlineCommand(view, "down") },
+            { key: "Tab", run: view => runOutlineCommand(view, "indent") },
+            { key: "Shift-Tab", run: view => runOutlineCommand(view, "outdent") },
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,
