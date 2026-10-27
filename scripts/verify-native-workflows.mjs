@@ -48,7 +48,7 @@ try {
  await palette('달력과 일지');await page.getByRole('button',{name:'일지 설정',exact:true}).click();
  assert.equal(await page.getByRole('textbox',{name:'일지 저장 폴더'}).inputValue(),'Daily');
  assert.equal(await page.getByRole('combobox',{name:'일지 템플릿'}).inputValue(),'Template.md');
- await page.getByRole('combobox',{name:'일지 주기'}).selectOption('weekly');await page.getByRole('combobox',{name:'일지 주 기준'}).selectOption('en-gb');await page.getByLabel('일지 날짜',{exact:true}).fill('2021-01-01');assert.equal(await page.locator('.journal-path').textContent(),'2020-W53.md');
+ await page.getByRole('combobox',{name:'일지 주기'}).selectOption('weekly');await page.getByRole('combobox',{name:'일지 주 기준'}).selectOption('en-gb');await page.getByLabel('일지 날짜',{exact:true}).fill('2021-01-01');assert.equal(await page.locator('.journal-path').textContent(),'2020-W53.md');assert.equal(await page.locator('.journal-calendar > span').first().textContent(),'Mo');assert.equal(await page.locator('.journal-calendar > span').count(),11);
  await page.getByRole('combobox',{name:'일지 주기'}).selectOption('daily');await page.getByRole('combobox',{name:'일지 주 기준'}).selectOption('ko');
  await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).waitFor();await page.keyboard.press('Escape');
  await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:A.md');await page.keyboard.press('Enter');
@@ -71,6 +71,6 @@ try {
  await palette('최근 파일');assert.equal(await page.getByRole('region',{name:'최근 파일'}).getByRole('button').count(),1);
  await palette('달력과 일지');await page.getByRole('button',{name:'일지 설정',exact:true}).click();assert.equal(await page.getByRole('textbox',{name:'일지 저장 폴더'}).inputValue(),'');
  assert.deepEqual(errors,[]);
- const report={checks:['keyboard palette separate from document switcher','calendar creates dated template note','existing note preserves edits and CRLF','recent file navigation','bookmark restart persistence','per-period preferences persist','renderer locale week-year matches Node date service','template insertion is one undo step','rename/delete reconcile bookmarks','second vault isolates navigation and preferences'],errors};
+ const report={checks:['keyboard palette separate from document switcher','calendar creates dated template note','existing note preserves edits and CRLF','recent file navigation','bookmark restart persistence','per-period preferences persist','renderer locale week-year and calendar weekday/padding match configured week start','template insertion is one undo step','rename/delete reconcile bookmarks','second vault isolates navigation and preferences'],errors};
  await writeFile('output/playwright/native-workflows.json',JSON.stringify(report,null,2));console.log(report);
 } finally {if(app)await app.close();await rm(fixture,{recursive:true,force:true});}

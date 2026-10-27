@@ -1,7 +1,7 @@
 # Obsidian plugin support investigation
 
 Date: 2026-10-27. Target: Dynote at commit `3e151d5827c41bf01a5cf357ac172f22155998d7`.
-Status: discovery completed for installed/enabled metadata and Dynote gaps; implementation scope awaits the user's choice. This document is research, not an approved implementation specification.
+Status: initial discovery baseline retained below. The user subsequently chose native functionality for all eleven enabled community plugins plus core plugins. Controlled original runs and native implementations are recorded in the dated follow-up and native-workflows.md; the baseline gaps below are historical.
 
 ## Evidence and limits
 

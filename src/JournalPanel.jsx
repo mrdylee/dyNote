@@ -11,8 +11,10 @@ export default function JournalPanel({ notes, active, preferences, onPreferences
   let target, problem;
   try { target = periodicNote(period, date, settings); } catch (e) { problem = e.message; }
   const existing = target && notes.find(n => n.path === target.path);
-  const month = moment(date, 'YYYY-MM-DD', true).isValid() ? moment(date) : moment();
+  const month = (moment(date, 'YYYY-MM-DD', true).isValid() ? moment(date) : moment()).locale(preferences.locale || 'ko');
   const start = month.clone().startOf('month');
+  const locale = month.localeData(), firstDay = locale.firstDayOfWeek();
+  const weekdays = locale.weekdaysMin();
   const previous = adjacentEntry(entries, active, -1), next = adjacentEntry(entries, active, 1);
   const update = (key, value) => onPreferences({ ...preferences, [period]: { ...preferences[period], [key]: value } });
   const selected = () => existing ? onOpen(existing.path) : target && onCreate(target, settings);
@@ -29,8 +31,8 @@ export default function JournalPanel({ notes, active, preferences, onPreferences
       <button aria-label="일지 다음 달" onClick={()=>setDate(month.clone().add(1,'month').format('YYYY-MM-DD'))}>→</button>
     </div>
     <div className="journal-calendar" aria-label="일지 달력">
-      {['일','월','화','수','목','금','토'].map(d=><span key={d}>{d}</span>)}
-      {Array.from({length:start.day()},(_,i)=><span key={`pad-${i}`}/>)}
+      {Array.from({length:7},(_,i)=>weekdays[(firstDay+i)%7]).map(d=><span key={d}>{d}</span>)}
+      {Array.from({length:(start.day()-firstDay+7)%7},(_,i)=><span key={`pad-${i}`}/>)}
       {Array.from({length:month.daysInMonth()},(_,i)=>{
         const day=start.clone().add(i,'day').format('YYYY-MM-DD');
         let path;
