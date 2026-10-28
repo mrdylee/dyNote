@@ -15,3 +15,9 @@ Scope: embedded ESS LINK viewer, transparent background, persistent container/de
 | --- | ---: | --- |
 | Dynote-0.10.0-macos-arm64.zip | 291846879 | 4b4e86e768b4bbd1c21cbe26b886115c436998d7a087328a4757ef58c58a9256 |
 | Dynote-0.10.0-windows-x64.zip | 380633931 | 5f3eee89ab0dcd355f01c7e6dda8063638a66d14b454d8cdfd537a2c4c137047 |
+
+## Publication confirmation
+
+Published prerelease [v0.10.0](https://github.com/mrdylee/dyNote/releases/tag/v0.10.0), release ID `426829457`, at **2026-10-29 00:14:58 Asia/Seoul**. The immutable annotated tag resolves to `b022317ddf3d8f7199652a72d6069d057ae34f21`. All three public asset sizes and API digests match; every complete public asset was downloaded and SHA-256 verified, including the 192-byte checksum file. The update-information feed identifies v0.10.0 for users including prereleases. No browser security settings were changed for upload.
+
+Additional packaged Mac audit checks confirm actual right-button canvas pan, readable startup failure when WebGL is unavailable, and successful retry after graphics availability returns. Local receipt: `output/playwright/ess-packaged/extra-runtime.json`. The follow-up commit records only documentation completion; the published binaries and immutable release tag remain those verified above.
