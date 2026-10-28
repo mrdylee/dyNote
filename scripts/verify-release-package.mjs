@@ -29,13 +29,16 @@ for (const [platform, relative] of [
   const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
   await access(path.join(`${archive}.unpacked`, runtime, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"));
   await access(path.join(`${archive}.unpacked`, runtime, "runtime.node"));
-  assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src|examples)\//.test(name)));
+  assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src|public|examples)\//.test(name)));
   assert.ok(!contents.includes("/HANDOFF.md"), "local session handoff must not ship");
   for (const file of sources)
     assert.deepEqual(extractFile(archive, file), await readFile(file), `${platform}: ${file}`);
   const metadata = JSON.parse(extractFile(archive, "package.json"));
   assert.equal(metadata.version, version);
   assert.equal(metadata.productName, "Dynote");
+  assert.ok(contents.includes('/dist/ess.html'));
+  assert.deepEqual(extractFile(archive, 'dist/ess/ess-container.glb'), await readFile('public/ess/ess-container.glb'));
+  assert.ok(contents.includes('/licenses/three.txt'));
   const wasm = contents.find((name) => /^\/dist\/assets\/graph-.*\.wasm$/.test(name));
   assert.ok(wasm);
   assert.ok(contents.some((name) => /^\/dist\/assets\/graph.worker-.*\.js$/.test(name)));

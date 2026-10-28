@@ -1,0 +1,22 @@
+.ess-workspace { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto minmax(0, 1fr); background: transparent; }
+.ess-heading { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.ess-heading h1 { font-size: 18px; margin: 0; color: #223d3c; }
+.ess-heading p { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
+.ess-workspace button, .ess-workspace input, .ess-workspace select { font: inherit; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: white; padding: 7px; min-width: 0; }
+.ess-workspace button { cursor: pointer; }
+.ess-workspace button:disabled { opacity: .5; cursor: default; }
+.ess-frame-wrap { position: relative; min-width: 0; min-height: 0; }
+.ess-frame-wrap iframe { border: 0; width: 100%; height: 100%; display: block; }
+.ess-loading { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: #eff4f5; font-size: 13px; color: #345453; }
+.ess-note-links { padding: 14px; overflow: auto; border-left: 1px solid var(--border); font-size: 12px; }
+.ess-note-links label { display: grid; gap: 5px; }
+.ess-note-links select, .ess-note-links input { width: 100%; }
+.ess-target-fields { display: grid; grid-template-columns: 1fr 1.2fr; gap: 6px; margin-bottom: 20px; }
+.ess-note-links form { display: grid; gap: 8px; margin-top: 18px; }
+.ess-note-links form button { background: #285c54; color: white; }
+.ess-note-links ul { padding: 0; list-style: none; }
+.ess-note-links li { display: grid; gap: 5px; margin: 10px 0; }
+.ess-note-links li button:first-child { text-align: left; overflow-wrap: anywhere; color: #285c54; }
+.ess-link-hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.ess-note-links [role="alert"] { color: #a23434; overflow-wrap: anywhere; }
+@media (max-width: 1200px) { .ess-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(290px, 1fr) 200px; } .ess-note-links { border-left: 0; border-top: 1px solid var(--border); } .ess-target-fields { margin-bottom: 10px; } }

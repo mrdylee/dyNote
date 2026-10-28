@@ -4,5 +4,5 @@ export default defineConfig({
   plugins: [react()],
   base: "./",
   server: { host: "127.0.0.1" },
-  build: { target: "es2022", assetsInlineLimit: 0, rollupOptions: { input: { main: "index.html", plugin: "plugin.html" } } },
+  build: { target: "es2022", assetsInlineLimit: 0, rollupOptions: { input: { main: "index.html", plugin: "plugin.html", ess: "ess.html" } } },
 });

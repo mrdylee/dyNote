@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import {
   BookOpen,
+  Box,
   Bookmark,
   CalendarDays,
   History,
@@ -80,6 +81,8 @@ import { convertMindmap } from "../core/mindmap.mjs";
 import { pdfBacklinks } from "../core/pdf-links.mjs";
 import Planner from "./Planner.jsx";
 import { BOARD_PATH } from "../core/planner.mjs";
+import EssViewer from "./EssViewer.jsx";
+import { noteEssLinks, setEssLink, validEssTarget } from "../core/ess-links.mjs";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -213,6 +216,8 @@ export default function App() {
   const [active, setActive] = useState(null);
   const [tabs, setTabs] = useState([]);
   const [section, setSection] = useState("files");
+  const [essOpened, setEssOpened] = useState(false);
+  const [essTarget, setEssTarget] = useState(null);
   const [mode, setMode] = useState("read");
   const [editorJump, setEditorJump] = useState(null);
   const [query, setQuery] = useState("");
@@ -339,6 +344,11 @@ export default function App() {
   );
 
   const install = useCallback((snapshot) => {
+    if (currentVault.current !== snapshot.id) {
+      setEssOpened(false);
+      setEssTarget(null);
+      setSection(old => old === "ess" ? "files" : old);
+    }
     setEditorSelection(null);
     clearTimeout(timer.current);
     setVault(snapshot);
@@ -426,9 +436,30 @@ export default function App() {
     setEditorJump(null);
     setAttachment(null);
     setTabs((old) => (old.includes(path) ? old : [...old, path]));
-    setSection((old) => (["graph", "planner"].includes(old) ? "files" : old));
+    setSection((old) => (["graph", "planner", "ess"].includes(old) ? "files" : old));
     setModal(null);
   }, []);
+
+  const openEss = (target) => {
+    if (validEssTarget(target)) setEssTarget(target);
+    setEssOpened(true); setSection("ess"); setModal(null);
+  };
+  const linkEssNote = async (path, target, linked, expectedRevision) => {
+    const vaultId=vault.id;
+    setBusy(true);
+    try {
+      await flush();
+      if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다.");
+      if(revisions.current.get(path)!==expectedRevision)throw new Error("문서가 변경되었습니다. 다시 연결해 주세요.");
+      const current=raw.find(n=>n.path===path);
+      if(!current)throw new Error("연결할 문서를 찾을 수 없습니다.");
+      const content=setEssLink(current.content,target,linked);
+      const saved=await invoke(api.saveNote({vaultId,path,content,revision:expectedRevision}));
+      if(currentVault.current!==vaultId)return;
+      revisions.current.set(path,saved.revision);
+      setRaw(old=>old.map(n=>n.path===path?{...saved,content}:n));
+    } finally {setBusy(false);}
+  };
 
   useEffect(() => {
     if (!api?.onPluginOpen) return;
@@ -847,6 +878,7 @@ export default function App() {
     });
   }), [modal === "commands", model.notes, journalPreferences, active, openNote]);
   const commands = [
+    { id: "ess", label: "ESS LINK 3D 보기", run: () => openEss() },
     ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
@@ -935,6 +967,7 @@ export default function App() {
             <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
             <IconButton label="달력과 일지" active={section === "journal"} onClick={() => setSection("journal")}><CalendarDays size={20}/></IconButton>
             <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><Sparkles size={20}/></IconButton>
+            <IconButton label="ESS LINK 3D 보기" active={section === "ess"} onClick={() => openEss()}><Box size={20}/></IconButton>
             <IconButton
               label="파일 목록"
               active={section === "files"}
@@ -1113,7 +1146,7 @@ export default function App() {
             <div className="tabs">
               {tabs.map((path) => (
                 <div
-                  className={`tab ${path === active && section !== "graph" ? "active" : ""}`}
+                  className={`tab ${path === active && !["graph", "ess"].includes(section) ? "active" : ""}`}
                   key={path}
                 >
                   <button className="tab-label" onClick={() => openNote(path)}>
@@ -1133,6 +1166,10 @@ export default function App() {
                   </button>
                 </div>
               ))}
+              {essOpened && <div className={`tab ${section === "ess" ? "active" : ""}`}>
+                <button className="tab-label" onClick={() => openEss()}><Box size={13}/>ESS LINK 3D</button>
+                <button className="tab-close" aria-label="ESS LINK 3D 탭 닫기" onClick={() => {setEssOpened(false);setEssTarget(null);if(section==="ess")setSection("files");}}><X size={12}/></button>
+              </div>}
               {section === "graph" && (
                 <div className="tab active">
                   <Network size={14} />
@@ -1156,13 +1193,14 @@ export default function App() {
               <span>{vault.name}</span>
               <ChevronRight size={12} />
               <span>
-                {section === "graph"
+                {section === "ess" ? "ESS LINK 3D" : section === "graph"
                   ? "문서 그래프"
                   : (active?.replace(/\.md$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
-              {section !== "graph" && (note || structured) && (
+              {note && !["graph", "ess", "planner"].includes(section) && <button className="text-action" onClick={() => openEss(noteEssLinks(note.content)[0])}><Box size={14}/> ESS LINK 보기</button>}
+              {!["graph", "ess"].includes(section) && (note || structured) && (
                 <>
                   <IconButton label="현재 문서 북마크" active={navigation.bookmarks.includes(active)} disabled={busy} onClick={() => updateNavigation({ type: "bookmark", path: active })}><Bookmark size={15}/></IconButton>
                   <button
@@ -1202,7 +1240,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {section !== "graph" && !structured && (
+              {!["graph", "ess"].includes(section) && !structured && (
                 <div className="view-segments">
                   <IconButton label="마인드맵 보기" active={mode === "mindmap"} disabled={!note || busy || edits.blocked()} onClick={() => setMode("mindmap")}><Network size={15}/></IconButton>
                   <IconButton
@@ -1266,7 +1304,8 @@ export default function App() {
           )}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "planner" ? <Planner key={vault.id} api={api} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
+            {section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
+            : section === "planner" ? <Planner key={vault.id} api={api} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
               onSave={async (content, expectedRevision) => {
@@ -1438,7 +1477,7 @@ export default function App() {
             </div>
           </footer>
         </main>
-        {right && (
+        {right && section !== "ess" && (
           <aside className={`context-panel ${rightTab === "copilot" ? "with-copilot" : ""}`}>
             <div className="context-tabs" role="tablist" aria-label="오른쪽 패널">
               <button role="tab" aria-selected={rightTab === "info"} className={rightTab === "info" ? "selected" : ""} onClick={() => setRightTab("info")}>

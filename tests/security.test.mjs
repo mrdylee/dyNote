@@ -29,6 +29,14 @@ test("only an exact main-frame application origin can invoke native operations",
   assert.equal(trustedFrame("notes://app/elsewhere.html", true), false);
 });
 
+test('ESS frame serves bundled assets and exactly the ESS model, without native trust', () => {
+  assert.equal(assetPath('notes://ess/ess.html','/safe/dist'),'/safe/dist/ess.html');
+  assert.equal(assetPath('notes://ess/assets/ess-a1.js','/safe/dist'),'/safe/dist/assets/ess-a1.js');
+  assert.equal(assetPath('notes://ess/ess/ess-container.glb','/safe/dist'),'/safe/dist/ess/ess-container.glb');
+  for(const url of ['notes://ess/index.html','notes://ess/plugin.html','notes://ess/secret.glb','notes://ess/ess/other.glb','notes://app/secret.glb','notes://ess/ess/%2e%2e/private.glb','notes://ess/ess/ess-container.glb?path=secret','notes://ess/ess/ess-container.glb#x'])assert.throws(()=>assetPath(url,'/safe/dist'));
+  assert.equal(trustedFrame('notes://ess/ess.html',true),false);
+});
+
 test("explicit external links cannot invoke operating system handlers or executable URLs", () => {
   assert.equal(
     safeExternalUrl("https://example.org/page"),

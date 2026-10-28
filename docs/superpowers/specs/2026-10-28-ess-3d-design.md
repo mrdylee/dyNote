@@ -4,9 +4,9 @@ The user approved adding the existing ESS viewer, linking equipment to notes, re
 
 ## Chosen approach
 
-Bundle the existing Three.js/TypeScript viewer and its GLB as a separate Vite entry displayed in an application tab. An iframe keeps its global DOM, styles and rendering lifecycle separate; removing it releases the renderer. Loading only the GLB would lose the existing doors, layout and diagnostics. A Unity Web build would duplicate an already working web implementation.
+Bundle the existing Three.js/TypeScript viewer and its GLB as a separate Vite entry displayed in an application tab. An iframe on the distinct internal `notes://ess` origin keeps its global DOM, styles and rendering lifecycle separate; removing it releases the renderer. Loading only the GLB would lose the existing doors, layout and diagnostics. A Unity Web build would duplicate an already working web implementation.
 
-Copy only the viewer source and public model from `ess_unity_project/ess-web-six` at `86a11015d74e100e90c9e1aa7d4a22bb927b3e50`; preserve the original project. Retain its model attribution and Three.js license. Its simulation labels remain visible. This is a bundled ESS feature, not arbitrary Unity projects or general model import.
+Copy only the viewer source and public model from `ess_unity_project/ess-web-six` at `86a11015d74e100e90c9e1aa7d4a22bb927b3e50`; preserve the original project. Retain its model attribution and Three.js license. Its simulation labels remain visible. Per the user correction, the scene, alpha canvas and frame backdrop are transparent so the notebook surface shows through. This is a bundled ESS feature, not arbitrary Unity projects or general model import.
 
 ## User flow
 

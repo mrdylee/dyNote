@@ -3,12 +3,16 @@ import path from "node:path";
 export function assetPath(input, root) {
   const url = new URL(input);
   const decoded = decodeURIComponent(url.pathname);
+  const ess = url.host === "ess";
+  const model = decoded === "/ess/ess-container.glb";
   if (
     url.protocol !== "notes:" ||
-    url.host !== "app" ||
+    !["app", "ess"].includes(url.host) ||
+    url.search || url.hash ||
+    (ess && decoded !== "/ess.html" && !decoded.startsWith("/assets/") && !model) ||
     /[\\\0]/.test(decoded) ||
     decoded.split("/").some((p) => p.startsWith(".")) ||
-    !/\.(?:html|m?js|css|svg|woff2|wasm)$/.test(decoded)
+    (!/\.(?:html|m?js|css|svg|woff2|wasm)$/.test(decoded) && !(ess && model))
   )
     throw new Error("Forbidden asset");
   const file = path.resolve(root, "." + decoded);

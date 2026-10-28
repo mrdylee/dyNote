@@ -1,5 +1,20 @@
 # Third-party source notices
 
+## ESS LINK viewer and Three.js
+
+`src/ess/` and `public/ess/ess-container.glb` reuse the user's ESS viewer/model
+from `mrdylee/260907_unity_link` revision
+`86a11015d74e100e90c9e1aa7d4a22bb927b3e50`. The original project is preserved.
+Dynote adds frame isolation, container/device note events, transparent rendering,
+startup/context failure handling and embedded layout adjustments. The GLB bytes
+are unchanged. Model dimensions, internal wiring and diagnostic data remain
+illustrative; this is not measured CAD or a device controller. Referenced product
+names and designs retain their respective owners' rights.
+
+Three.js 0.186.0 is MIT licensed. Copyright © 2010–2026 three.js authors.
+Its full license is retained in `licenses/three.txt` and the installed package.
+No Unity runtime or Blender executable is redistributed.
+
 ## open-obsidian search index
 
 `core/searchIndex.mjs` is derived from `src/core/searchIndex.ts` at https://github.com/JingHao-Leon/open-obsidian/commit/d6601440e1cd3dc049c6f81cb48903e0df61d047. TypeScript types were removed with the TypeScript compiler. Search integration and Dynote tests are separate changes.

@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.9.0 프리릴리스는 캡처에서 일정을 인식하고 준비 작업·브레인스토밍·V모델 근거를 연결하는 개발 플래너를 추가합니다. [사용법](docs/DEVELOPMENT-PLANNER.md)과 [변경사항과 검증 범위](docs/RELEASE-NOTES-0.9.0.md)를 확인하세요. v0.8.0의 Recent Files·Calendar 제한 실행 호스트와 기존 노트·그래프 기능도 포함합니다.
+v0.10.0 프리릴리스는 배경색 없는 ESS LINK 3D 탭과 컨테이너·부품별 노트 연결을 추가합니다. [사용법](docs/ESS-3D.md) · [변경사항](docs/RELEASE-NOTES-0.10.0.md). v0.9.0의 개발 플래너와 v0.8.0의 제한된 원본 플러그인 실행도 포함합니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -10,11 +10,11 @@ v0.9.0 프리릴리스는 캡처에서 일정을 인식하고 준비 작업·브
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.9.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.10.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.9.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.10.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -34,6 +34,8 @@ npm start
 `npm run dev`는 그래프 WASM을 자동 생성한 뒤 화면 개발 서버를 시작합니다. 파일 접근 기능은 Electron 앱에서만 제공하므로 실제 사용은 `npm start`로 실행합니다.
 
 ## 제공 기능
+
+- ESS LINK 3D 탭: 6대 배치·회전·확대·문 개폐와 컨테이너·부품별 노트 연결. [사용법](docs/ESS-3D.md)
 
 - 개발 플래너: 캡처 일정 인식·검토·등록, 오늘/타임라인/근거 보기, AI 대안 채택·보류, 준비 작업과 문서 변경 확인
 - 중첩 폴더의 `.md` 파일 열기, 새 문서 만들기, CodeMirror 기반 편집

@@ -160,6 +160,7 @@ app
           ".svg": "image/svg+xml",
           ".woff2": "font/woff2",
           ".wasm": "application/wasm",
+          ".glb": "model/gltf-binary",
         };
         return new Response(await readFile(file), {
           headers: { "Content-Type": mime[path.extname(file)] },
