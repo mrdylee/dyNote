@@ -35,6 +35,13 @@ const outputs = await packager({
   dir: ".", name: "Dynote", platform, arch,
   out: process.env.DYNOTE_PACKAGE_OUT || `release/v${metadata.version}`,
   overwrite: true,
+  // Seal the renamed bundle and nested binaries; Electron's linker signature
+  // alone is invalid for the packaged app. This is not Developer ID signing.
+  osxSign: platform === "darwin" ? {
+    identity: "-", identityValidation: false,
+    preAutoEntitlements: false, preEmbedProvisioningProfile: false,
+    optionsForFile: () => ({ hardenedRuntime: false, timestamp: "none" }),
+  } : undefined,
   extendInfo: platform === "darwin" ? { NSMicrophoneUsageDescription: "선택한 보관함에 음성을 녹음하려면 마이크 사용을 허용해 주세요." } : undefined,
   asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi}/**" },
   ignore: /^\/(?:(src|public|tests|docs|release|assembly|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,

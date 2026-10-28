@@ -1,6 +1,7 @@
 import { readFile, readdir, writeFile, access } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import assert from "node:assert/strict";
 
@@ -24,6 +25,9 @@ for (const [platform, relative] of [
   ["win32-x64", "Dynote-win32-x64/resources/app.asar"],
 ]) {
   const archive = `${packageRoot}/${relative}`;
+  if (platform === "darwin-arm64") {
+    execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", `${packageRoot}/Dynote-darwin-arm64/Dynote.app`], { stdio: "pipe" });
+  }
   const contents = listPackage(archive);
   assert.ok(!contents.some((name) => name.includes("graph-simulation.wasm")));
   const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
@@ -44,5 +48,5 @@ for (const [platform, relative] of [
   assert.ok(contents.some((name) => /^\/dist\/assets\/graph.worker-.*\.js$/.test(name)));
   report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extractFile(archive, wasm.slice(1))), copilotRuntimeIncluded: true });
 }
-await writeFile(process.env.DYNOTE_PACKAGE_OUT ? "docs/verification/copilot-package.json" : `docs/verification/dynote-v${version}-release-package.json`, JSON.stringify(report, null, 2) + "\n");
+await writeFile(process.env.DYNOTE_PACKAGE_REPORT || (process.env.DYNOTE_PACKAGE_OUT ? "docs/verification/copilot-package.json" : `docs/verification/dynote-v${version}-release-package.json`), JSON.stringify(report, null, 2) + "\n");
 console.log(JSON.stringify(report, null, 2));

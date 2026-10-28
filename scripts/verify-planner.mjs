@@ -31,7 +31,7 @@ try{
   // Synthetic PPT-like screenshot; never use personal slides or notes.
   const image=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1100;c.height=500;const x=c.getContext('2d');x.fillStyle='#f7f8fa';x.fillRect(0,0,1100,500);x.fillStyle='#263a38';x.font='bold 38px Arial';x.fillText('DEVELOPMENT MILESTONES',45,70);x.font='28px Arial';x.fillText('Link   DV   2026-11-20 — 2026-11-21',45,170);x.fillText('BMS   PD   12/02 (year not specified)',45,270);x.fillStyle='#dbe9e1';x.fillRect(45,340,1000,80);x.fillStyle='#365f4f';x.fillText('Prepare: confirm test list',65,390);return c.toDataURL('image/png').split(',')[1];});
   await writeFile(`${output}/synthetic-schedule.png`,Buffer.from(image,'base64'));
-  await app.evaluate(async({clipboard,ClipboardItem},base64)=>{ globalThis.previousPlannerClipboard=await Promise.all((await clipboard.read()).map(async item=>new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type=>[type,await item.getType(type)])))))); await clipboard.write([new ClipboardItem({'image/png':new Blob([Buffer.from(base64,'base64')],{type:'image/png'})})]); },image);
+  await app.evaluate(async({clipboard,ClipboardItem},base64)=>{ globalThis.previousPlannerClipboard=await Promise.all((await clipboard.read()).filter(item=>item.types.length).map(async item=>new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type=>[type,await item.getType(type)])))))); await clipboard.write([new ClipboardItem({'image/png':new Blob([Buffer.from(base64,'base64')],{type:'image/png'})})]); },image);
   await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');
 
   await page.getByLabel('추출 제목',{exact:true}).waitFor();
