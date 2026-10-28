@@ -63,6 +63,7 @@ import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
 import JournalPanel from "./JournalPanel.jsx";
 import NavigationPanel from "./NavigationPanel.jsx";
+import PluginSettings from "./PluginSettings.jsx";
 import { normalizeNavigation, navigationAction, reconcileNavigation } from "../core/navigation.mjs";
 import { periods, periodicNote, periodicEntries, adjacentEntry, renderTemplate, localDate } from "../core/periodic-notes.mjs";
 import { timestampInsertion, rateJournal, onThisDay, wordStatistics } from "../core/journal-details.mjs";
@@ -231,6 +232,16 @@ export default function App() {
     return () => { clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); };
   }, [active, vault?.id, modal]);
   const [settingsTab, setSettingsTab] = useState("vault");
+  const [pluginData, setPluginData] = useState({ entries: [] });
+  useEffect(() => {
+    setPluginData({ entries: [] });
+    if (!vault?.id || !api?.plugins) return;
+    let mounted = true;
+    const update = value => { if (mounted && value.vaultId === currentVault.current) setPluginData(value); };
+    const unsubscribe = api.onPluginStatus(update);
+    invoke(api.plugins({ vaultId: vault.id })).then(update).catch(error => { if (mounted) setPluginData({ entries: [], error: error.message }); });
+    return () => { mounted = false; unsubscribe(); };
+  }, [vault?.id]);
   useEffect(() => api?.onOpenSettings(() => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) setModal("settings"); }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
@@ -415,6 +426,28 @@ export default function App() {
     setSection((old) => (old === "graph" ? "files" : old));
     setModal(null);
   }, []);
+
+  useEffect(() => {
+    if (!api?.onPluginOpen) return;
+    return api.onPluginOpen(async value => {
+      if (value.vaultId !== currentVault.current) return;
+      try {
+        await flush();
+        if (value.created) {
+          const snapshot = await invoke(api.snapshot());
+          if (value.vaultId !== currentVault.current) return;
+          const created = snapshot.notes.find(note => note.path === value.path);
+          if (created) { revisions.current.set(created.path, created.revision); setRaw(old => [...old.filter(note => note.path !== created.path), created]); }
+        }
+        if (value.vaultId === currentVault.current) openNote(value.path);
+      } catch (error) { setError(error.message); }
+    });
+  }, [flush, openNote]);
+  const hasOriginalPlugins = pluginData.entries.some(entry => entry.phase === 'loaded');
+  useEffect(() => {
+    if (!api?.pluginContext || !vault?.id || !hasOriginalPlugins) return;
+    invoke(api.pluginContext({ vaultId: vault.id, notes: raw.map(note => ({ ...note, cache: { frontmatter: parseMetadata(note.content).properties } })), active, dailyOptions: journalPreferences.daily || {} })).catch(error => setError(error.message));
+  }, [vault?.id, raw, active, journalPreferences, hasOriginalPlugins]);
 
   const updateNavigation = (action) => {
     const next = navigationAction(navigationRef.current, action);
@@ -811,6 +844,7 @@ export default function App() {
     });
   }), [modal === "commands", model.notes, journalPreferences, active, openNote]);
   const commands = [
+    ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
     ...[["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
@@ -1869,7 +1903,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["vault", "보관함"], ["fonts", "글꼴"], ["git", "Git 백업"], ["git-workspace", "Git 변경"], ["history", "백업 복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["git", "Git 백업"], ["git-workspace", "Git 변경"], ["history", "백업 복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={settingsTab === key ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
@@ -1886,6 +1920,10 @@ export default function App() {
             }}
             onForget={(root) => invoke(api.forgetVault({ root }))} />}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
+          {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
+            onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
+            onEnable={(id, enabled) => invoke(api.enablePlugin({ vaultId: vault.id, id, enabled }))}
+            onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
           {settingsTab === "updates" && <UpdateSettings currentVersion={version} onCheck={(includePrerelease) => invoke(api.checkUpdates({ includePrerelease }))} onOpen={openExternal}/>}
           {settingsTab === "git-workspace" && vault.id && <GitWorkspace key={vault.id} busy={busy} backupEnabled={gitStatus.enabled}
             onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: vault.id }))}

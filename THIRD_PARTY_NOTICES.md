@@ -45,7 +45,7 @@ for this integration.
 - `obsidian-bases-expression` 0.3.0-rc.4, https://github.com/callumalpass/obsidian-bases-expression — MIT, Copyright (c) 2026 Callum Alpass. Used as an installed headless expression library. Reviewed source commit: `1af9c81d8648407e56f7889cd78e7c02b4c258eb`. Its packaged LICENSE and Moment dependency license are retained. The Obsidian-specific builder/oracle scripts are not executed by Dynote.
 - JSON Canvas 1.0, https://github.com/obsidianmd/jsoncanvas — MIT, Copyright (c) 2024 Obsidian.md. The public data format informed Dynote's independent format adapter. The Obsidian Canvas editor implementation is not included.
 
-The MIT permission and warranty terms reproduced above apply to the respective MIT works with their own copyright notices. No Obsidian plugin API compatibility or endorsement is implied.
+The MIT permission and warranty terms reproduced above apply to the respective MIT works with their own copyright notices. Only explicitly documented original-plugin versions and workflows are tested; no general Obsidian API compatibility or endorsement is implied. User-imported plugin programs are not bundled with Dynote.
 
 ## Graph engine (v0.3.0)
 

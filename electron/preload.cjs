@@ -4,6 +4,22 @@ contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
     snapshot: () => call("snapshot"),
+    plugins: args => call("plugins-list", args),
+    importPlugin: args => call("plugin-import", args),
+    enablePlugin: args => call("plugin-enable", args),
+    showPlugin: args => call("plugin-show", args),
+    pluginCommand: args => call("plugin-command", args),
+    pluginContext: args => call("plugin-context", args),
+    onPluginStatus: callback => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:plugin-status", listener);
+      return () => ipcRenderer.removeListener("notes:plugin-status", listener);
+    },
+    onPluginOpen: callback => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:plugin-open-note", listener);
+      return () => ipcRenderer.removeListener("notes:plugin-open-note", listener);
+    },
     checkUpdates: (args) => call("check-updates", args),
     openWebViewer: (args) => call("open-web-viewer", args),
     previewComposition: (args) => call("composer-preview", args),

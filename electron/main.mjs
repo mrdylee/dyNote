@@ -22,6 +22,7 @@ import { GitWorkspace } from "../core/git-workspace.mjs";
 import { checkReleaseInformation } from "../core/update-information.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
+import { PluginController } from "./plugin-controller.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ let restoring = false;
 let activeMutations = 0;
 let gitBackup;
 let copilot;
+let plugins;
 
 function validateSender(event) {
   if (
@@ -75,9 +77,11 @@ async function selectVault(root) {
   await copilot?.cancel();
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
+  await plugins?.close();
   await registry.select(selected.root);
   vault = selected; vaultError = "";
   await gitBackup.open(vault);
+  await plugins?.activate(vault);
   return snapshot;
 }
 
@@ -143,7 +147,11 @@ app
             },
           });
         }
-        const file = assetPath(request.url, dist);
+        if (/^plugin-[a-f0-9]{16}-[a-z0-9][a-z0-9-]{0,79}$/.test(url.host)) {
+          if (url.pathname !== "/plugin.html" && !url.pathname.startsWith("/assets/")) return new Response("Forbidden", { status: 403 });
+          url.host = "app";
+        }
+        const file = assetPath(url.href, dist);
         const mime = {
           ".html": "text/html; charset=utf-8",
           ".js": "text/javascript",
@@ -239,7 +247,24 @@ app
     window.webContents.on("did-fail-load", (_event, code, text) =>
       console.error("Load failed:", code, text),
     );
+    plugins = new PluginController({
+      directory: path.join(app.getPath("userData"), "plugins"), BrowserWindow, ipcMain,
+      getVault: () => vault,
+      onStatus: value => { if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-status", value); },
+      onOpen: value => { if (value.created) gitBackup.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
+    });
     for (const [name, action] of Object.entries({
+      "plugins-list": args => { checkVault(args); return plugins.status(); },
+      "plugin-import": async args => {
+        checkVault(args);
+        const selected = await dialog.showOpenDialog(window, { title: "Obsidian 플러그인 폴더 가져오기", properties: ["openDirectory"] });
+        if (selected.canceled) return null;
+        checkVault(args); return plugins.import(selected.filePaths[0]);
+      },
+      "plugin-enable": async args => { checkVault(args); if (args.enabled === true) await plugins.enable(args.id); else await plugins.disable(args.id); return plugins.status(); },
+      "plugin-show": args => { checkVault(args); plugins.show(args.id, args.settings === true); },
+      "plugin-command": args => { checkVault(args); plugins.execute(args.id, args.command); },
+      "plugin-context": args => { checkVault(args); plugins.update({ notes: args.notes, active: args.active, dailyOptions: args.dailyOptions }); },
       "copilot-status": () => copilot.status(),
       "check-updates": (args) => checkReleaseInformation(app.getVersion(), args?.includePrerelease === true),
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
@@ -413,10 +438,11 @@ app
           if (locked) { activeMutations--; if (exclusive) restoring = false; }
         }
       });
-    ipcMain.on("notes:close-ready", (event) => {
+    ipcMain.on("notes:close-ready", async (event) => {
       try {
         validateSender(event);
         if (restoring) return;
+        await plugins.close();
         closeReady = true;
         window.close();
       } catch {
@@ -437,6 +463,7 @@ app
       }, 1500);
     });
     await window.loadURL("notes://app/index.html");
+    await plugins.activate(vault);
   })
   .catch((error) => {
     console.error(error);
@@ -446,5 +473,12 @@ app
 app.on("window-all-closed", async () => {
   gitBackup?.close();
   await Promise.race([Promise.allSettled([copilot?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  app.quit();
+});
+
+app.on("before-quit", async event => {
+  if (!plugins?.instances.size) return;
+  event.preventDefault();
+  await plugins.close();
   app.quit();
 });
