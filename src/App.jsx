@@ -18,6 +18,7 @@ import {
   Link2,
   List,
   LoaderCircle,
+  MessageCircle,
   Network,
   PanelRight,
   PencilLine,
@@ -1236,7 +1237,7 @@ export default function App() {
                 active={right && rightTab === "copilot"}
                 onClick={() => { setRight(true); setRightTab("copilot"); }}
               >
-                <Sparkles size={16} />
+                <MessageCircle size={16} />
               </IconButton>
               <IconButton
                 label="문서 정보 패널"

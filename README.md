@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.7.0 프리릴리스는 달력·일지, 목록·마인드맵·Mermaid 편집, PDF 주석, Git 작업과 기본 편집 기능을 추가합니다. [변경사항과 검증 범위](docs/RELEASE-NOTES-0.7.0.md)를 확인하세요. v0.6.3의 그래프 드래그 수정도 포함합니다.
+v0.8.0 프리릴리스는 원본 Recent Files·Calendar 플러그인의 제한된 실행 호스트와 AI 채팅 말풍선 아이콘을 추가합니다. [변경사항과 검증 범위](docs/RELEASE-NOTES-0.8.0.md)를 확인하세요. v0.7.0의 달력·일지, 목록·마인드맵·Mermaid 편집, PDF 주석, Git 작업과 v0.6.3의 그래프 드래그 수정도 포함합니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -10,11 +10,11 @@ v0.7.0 프리릴리스는 달력·일지, 목록·마인드맵·Mermaid 편집, 
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.7.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.8.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.7.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.8.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -84,7 +84,7 @@ npm start
 
 Copilot 패널은 공식 SDK로 계정 상태와 모델을 확인합니다. 질문을 보내면 선택한 문서 내용과 대화를 Copilot 서비스에 전송하며 계정의 사용량 한도가 적용됩니다. AI의 파일·명령 실행 도구는 비활성화하고, 수정은 사용자가 확인한 뒤 기존 저장 절차로 적용합니다. 실제 계정 로그인 완료와 모델 응답은 별도 사용자 인증 검증이 필요합니다.
 
-ZIP 가져오기, Git 자동 pull·충돌 해결, 모바일, Obsidian 플러그인 전체 호환은 지원하지 않습니다. 로컬 개발본의 원본 플러그인 실행 범위는 [별도 검증 기록](docs/verification/original-plugin-runtime.md)을 확인하세요. Live Preview는 기본 서식·링크·체크박스·로컬 이미지부터 지원합니다. 표 셀 직접 편집, 수식·Mermaid·PDF·콜아웃의 편집 중 렌더링은 포함하지 않으며 읽기·분할 보기에서 기존 기능을 이용할 수 있습니다. Markdown 전체 규격 및 Obsidian의 모든 확장 문법과 동일하지 않습니다. 원자적 교체는 일반적인 중간 저장 손상을 줄이지만 전원 장애에 대한 디스크 내구성이나 악성 로컬 프로세스의 경로 교체 경쟁까지 보장하지 않습니다.
+ZIP 가져오기, Git 자동 pull·충돌 해결, 모바일, Obsidian 플러그인 전체 호환은 지원하지 않습니다. 원본 플러그인 실행 범위는 [별도 검증 기록](docs/verification/original-plugin-runtime.md)을 확인하세요. Live Preview는 기본 서식·링크·체크박스·로컬 이미지부터 지원합니다. 표 셀 직접 편집, 수식·Mermaid·PDF·콜아웃의 편집 중 렌더링은 포함하지 않으며 읽기·분할 보기에서 기존 기능을 이용할 수 있습니다. Markdown 전체 규격 및 Obsidian의 모든 확장 문법과 동일하지 않습니다. 원자적 교체는 일반적인 중간 저장 손상을 줄이지만 전원 장애에 대한 디스크 내구성이나 악성 로컬 프로세스의 경로 교체 경쟁까지 보장하지 않습니다.
 
 ## 패키징
 
@@ -129,13 +129,13 @@ REA의 관찰 범위와 한계: [REA 분석 기록](docs/REA-EVIDENCE.md). Elect
 
 Canvas·Bases는 v0.3.0에서 기본 기능을 구현했습니다. 원본과의 전체 호환성이나 대규모 보관함 성능을 보장하지 않습니다. [참고 코드 검토](docs/UPSTREAM-REVIEW.md), [v0.2.0 검증](docs/VERIFICATION.md)을 확인하세요.
 
-## 원본 플러그인 실행 · 로컬 개발본
+## 원본 플러그인 실행 · v0.8.0
 
 **설정 → 플러그인 → 플러그인 폴더 가져오기**에서 `manifest.json`, `main.js`, 선택적 `styles.css`가 있는 폴더를 가져온 뒤 켭니다. 원본 프로그램을 변경하지 않고 별도 창에서 실행하며, 명령은 Dynote 명령 팔레트에도 나타납니다. 설정과 켜짐 상태는 보관함별로 저장합니다. 기존 개인 `data.json`은 가져오지 않습니다.
 
 Recent Files **1.7.10**과 Calendar **1.5.10**의 대표 동작을 macOS에서 검증했습니다. Markdown 문서 읽기·열기·새 문서 생성과 해당 플러그인의 설정/화면을 연결한 제한된 API입니다. Node, 외부 네트워크, 다른 플러그인과의 연동, 첨부파일 추적·미리보기·드래그·컨텍스트 삭제 등은 검증 범위에 포함되지 않습니다. 지원하지 않는 모듈/API는 실행 오류로 표시할 수 있습니다. [REA 근거와 실행 검증](docs/verification/original-plugin-runtime.md).
 
-이 기능은 `feat/obsidian-plugin-runtime`의 로컬 작업입니다. 공개된 v0.7.0에는 포함되지 않았고 Windows 실행은 검증하지 않았습니다.
+v0.8.0부터 포함합니다. 제3자 플러그인 프로그램은 배포 파일에 포함하지 않으며 사용자가 폴더를 별도로 가져옵니다. Windows 실행은 검증하지 않았습니다.
 
 ## 보관함과 날짜별 복원
 
