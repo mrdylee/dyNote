@@ -64,7 +64,7 @@ export class CopilotController {
       try {
         result.models = (await client.listModels())
           .filter((model) => model.policy?.state !== "disabled")
-          .map((model) => ({ id: model.id, name: model.name || model.id }));
+          .map((model) => ({ id: model.id, name: model.name || model.id, vision: model.capabilities?.supports?.vision === true }));
       } catch (error) { result.error = message(error); }
     }
     return result;
@@ -90,6 +90,8 @@ export class CopilotController {
       if (!status.authenticated) throw new Error("먼저 GitHub Copilot에 연결해 주세요.");
       if (!status.models.some((model) => model.id === args.model))
         throw new Error(status.error || "선택한 모델을 사용할 수 없습니다. 연결 상태를 새로 확인해 주세요.");
+      if (args.image && !status.models.find(model => model.id === args.model)?.vision)
+        throw new Error('이미지를 지원하는 모델을 선택해 주세요.');
       const tools = args.mode === "agent" ? noteTools({ args, getNotes: this.getNotes, emit, canceled: () => job.canceled || !!job.failure || this.closed }) : [];
       job.session = await client.createSession(sessionOptions(args.model, args.mode, tools));
       if (job.canceled) return;
@@ -112,6 +114,7 @@ export class CopilotController {
       });
       const result = await job.session.sendAndWait({
         prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history }),
+        ...(args.image ? { attachments: [{ type: 'blob', ...args.image, displayName: 'Schedule capture' }] } : {}),
       }, args.mode === "agent" ? 240000 : 120000);
       if (job.canceled) return;
       if (job.failure) throw new Error(job.failure);

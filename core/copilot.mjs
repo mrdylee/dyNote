@@ -71,7 +71,16 @@ export function prepareRequest(args) {
     return { role: item.role, content };
   });
   if (historyBytes > 32768) throw new Error("대화가 길어졌습니다. 새 대화를 시작해 주세요.");
-  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, vaultAccess: args.vaultAccess === true };
+  let image;
+  if (args.image != null) {
+    const value = args.image;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(value.mimeType) ||
+        typeof value.data !== 'string' || !value.data.length || value.data.length > 8 * 1024 * 1024 ||
+        value.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.data))
+      throw new Error('이미지는 PNG/JPEG/WebP, 최대 6MB로 보내 주세요.');
+    image = { mimeType: value.mimeType, data: value.data };
+  }
+  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, vaultAccess: args.vaultAccess === true, ...(image ? { image } : {}) };
 }
 
 export function sessionOptions(model, mode, tools = []) {

@@ -29,7 +29,7 @@ for (const [platform, relative] of [
   const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
   await access(path.join(`${archive}.unpacked`, runtime, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"));
   await access(path.join(`${archive}.unpacked`, runtime, "runtime.node"));
-  assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src)\//.test(name)));
+  assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src|examples)\//.test(name)));
   assert.ok(!contents.includes("/HANDOFF.md"), "local session handoff must not ship");
   for (const file of sources)
     assert.deepEqual(extractFile(archive, file), await readFile(file), `${platform}: ${file}`);

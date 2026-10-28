@@ -7,6 +7,29 @@ const note = { path: "BMS.md", content: "# 시험\r\n\r\n원문\r\n끝" };
 const context = { kind: "document", path: note.path, content: note.content };
 const request = (extra = {}) => ({ requestId: "request-1", vaultId: "vault-1", model: "test-model", mode: "chat", prompt: "요약해 줘", context, history: [], ...extra });
 
+test('image requests accept bounded image blobs and reject invalid media, paths and oversize data', () => {
+  const image={mimeType:'image/png',data:'iVBORw0KGgo='};
+  assert.deepEqual(prepareRequest(request({image})).image,image);
+  for(const bad of [{mimeType:'text/plain',data:'eA=='},{mimeType:'image/png',data:'file:///secret'}, {mimeType:'image/png',data:'A'.repeat(12*1024*1024)}])
+    assert.throws(()=>prepareRequest(request({image:bad})),/이미지/);
+});
+
+test('vision request forwards blob bytes to SDK without file access', async () => {
+  let sent;
+  const f=fixture({respond:async args=>{sent=args;return {data:{content:'{"items":[]}'}};}});
+  f.client.listModels=async()=>[{id:'test-model',capabilities:{supports:{vision:true}}}];
+  f.controller.send(request({image:{mimeType:'image/png',data:'iVBORw0KGgo='}}));
+  await f.controller.settled();
+  assert.equal(sent.attachments[0].type,'blob');assert.equal(sent.attachments[0].data,'iVBORw0KGgo=');
+  assert.equal(sent.attachments[0].path,undefined);
+  await f.controller.close();
+});
+
+test('image inference fails clearly for a text-only model', async () => {
+  const f=fixture();f.controller.send(request({image:{mimeType:'image/png',data:'iVBORw0KGgo='}}));await f.controller.settled();
+  assert.match(f.events.find(e=>e.type==='error')?.error??'',/이미지/);await f.controller.close();
+});
+
 test("selected context sends only selected text and preserves CRLF on application", () => {
   const from = note.content.indexOf("원문"), to = from + 2;
   const captured = captureContext({ vaultId: "vault-1", note, scope: "selection", selection: { path: note.path, source: note.content, from, to } });
@@ -100,7 +123,7 @@ function fixture({ start, respond } = {}) {
 
 test("controller streams one bounded request and deletes its temporary session", async () => {
   const f = fixture();
-  assert.deepEqual(await f.controller.status(), { authenticated: true, login: "test-user", models: [{ id: "test-model", name: "Test model" }], error: "" });
+  assert.deepEqual(await f.controller.status(), { authenticated: true, login: "test-user", models: [{ id: "test-model", name: "Test model", vision: false }], error: "" });
   f.controller.send(request());
   await f.controller.settled();
   assert.equal(f.events[0].type, "delta");

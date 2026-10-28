@@ -1,0 +1,28 @@
+[parse.parsers.md]
+flavour = "myst"
+
+[needs]
+schema_definitions_from_json = "schemas.json"
+
+[[needs.types]]
+directive = "req"
+title = "Requirement"
+prefix = "REQ"
+
+[[needs.types]]
+directive = "spec"
+title = "Design"
+prefix = "DES"
+
+[[needs.types]]
+directive = "test"
+title = "Test"
+prefix = "TEST"
+
+[needs.links.tests]
+outgoing = "Tests"
+incoming = "Tested by"
+
+[needs.links.implements]
+outgoing = "Implements"
+incoming = "Implemented by"

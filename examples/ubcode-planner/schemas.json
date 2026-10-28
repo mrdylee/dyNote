@@ -1,0 +1,11 @@
+{
+  "schemas": [
+    {
+      "id": "requirement-needs-test",
+      "severity": "violation",
+      "message": "Every requirement needs at least one linked test.",
+      "select": {"properties": {"type": {"const": "req"}}, "required": ["type"]},
+      "validate": {"network_back": {"tests": {"contains": {"local": {"properties": {"type": {"const": "test"}}}}, "minContains": 1}}}
+    }
+  ]
+}

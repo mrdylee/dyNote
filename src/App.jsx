@@ -78,6 +78,8 @@ import ComposerDialog from "./ComposerDialog.jsx";
 import NoteHover from "./NoteHover.jsx";
 import { convertMindmap } from "../core/mindmap.mjs";
 import { pdfBacklinks } from "../core/pdf-links.mjs";
+import Planner from "./Planner.jsx";
+import { BOARD_PATH } from "../core/planner.mjs";
 
 const api = window.notes;
 const invoke = async (result) => {
@@ -424,7 +426,7 @@ export default function App() {
     setEditorJump(null);
     setAttachment(null);
     setTabs((old) => (old.includes(path) ? old : [...old, path]));
-    setSection((old) => (old === "graph" ? "files" : old));
+    setSection((old) => (["graph", "planner"].includes(old) ? "files" : old));
     setModal(null);
   }, []);
 
@@ -848,7 +850,7 @@ export default function App() {
     ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
-    ...[["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
+    ...[["planner", "개발 플래너"], ["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
     { id: "bookmark", label: "현재 문서 북마크 전환", disabled: !note && !structured, run: () => { updateNavigation({ type: "bookmark", path: active }); setModal(null); } },
     { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
     ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
@@ -932,6 +934,7 @@ export default function App() {
             <IconButton label="최근 파일" active={section === "recent"} onClick={() => setSection("recent")}><History size={20}/></IconButton>
             <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
             <IconButton label="달력과 일지" active={section === "journal"} onClick={() => setSection("journal")}><CalendarDays size={20}/></IconButton>
+            <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><Sparkles size={20}/></IconButton>
             <IconButton
               label="파일 목록"
               active={section === "files"}
@@ -1263,7 +1266,19 @@ export default function App() {
           )}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "graph" ? (
+            {section === "planner" ? <Planner key={vault.id} api={api} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
+              onOpen={openNote}
+              onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
+              onSave={async (content, expectedRevision) => {
+                const vaultId=vault.id;
+                await flush();
+                if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다.");
+                if((revisions.current.get(BOARD_PATH)??null)!==expectedRevision)throw new Error("일정 문서가 변경되었습니다. 다시 열어 주세요.");
+                const saved=await invoke(expectedRevision===null ? api.createNote({vaultId,path:BOARD_PATH,content}) : api.saveNote({vaultId,path:BOARD_PATH,content,revision:expectedRevision}));
+                if(currentVault.current!==vaultId)return;
+                revisions.current.set(saved.path,saved.revision);
+                setRaw(old=>[...old.filter(n=>n.path!==saved.path),{...saved,content}]);
+              }} /> : section === "graph" ? (
               <Graph
                 key={vault.id}
                 fontFamily={fontVariables(fonts)["--ui-font"]}

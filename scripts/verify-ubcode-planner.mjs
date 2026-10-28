@@ -1,0 +1,18 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const cli=path.resolve(process.env.UBCODE_BINARY||'output/research/ubcode/ubc');
+const out=path.resolve('output/research/ubcode/evaluation');await mkdir(out,{recursive:true});
+const base=path.join(out,'base'),changed=path.join(out,'changed'),missing=path.join(out,'missing');
+for(const directory of [base,changed,missing])await cp('examples/ubcode-planner',directory,{recursive:true});
+const run=(cwd,args)=>{const result=spawnSync(cli,args,{cwd,encoding:'utf8'});return {exit:result.status,stdout:result.stdout,stderr:result.stderr};};
+const good=run(base,['check','--output-format','json']);assert.equal(good.exit,0,good.stderr+good.stdout);assert.equal(JSON.parse(good.stdout).summary.errors,0);
+const original=await readFile(path.join(base,'index.md'),'utf8');
+await writeFile(path.join(missing,'index.md'),original.replace(':tests: REQ_YEAR\n',''));
+const bad=run(missing,['check','--output-format','json']);assert.notEqual(bad.exit,0);assert.match(bad.stdout,/REQ_YEAR/);assert.match(bad.stdout,/needs.schema_network_violation/);
+await writeFile(path.join(changed,'index.md'),original.replace('The user can edit extracted dates before registering a milestone.','The user can edit extracted dates AND inspect source text before registering a milestone.'));
+const diff=run(base,['diff','--project',base,'--project',changed,'--impact','--impact-depth','2']);
+await writeFile(path.join(out,'baseline.json'),good.stdout);await writeFile(path.join(out,'missing-link.json'),bad.stdout);await writeFile(path.join(out,'impact.txt'),diff.stdout+diff.stderr);
+const report={version:execFileSync(cli,['--version'],{encoding:'utf8'}).trim(),requirements:3,designs:2,tests:3,baselineExit:good.exit,missingTestExit:bad.exit,missingRequirementIdentified:true,impactExit:diff.exit,impactVerified:diff.exit===0&&/REQ_REVIEW/.test(diff.stdout)&&/TEST_REVIEW/.test(diff.stdout),licensePurchased:false};
+await writeFile(path.join(out,'verification.json'),JSON.stringify(report,null,2));console.log(report);
