@@ -17,12 +17,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ae3f292ff6712dd1d0119897be3f8bbd2a9d4281
+          ref: 8f90a5d55c500ffcb9fe1d23c2f6d0c65b8020bf
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
           cache: npm
+      - name: Verify only portable test expectations differ from release tag
+        run: |
+          $changed = @(git diff --name-only v0.11.0 HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -ne 'tests/security.test.mjs') { throw 'Product source differs from v0.11.0' }
       - name: Install locked dependencies
         run: npm ci
       - name: Unit tests on Windows
