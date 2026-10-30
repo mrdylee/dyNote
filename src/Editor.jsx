@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
@@ -12,6 +12,8 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  undo,
+  redo,
   indentWithTab,
 } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -27,7 +29,7 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
-import { outlineFolding, runOutlineCommand } from "./editorCommands.mjs";
+import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor } from "./editorCommands.mjs";
 
 export default function Editor({
   note,
@@ -41,10 +43,12 @@ export default function Editor({
   jump,
   readOnly = false,
   fontSettings,
+  onFontSettings,
   onSelection,
   editorRef,
   pendingOriginal,
 }) {
+  const [textColor, setTextColor] = useState("#c62828");
   const host = useRef(null);
   const editor = useRef(null);
   const callback = useRef(onChange);
@@ -113,6 +117,10 @@ export default function Editor({
           syntaxHighlighting(defaultHighlightStyle),
           EditorView.lineWrapping,
           keymap.of([
+            { key: "Mod-b", run: view => runMarkdownFormat(view, "bold") },
+            { key: "Mod-i", run: view => runMarkdownFormat(view, "italic") },
+            { key: "Mod-Shift-x", run: view => runMarkdownFormat(view, "strike") },
+            { key: "Mod-e", run: view => runMarkdownFormat(view, "code") },
             { key: "Alt-ArrowUp", run: view => runOutlineCommand(view, "up") },
             { key: "Alt-ArrowDown", run: view => runOutlineCommand(view, "down") },
             { key: "Tab", run: view => runOutlineCommand(view, "indent") },
@@ -197,6 +205,13 @@ export default function Editor({
       if (editorRef?.current === view) editorRef.current = null;
     };
   }, []);
+  useEffect(() => window.notes?.onFormatEditor?.(format => {
+    const view = editor.current;
+    if (!view?.hasFocus || view.state.readOnly) return;
+    if (format === "undo") undo(view);
+    else if (format === "redo") redo(view);
+    else runMarkdownFormat(view, format);
+  }), []);
   useEffect(() => {
     editor.current?.dispatch({
       effects: readonly.current.reconfigure(EditorState.readOnly.of(readOnly)),
@@ -254,5 +269,17 @@ export default function Editor({
       view.focus();
     }
   }, [jump, note.path]);
-  return <div className="code-editor" ref={host} />;
+  return <div className="code-editor">
+    <div className="format-toolbar" role="toolbar" aria-label="Markdown 서식">
+      {[["bold", "굵게", "B"], ["italic", "기울임", "I"], ["strike", "취소선", "S"], ["code", "인라인 코드", "</>"]].map(([format, label, text]) =>
+        <button key={format} className={`format-${format}`} type="button" aria-label={label} title={label} disabled={readOnly}
+          onMouseDown={event => event.preventDefault()} onClick={() => runMarkdownFormat(editor.current, format)}>{text}</button>)}
+      <label className="text-color-picker">글자 색상<input aria-label="글자 색상" type="color" value={textColor} disabled={readOnly}
+        onInput={event => setTextColor(event.currentTarget.value)} /></label>
+      <button type="button" aria-label="글자 색상 적용" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, textColor)}>색상 적용</button>
+      <button type="button" aria-label="글자 색상 지우기" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, null)}>기본색</button>
+      <button type="button" onClick={onFontSettings}>글꼴·크기</button>
+    </div>
+    <div className="editor-host" ref={host} />
+  </div>;
 }

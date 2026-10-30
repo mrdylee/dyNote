@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
-import { readBoard, BOARD_PATH } from '../core/planner.mjs';
+import { readBoard, BOARD_PATH, captureAuditPrompt } from '../core/planner.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const output=process.env.DYNOTE_PLANNER_OUTPUT||'output/playwright/planner';
 await mkdir(output,{recursive:true});
@@ -14,17 +14,19 @@ const start=async()=>{
   page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1440,960));
   await page.getByRole('button',{name:'개발 플래너',exact:true}).click();
-  await app.evaluate(({ipcMain})=>{
+  await app.evaluate(({ipcMain},auditPrompt)=>{
     globalThis.plannerRequests=[];
     ipcMain.removeHandler('notes:copilot-status');ipcMain.handle('notes:copilot-status',()=>({ok:true,value:{authenticated:true,models:[{id:'fixture',name:'Fixture vision',vision:true}]}}));
     ipcMain.removeHandler('notes:copilot-send');ipcMain.handle('notes:copilot-send',(event,args)=>{
       globalThis.plannerRequests.push({image:!!args.image,mode:args.mode,context:args.context.kind});
-      const result=args.image?{items:[{title:'DV 준비 검토',target:'Link',stage:'DV',start:'2026-11-20',end:'2026-11-21',sourceText:'Link DV 2026-11-20 — 21',bbox:[.04,.25,.85,.2],tasks:['시험 목록 확정']},{title:'BMS 설계 확인',target:'BMS',stage:'PD',start:'',end:'',uncertainty:'연도 미표기',sourceText:'BMS PD 12/02',tasks:[]}]}:{options:[{title:'시험부터 정리',reason:'검증 기준을 먼저 정합니다.',tradeoff:'초기 정리 시간이 필요합니다.',tasks:['시험 조건 검토']},{title:'설계부터 검토',reason:'설계 변경을 먼저 확인합니다.',tradeoff:'시험 준비가 늦어질 수 있습니다.',tasks:['변경 목록 정리']}]};
+      let result=args.image?{items:[{title:'DV 준비 검토',target:'Link',stage:'DV',start:'2026-11-20',end:'2026-11-21',sourceText:'Link DV 2026-11-20 — 21',bbox:[.04,.25,.85,.2],tasks:['시험 목록 확정']},{title:'BMS 설계 확인',target:'BMS',stage:'PD',start:'',end:'',uncertainty:'연도 미표기',sourceText:'BMS PD 12/02',tasks:[]}]}:{options:[{title:'시험부터 정리',reason:'검증 기준을 먼저 정합니다.',tradeoff:'초기 정리 시간이 필요합니다.',tasks:['시험 조건 검토']},{title:'설계부터 검토',reason:'설계 변경을 먼저 확인합니다.',tradeoff:'시험 준비가 늦어질 수 있습니다.',tasks:['변경 목록 정리']}]};
+      if(args.prompt===auditPrompt)result={groups:[...new Set(result.items.map(row=>row.target||'대상 미지정'))].map(target=>({target,labels:result.items.filter(row=>(row.target||'대상 미지정')===target).map(row=>row.sourceText||row.title),items:result.items.filter(row=>(row.target||'대상 미지정')===target)}))};
       setTimeout(()=>event.sender.send('notes:copilot-event',{requestId:args.requestId,type:'done',content:JSON.stringify(result)}),120);
       return {ok:true,value:{requestId:args.requestId}};
     });
-  });
+  },captureAuditPrompt);
 };
+const confirmSource=async()=>{for(const box of await page.getByRole('checkbox',{name:/원본 대조 확인$/}).all())await box.check();};
 const disk=async predicate=>{let board;for(let i=0;i<60;i++){try{board=readBoard(await readFile(`${vault}/${BOARD_PATH}`,'utf8'));if(predicate(board))return board;}catch{}await page.waitForTimeout(80);}assert.ok(predicate(board),JSON.stringify(board));return board;};
 try{
   await start();await page.screenshot({path:`${output}/empty.png`});
@@ -38,10 +40,10 @@ try{
   assert.equal(await page.getByLabel('추출 시작일',{exact:true}).inputValue(),'2026-11-20');
   await page.getByLabel('추출 종료일',{exact:true}).fill('2026-11-22');
   await page.screenshot({path:`${output}/capture-review.png`});
-  await page.getByRole('button',{name:'선택한 2개 등록',exact:true}).click();
+  await confirmSource();await page.getByRole('button',{name:'선택한 2개 등록',exact:true}).click();
   let board=await disk(b=>b.items.length===2);assert.equal(board.items[0].end,'2026-11-22');assert.equal(board.items[1].start,'');assert.match(board.items[1].uncertainty,/연도/);assert.equal(board.items[0].tasks[0].origin,'source');
   checks.push('clipboard image → actual attachment → editable extraction review → Markdown registration');
-  await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');await page.getByLabel('추출 제목',{exact:true}).waitFor();await page.getByLabel('BMS 설계 확인 등록 선택',{exact:true}).uncheck();await page.getByRole('button',{name:'선택한 1개 등록',exact:true}).click();await page.locator('.planner-notice').filter({hasText:'0개 등록 · 중복 1개 제외'}).waitFor();await disk(b=>b.items.length===2);checks.push('selection review and duplicate capture preserve user-corrected dates');
+  await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');await page.getByLabel('추출 제목',{exact:true}).waitFor();await page.getByLabel('BMS 설계 확인 등록 선택',{exact:true}).uncheck();await confirmSource();await page.getByRole('button',{name:'선택한 1개 등록',exact:true}).click();await page.locator('.planner-notice').filter({hasText:'0개 등록 · 중복 1개 제외'}).waitFor();await disk(b=>b.items.length===2);checks.push('selection review and duplicate capture preserve user-corrected dates');
   await page.getByRole('button',{name:/Link DV.*DV 준비 검토/}).click();
   await page.getByRole('textbox',{name:'새 준비 작업',exact:true}).fill('장비 준비');await page.getByRole('button',{name:'준비 작업 추가',exact:true}).click();
   await page.getByRole('combobox',{name:'근거 문서',exact:true}).selectOption('REQ.md');await page.getByRole('button',{name:'근거 연결',exact:true}).click();

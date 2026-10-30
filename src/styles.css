@@ -838,18 +838,11 @@ kbd {
 .context-panel.with-copilot { width: clamp(310px, 28vw, 390px); overflow: hidden; background: #fff; }
 .copilot-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; font-size: 12px; }
 .copilot-panel[hidden], .document-info[hidden] { display: none; }
-.copilot-connection { padding: 9px 14px; border-bottom: 1px solid var(--border); }
-.copilot-account { display: flex; align-items: center; gap: 7px; }
-.copilot-account strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.copilot-account button { border: 0; background: transparent; color: var(--muted); padding: 4px; }
-.copilot-login p { color: var(--muted); line-height: 1.7; margin: 12px 0; }
-.copilot-login .primary-button { font-size: 12px; padding: 9px 14px; }
-.copilot-login .text-action { margin-left: 8px; margin-top: 8px; }
-.copilot-auth { font-size: 11px; line-height: 1.6; margin-bottom: 0; overflow-wrap: anywhere; }
+.copilot-auth { font-size: 11px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
 .copilot-auth.failed { color: #a44140; }
 .copilot-model { flex: 1; min-width: 0; }
 .copilot-model select { width: 100%; }
-.copilot-chat-heading { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px 4px; color: var(--muted); font-size: 10px; }
+.copilot-chat-heading { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 7px 12px; color: var(--muted); font-size: 10px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .copilot-chat-heading button { display: flex; gap: 3px; align-items: center; background: transparent; border: 0; color: var(--muted); font-size: 10px; }
 .copilot-transcript { flex: 1; min-height: 80px; overflow: auto; padding: 12px 16px; scrollbar-width: thin; }
 .copilot-empty { padding: 24px 0; color: #9383b2; }
@@ -1867,3 +1860,39 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .pdf-annotation-tools textarea {min-width: 260px; min-height: 64px;}
 .pdf-annotation-tools button {margin: 4px; padding: 6px 9px; border: 1px solid #d9dfeb; border-radius: 5px;}
 .pdf-annotation-tools input, .pdf-annotation-tools select, .pdf-annotation-tools textarea {padding: 5px; border: 1px solid #ccd5e2; border-radius: 4px;}
+
+.panel-resize { width: 5px; flex: 0 0 5px; cursor: col-resize; touch-action: none; user-select: none; background: transparent; }
+.panel-resize:hover, .panel-resize:focus-visible, .panel-resize:active { background: #c9bce8; outline: none; }
+.code-editor { display: flex; flex-direction: column; }
+.editor-host { flex: 1; min-height: 0; }
+.format-toolbar { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.format-toolbar button { min-width: 30px; padding: 5px 8px; border-radius: 4px; font-size: 12px; }
+.format-toolbar button:hover { background: #eee9f8; }
+.format-bold { font-weight: 700; }
+.format-italic { font-style: italic; }
+.format-strike { text-decoration: line-through; }
+.workspace .document-toolbar { height: auto; min-height: 47px; flex-wrap: wrap; gap: 5px; padding: 7px 16px; }
+.workspace .toolbar-actions { flex-wrap: wrap; }
+
+.text-color-picker { display: inline-flex; align-items: center; gap: 5px; margin-left: 5px; font-size: 12px; }
+.text-color-picker input { width: 30px; height: 25px; padding: 1px; border: 1px solid var(--border); border-radius: 4px; background: white; cursor: pointer; }
+
+.titlebar > .app-version { color: #686370; font-weight: 600; padding: 4px; margin: 0; }
+.app-version small { color: #9698a5; font-size: 10px; font-weight: 400; }
+.app-version-details { font-weight: 600; }
+.copilot-send-status { color: #78628d; font-size: 11px; line-height: 1.6; }
+.copilot-send-status:empty { display: none; }
+.copilot-send-status .text-action { display: block; padding: 3px 0; }
+
+.copilot-heading-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copilot-heading-actions { position: relative; display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.copilot-account-menu { position: static; }
+.copilot-account-menu summary { display: flex; align-items: center; gap: 4px; max-width: 110px; padding: 4px; border-radius: 4px; cursor: pointer; list-style: none; }
+.copilot-account-menu summary::-webkit-details-marker { display: none; }
+.copilot-account-menu summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copilot-account-menu[open] summary, .copilot-account-menu summary:hover { background: var(--soft); color: var(--purple); }
+.copilot-account-options { position: absolute; top: calc(100% + 5px); right: 0; z-index: 30; width: 180px; padding: 10px; background: white; border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 6px 20px #30234320; }
+.copilot-account-options p { margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.copilot-account-options button { width: 100%; padding: 7px 4px; border-radius: 4px; text-align: left; }
+.copilot-account-options button:hover { background: var(--soft); }
+.copilot-auth-notice { padding: 6px 12px; border-bottom: 1px solid var(--border); }

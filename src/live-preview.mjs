@@ -1,3 +1,4 @@
+import { colorInlineParser, readColorSpan } from "../core/text-color.mjs";
 import { Facet, RangeSet, RangeValue, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
@@ -9,7 +10,7 @@ const { unescapeAll } = new MarkdownIt().utils;
 // This grammar participates in Markdown parsing, so escaped brackets and code
 // never become wiki links through a second, unrelated regex pass.
 export const wikiSyntax = {
-  defineNodes: ["WikiLink", "WikiEmbed"],
+  defineNodes: ["WikiLink", "WikiEmbed", "TextColor", "ColorMark"],
   parseInline: [{
     name: "WikiLink", before: "Link",
     parse(cx, next, pos) {
@@ -17,7 +18,7 @@ export const wikiSyntax = {
       const match = /^(!?)\[\[([^\]\n]+)\]\]/.exec(cx.slice(pos, cx.end));
       return match ? cx.addElement(cx.elt(match[1] ? "WikiEmbed" : "WikiLink", pos, pos + match[0].length)) : -1;
     },
-  }],
+  }, colorInlineParser],
 };
 
 const config = Facet.define({ combine: (values) => values[0] ?? {} });
@@ -129,7 +130,13 @@ function decorate(state) {
       }
       if (skipChildren) return false;
     };
-    if (formatting[name]) {
+    if (name === "TextColor") {
+      const span = readColorSpan(source, from);
+      if (span) {
+        mark(span.contentFrom, span.contentTo, "color", { style: `color:${span.color}` });
+        hide(from, span.contentFrom); hide(span.contentTo, to);
+      }
+    } else if (formatting[name]) {
       mark(from, to, formatting[name]);
       for (let child = node.firstChild; child; child = child.nextSibling) {
         if (/^(?:Emphasis|Strikethrough|Code)Mark$/.test(child.name)) hide(child.from, child.to);

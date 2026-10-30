@@ -1,3 +1,4 @@
+import { textWithoutColorMarkup } from "./text-color.mjs";
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
 import { katex } from "@mdit/plugin-katex";
@@ -101,7 +102,7 @@ export function buildKnowledge(raw) {
           level: Number(token.tag.slice(1)),
           text: tokens[i + 1]?.content ?? "",
           plainText,
-          id: headingId(tokens[i + 1]?.content ?? ""),
+          id: headingId(textWithoutColorMarkup(tokens[i + 1]?.content ?? "")),
           line: (token.map?.[0] ?? 0) + meta.offset,
         });
       }

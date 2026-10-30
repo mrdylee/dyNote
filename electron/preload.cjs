@@ -47,9 +47,14 @@ contextBridge.exposeInMainWorld(
     previewGit: (args) => call("git-preview", args),
     restoreGit: (args) => call("git-restore", args),
     onOpenSettings: (callback) => {
-      const listener = () => callback();
+      const listener = (_event, tab) => callback(tab);
       ipcRenderer.on("notes:open-settings", listener);
       return () => ipcRenderer.removeListener("notes:open-settings", listener);
+    },
+    onFormatEditor: callback => {
+      const listener = (_event, format) => callback(format);
+      ipcRenderer.on("notes:format-editor", listener);
+      return () => ipcRenderer.removeListener("notes:format-editor", listener);
     },
     createNote: (args) => call("create", args),
     openOrCreateNote: (args) => call("open-or-create", args),

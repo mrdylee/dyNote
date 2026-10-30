@@ -50,6 +50,8 @@ import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
+import PanelResize from "./PanelResize.jsx";
+import { normalizePanelWidths, fitPanelWidths } from "../core/panel-widths.mjs";
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
@@ -222,6 +224,18 @@ export default function App() {
   const [editorJump, setEditorJump] = useState(null);
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
+  const [panelWidths, setPanelWidths] = useState(() => normalizePanelWidths(stored("dynote.panelWidths", null)));
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
+  useEffect(() => { persist("dynote.panelWidths", panelWidths); }, [panelWidths]);
+  useEffect(() => {
+    const resize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  const rightVisible = right && section !== "ess";
+  const panelLayout = fitPanelWidths(panelWidths, viewportWidth, rightVisible);
+  const panelBudget = Math.max(1000, viewportWidth) - 64 - 360 - (rightVisible ? 10 : 5);
+  const resizePanel = side => width => setPanelWidths(old => normalizePanelWidths({ ...old, [side]: width }));
   const [rightTab, setRightTab] = useState("copilot");
   const [editorSelection, setEditorSelection] = useState(null);
   const editorView = useRef(null);
@@ -250,7 +264,7 @@ export default function App() {
     invoke(api.plugins({ vaultId: vault.id })).then(update).catch(error => { if (mounted) setPluginData({ entries: [], error: error.message }); });
     return () => { mounted = false; unsubscribe(); };
   }, [vault?.id]);
-  useEffect(() => api?.onOpenSettings(() => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) setModal("settings"); }), [busy]);
+  useEffect(() => api?.onOpenSettings(tab => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) { if (tab === "fonts") setSettingsTab("fonts"); setModal("settings"); } }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
   const [commandQuery, setCommandQuery] = useState("");
@@ -930,7 +944,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="titlebar">
-        <span>Dynote</span>
+        <button className="app-version" aria-label="앱 버전 정보" title="Dynote 버전 정보" onClick={() => setModal("about")}>Dynote <small>v{version}</small></button>
         <div>
           <span className="local-dot" />내 기기에 저장되는 지식 공간
         </div>
@@ -1001,7 +1015,7 @@ export default function App() {
             <span className="avatar">DN</span>
           </div>
         </nav>
-        <aside className="navigator">
+        <aside className="navigator" style={{ width: panelLayout.left }}>
           <div className="vault-switch">
             <div className="vault-icon">
               <FolderOpen size={18} />
@@ -1141,6 +1155,7 @@ export default function App() {
             <span className="count">{raw.length}</span>
           </div>
         </aside>
+        <PanelResize side="left" width={panelLayout.left} max={panelBudget - (rightVisible ? panelLayout.right : 0)} onChange={resizePanel("left")} />
         <main className="workspace">
           <div className="tabbar">
             <div className="tabs">
@@ -1397,6 +1412,7 @@ export default function App() {
                       key={note.path}
                       pendingOriginal={pendingEdit?.original}
                       fontSettings={fonts}
+                      onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
                       editorRef={editorView}
                       onSelection={setEditorSelection}
                       note={note}
@@ -1477,8 +1493,9 @@ export default function App() {
             </div>
           </footer>
         </main>
-        {right && section !== "ess" && (
-          <aside className={`context-panel ${rightTab === "copilot" ? "with-copilot" : ""}`}>
+        {rightVisible && (<>
+          <PanelResize side="right" width={panelLayout.right} max={panelBudget - panelLayout.left} onChange={resizePanel("right")} />
+          <aside className={`context-panel ${rightTab === "copilot" ? "with-copilot" : ""}`} style={{ width: panelLayout.right }}>
             <div className="context-tabs" role="tablist" aria-label="오른쪽 패널">
               <button role="tab" aria-selected={rightTab === "info"} className={rightTab === "info" ? "selected" : ""} onClick={() => setRightTab("info")}>
                 <List size={14} />
@@ -1488,7 +1505,7 @@ export default function App() {
             </div>
             <CopilotPanel key={vault.id ?? "missing"} api={api}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
-              notes={raw} liveEdits={edits}
+              notes={raw} liveEdits={edits} onOpenVault={pickFolder}
               onBeginLive={async (requestId) => { await flush(); edits.begin(requestId); }}
               selection={mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
               onReview={(path) => { openNote(path); setMode("edit"); }}
@@ -1551,7 +1568,7 @@ export default function App() {
                     style={{ paddingLeft: 12 + Math.max(0, h.level - 1) * 12 }}
                     onClick={() => {
                       if (mode === "live") {
-                        setEditorJump({ path: note.path, fragment: h.text });
+                        setEditorJump({ path: note.path, fragment: h.id });
                         return;
                       }
                       if (mode === "edit") setMode("read");
@@ -1562,13 +1579,13 @@ export default function App() {
                               "h1,h2,h3,h4,h5,h6",
                             ) ?? []),
                           ]
-                            .find((node) => node.textContent === h.text)
+                            .find((node) => node.id === h.id)
                             ?.scrollIntoView({ behavior: "smooth" }),
                         30,
                       );
                     }}
                   >
-                    {h.text}
+                    {h.plainText ?? h.text}
                   </button>
                 ))}
                 {!note?.headings.length && (
@@ -1686,6 +1703,7 @@ export default function App() {
             </div>
             </div>
           </aside>
+        </>
         )}
       </div>
       {lastTrash && (
@@ -1928,7 +1946,8 @@ export default function App() {
         </Modal>
       )}
       {modal === "about" && (
-        <Modal title="내 기록을 안전하게" onClose={() => setModal(null)}>
+        <Modal title="Dynote 정보" onClose={() => setModal(null)}>
+          <p className="app-version-details">현재 버전 v{version}</p>
           <div className="about-icon">
             <ShieldCheck size={31} />
           </div>

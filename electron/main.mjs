@@ -1,3 +1,4 @@
+import { contextMenuTemplate } from "./context-menu.mjs";
 import {
   app,
   BrowserWindow,
@@ -237,6 +238,12 @@ app
         },
       ]),
     );
+    window.webContents.on("context-menu", (_event, params) => {
+      const menu = Menu.buildFromTemplate(contextMenuTemplate(params,
+        format => window.webContents.send("notes:format-editor", format),
+        () => window.webContents.send("notes:open-settings", "fonts")));
+      menu.popup({ window });
+    });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.webContents.on("will-attach-webview", (event) =>

@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.10.1 프리릴리스는 macOS 앱의 잘못된 서명을 수정하고 패키지 서명 검사를 추가합니다. **임시(ad-hoc) 서명이며 Apple 공증이 없어 다운로드한 앱은 macOS에서 계속 차단될 수 있습니다.** [변경사항과 제한](docs/RELEASE-NOTES-0.10.1.md)을 확인하세요. v0.10.0의 ESS LINK 3D와 노트 연결, 개발 플래너와 기존 노트 기능도 포함합니다.
+v0.11.0 프리릴리스는 Markdown 서식·글자 색상·우클릭·패널 너비 조절, 버전 표시와 AI 전송·계정 메뉴, 개발 플래너 캡처 검토를 개선합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.11.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -10,11 +10,11 @@ v0.10.1 프리릴리스는 macOS 앱의 잘못된 서명을 수정하고 패키�
 
 패키징 결과의 Apple Silicon Mac 앱:
 
-`release/v0.10.1/Dynote-darwin-arm64/Dynote.app`
+`release/v0.11.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.10.1/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.11.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
 
 [GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
@@ -40,6 +40,8 @@ npm start
 - 개발 플래너: 캡처 일정 인식·검토·등록, 오늘/타임라인/근거 보기, AI 대안 채택·보류, 준비 작업과 문서 변경 확인
 - 중첩 폴더의 `.md` 파일 열기, 새 문서 만들기, CodeMirror 기반 편집
 - 읽기·소스 편집·Live Preview·분할 보기, 자동 저장, 문서 탭
+- 작성 도구막대의 굵게·기울임·취소선·코드·글자 색상, 우클릭 편집 메뉴
+- 좌우 패널 너비 조절·복원, 상단 앱 버전 정보
 - 한글 전체 검색과 빠른 문서 전환 (`⌘/Ctrl K`, `⌘/Ctrl P`)
 - `[[문서]]`, `[[경로/문서|표시 이름]]`, 제목 링크, 백링크
 - 문서 연결 그래프: WASM·Worker 물리 배치, GPU 표시, 점 드래그, 이동·확대/축소, 문서 클릭

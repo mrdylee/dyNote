@@ -6,7 +6,7 @@ const fixture=await mkdtemp(`${tmpdir()}/dynote-editor-tools-`),profile=`${fixtu
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
 const original='- Parent\n  - Child\n- Sibling\n';
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/List.md`,original);
-const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 const errors=[];
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));

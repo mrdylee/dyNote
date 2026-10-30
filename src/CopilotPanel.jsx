@@ -1,5 +1,6 @@
+import { sendBlock, defaultCopilotModel } from "../core/copilot-send-state.mjs";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip } from "lucide-react";
+import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip, ChevronDown } from "lucide-react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import DiagramPreview from "./DiagramPreview.jsx";
@@ -16,7 +17,7 @@ const markdown = new MarkdownIt({ html: false, breaks: true });
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[이미지: ${tokens[index].content}]`);
 const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
-export default function CopilotPanel({ api, vaultId, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive }) {
+export default function CopilotPanel({ api, vaultId, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive, onOpenVault }) {
   const label = "Copilot";
   const accountLabel = "GitHub";
   const ai = {
@@ -24,6 +25,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     cancelLogin: api.copilotCancelLogin, send: api.copilotSend,
     cancel: api.copilotCancel, onEvent: api.onCopilotEvent,
   };
+  const accountMenu = useRef(null);
   const [connection, setConnection] = useState(disconnected);
   const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState(null);
@@ -53,7 +55,7 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
       const next = await invoke(ai.status());
       if (!mounted.current) return;
       setConnection(next);
-      setModel((current) => next.models.some((m) => m.id === current) ? current : "");
+      setModel((current) => defaultCopilotModel(next.models, current));
       if (next.error) setError(next.error);
     } catch (e) { if (mounted.current) setError(e.message); }
     finally { if (mounted.current) setChecking(false); }
@@ -133,7 +135,9 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
-  const canSend = connection.authenticated && model && prompt.trim() && !checking && !authBusy && !busy && !applying && vaultId && liveEdits.ready && !liveEdits.blocked();
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy, applying, running,
+    vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
+  const canSend = !blockedSend;
   const send = async (event) => {
     event?.preventDefault();
     if (pending.current || running || !canSend) return;
@@ -181,20 +185,29 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
   };
 
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
-    <div className="copilot-connection">
-      <div className="copilot-account"><GitBranch size={15} /><strong>{connection.authenticated ? connection.login || `${accountLabel} 연결됨` : "GitHub Copilot"}</strong>
-        <button title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || applying || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""} /></button>
+    <div className="copilot-chat-heading">
+      <span className="copilot-heading-label" title="노트 어시스턴트">Copilot</span>
+      <div className="copilot-heading-actions">
+        <details className="copilot-account-menu" ref={accountMenu}
+          onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}
+          onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary").focus(); } }}>
+          <summary aria-label={`${label} 계정 설정`} title={connection.authenticated ? `${accountLabel} · ${connection.login || "연결됨"}` : `${accountLabel} 연결 설정`}>
+            <GitBranch size={13}/><span>{connection.authenticated ? connection.login || accountLabel : `${accountLabel} 연결`}</span><ChevronDown size={11}/>
+          </summary>
+          <div className="copilot-account-options" role="group" aria-label="GitHub 연결 설정">
+            <p>{connection.authenticated ? `${accountLabel} · ${connection.login || "연결됨"}` : "GitHub Copilot 계정으로 연결하세요."}</p>
+            <button type="button" disabled={checking || running || applying || authBusy} onClick={() => { accountMenu.current.open = false; login(); }}>{connection.authenticated ? "계정 다시 연결" : `${accountLabel}로 연결`}</button>
+            <button type="button" disabled={checking || running || applying || authBusy} onClick={() => { accountMenu.current.open = false; refresh(); }}>이미 연결한 계정 확인</button>
+          </div>
+        </details>
+        <button type="button" title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || applying || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""}/></button>
+        <button type="button" title="새 대화" aria-label={`${label} 새 대화`} disabled={running || applying} onClick={newConversation}><Plus size={14}/></button>
       </div>
-      {!connection.authenticated && !authBusy && <div className="copilot-login">
-        <p>사용 중인 Copilot 계정으로<br />노트에 관해 이야기해 보세요.</p>
-        <button className="primary-button" disabled={checking} onClick={login}>{accountLabel}로 연결</button>
-        <button className="text-action" disabled={checking} onClick={refresh}>이미 연결한 계정 확인</button>
-      </div>}
-      {auth && <p role="status" className={`copilot-auth ${auth.phase === "error" ? "failed" : ""}`}>{auth.message}</p>}
-      {authBusy && <button className="text-action" onClick={() => invoke(ai.cancelLogin()).catch((e) => setError(e.message))}>로그인 취소</button>}
-      {connection.authenticated && <button className="text-action" disabled={running || checking || authBusy} onClick={login}>계정 다시 연결</button>}
     </div>
-    <div className="copilot-chat-heading"><span>노트 어시스턴트</span><button aria-label={`${label} 새 대화`} disabled={running || applying} onClick={newConversation}><Plus size={14} />새 대화</button></div>
+    {auth && (authBusy || auth.phase === "error") && <div className="copilot-auth-notice">
+      <p role="status" className={`copilot-auth ${auth.phase === "error" ? "failed" : ""}`}>{auth.message}</p>
+      {authBusy && <button type="button" className="text-action" onClick={() => invoke(ai.cancelLogin()).catch(e => setError(e.message))}>로그인 취소</button>}
+    </div>}
     <div className="copilot-transcript" ref={transcript} role="log" aria-label={`${label} 대화`}>
       {!messages.length && <div className="copilot-empty"><Sparkles size={24} /><h3>생각을 더 선명하게</h3><p>내용을 요약하거나, 문장을 다듬거나,<br />시험 항목을 체크리스트로 정리해 보세요.</p>
         <div className="copilot-suggestions">{(mode === "agent" ? ["현재 문서에 실행할 일 체크리스트를 추가해 줘", "현재 문서를 참고해서 새 요약 문서를 만들어 줘"] : ["핵심 내용을 요약해 줘", "실행할 일을 체크리스트로 정리해 줘"]).map((text) => <button key={text} onClick={() => setPrompt(text)}>{text}</button>)}</div>
@@ -244,8 +257,13 @@ export default function CopilotPanel({ api, vaultId, note, notes = [], selection
           {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select></label>}
           {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => { liveEdits.stop(); invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message)); }}><Square size={15} />중지</button>
-            : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} disabled={!canSend}><ArrowUp size={16} /></button>}
+            : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} aria-describedby="copilot-send-status" title={blockedSend?.message || "현재 전달 범위로 질문 보내기"} disabled={!canSend}><ArrowUp size={16} /></button>}
         </div>
+      </div>
+      <div id="copilot-send-status" className="copilot-send-status" role="status" aria-label="Copilot 전송 상태">
+        {blockedSend?.message}
+        {blockedSend?.code === "vault" && <button type="button" className="text-action" aria-label="AI용 노트 폴더 열기" onClick={onOpenVault}>노트 폴더 열기</button>}
+        {blockedSend?.code === "drafts" && <button type="button" className="text-action" onClick={() => { newConversation(); setMode("chat"); }}>Ask로 대화</button>}
       </div>
       <small className="copilot-shortcuts">Enter 전송 · Shift+Enter 줄바꿈</small>
       <small className="copilot-allowance">선택한 내용과 대화가 전송되며 Copilot 사용량이 적용됩니다.</small>
