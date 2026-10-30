@@ -10,6 +10,8 @@ const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`
 const errors=[];
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();
+ await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:List.md');await page.keyboard.press('Enter');
  await page.getByRole('button',{name:'편집 보기',exact:true}).click();
  const editor=page.getByRole('textbox',{name:'Markdown 편집기'});await editor.waitFor();
  const content=async()=>(await page.locator('.cm-content .cm-line').allTextContents()).join('\n');

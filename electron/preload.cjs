@@ -20,13 +20,40 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:plugin-open-note", listener);
       return () => ipcRenderer.removeListener("notes:plugin-open-note", listener);
     },
+    updateState: () => call("update-state"),
+    updateSettings: args => call("update-settings",args),
+    downloadUpdate: () => call("update-download"),
+    showUpdate: () => call("update-show"),
+    onUpdateStatus: callback => { const listener=(_event,value)=>callback(value);ipcRenderer.on("notes:update-status",listener);return()=>ipcRenderer.removeListener("notes:update-status",listener); },
     checkUpdates: (args) => call("check-updates", args),
     openWebViewer: (args) => call("open-web-viewer", args),
+    previewClassification: args => call("classification-preview", args),
+    applyClassification: args => call("classification-apply", args),
     previewComposition: (args) => call("composer-preview", args),
     applyComposition: (args) => call("composer-apply", args),
     previewPdf: (args) => call("pdf-preview", args),
     applyPdf: (args) => call("pdf-apply", args),
     copilotStatus: () => call("copilot-status"),
+    codexStatus: () => call("codex-status"),
+    codexLogin: () => call("codex-login"),
+    codexCancelLogin: () => call("codex-cancel-login"),
+    codexSend: args => call("codex-send", args),
+    codexCancel: args => call("codex-cancel", args),
+    onCodexEvent: callback => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:codex-event", listener);
+      return () => ipcRenderer.removeListener("notes:codex-event", listener);
+    },
+    claudeStatus: () => call("claude-status"),
+    claudeLogin: () => call("claude-login"),
+    claudeCancelLogin: () => call("claude-cancel-login"),
+    claudeSend: args => call("claude-send", args),
+    claudeCancel: args => call("claude-cancel", args),
+    onClaudeEvent: callback => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:claude-event", listener);
+      return () => ipcRenderer.removeListener("notes:claude-event", listener);
+    },
     copilotLogin: () => call("copilot-login"),
     copilotCancelLogin: () => call("copilot-cancel-login"),
     copilotSend: (args) => call("copilot-send", args),

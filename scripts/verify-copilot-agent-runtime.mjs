@@ -28,9 +28,9 @@ try {
   page.setDefaultTimeout(15000);
   page.on("pageerror", (e) => report.errors.push(e.message));
   assert.equal(await page.evaluate(() => localStorage.getItem("dynote.ai.provider")), "codex");
-  assert.deepEqual(await page.evaluate(() => Object.keys(window.notes).filter((name) => /codex/i.test(name))), []);
-  assert.equal(await page.getByLabel("AI 서비스").count(), 0);
-  report.checks.push("Legacy Codex preference opens Copilot; Codex renderer API and service selector are removed");
+  assert.equal(await page.getByLabel("AI 제공자", { exact: true }).inputValue(), "codex");
+  await page.getByLabel("AI 제공자", { exact: true }).selectOption("copilot");
+  report.checks.push("Provider preference persists; Copilot can be selected for Agent tasks");
   report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, electron: process.versions.electron }));
   await app.evaluate(async ({ ipcMain, app }) => {
     const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
@@ -58,7 +58,7 @@ try {
   await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
   await page.getByLabel("Copilot 모델").selectOption("fixture");
-  await page.locator('.file-row[title="Home.md"]').click();
+  await page.keyboard.press("Meta+k"); await page.getByRole("textbox", { name: "빠른 문서 검색" }).fill("path:Home.md"); await page.keyboard.press("Enter");
   assert.equal(await page.getByLabel("Copilot 작업").inputValue(), "agent");
   await page.getByRole("button", { name: /참고 문서 0\/5/ }).click();
   await page.getByLabel("참고 문서 검색").fill("Ref");

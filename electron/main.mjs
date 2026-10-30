@@ -9,6 +9,7 @@ import {
   shell,
   Menu,
   clipboard,
+  powerMonitor,
 } from "electron";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -20,11 +21,13 @@ import { demoNotes } from "../core/demo.mjs";
 import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
 import { GitWorkspace } from "../core/git-workspace.mjs";
-import { checkReleaseInformation } from "../core/update-information.mjs";
+import { UpdateManager } from "../core/update-manager.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { PluginController } from "./plugin-controller.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
+import { CodexController } from "./codex-controller.mjs";
+import { ClaudeController } from "./claude-controller.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -55,7 +58,9 @@ let restoring = false;
 let activeMutations = 0;
 let gitBackup;
 let copilot;
+let codex, claude;
 let plugins;
+let updates;
 
 function validateSender(event) {
   if (
@@ -75,7 +80,7 @@ function checkVault(args) {
 }
 
 async function selectVault(root) {
-  await copilot?.cancel();
+  await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
   await plugins?.close();
@@ -114,6 +119,9 @@ app
     registry = new VaultRegistry(path.join(app.getPath("userData"), "settings.json"));
     await mkdir(app.getPath("userData"), { recursive: true });
     vault = await initialVault();
+    updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),current:app.getVersion(),
+      onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
+    await updates.init();
     gitBackup = new GitController({
       settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
       onStatus: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status); },
@@ -130,6 +138,13 @@ app
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
       },
     });
+    const cliOptions = (provider) => ({
+      directory: path.join(app.getPath("userData"), provider),
+      openExternal: url => shell.openExternal(url),
+      onEvent: event => { if (window && !window.webContents.isDestroyed()) window.webContents.send(`notes:${provider}-event`, event); },
+    });
+    codex = new CodexController(cliOptions("codex"));
+    claude = new ClaudeController(cliOptions("claude"));
     protocol.handle("notes", async (request) => {
       try {
         const url = new URL(request.url);
@@ -274,7 +289,21 @@ app
       "plugin-command": args => { checkVault(args); plugins.execute(args.id, args.command); },
       "plugin-context": args => { checkVault(args); plugins.update({ notes: args.notes, active: args.active, dailyOptions: args.dailyOptions }); },
       "copilot-status": () => copilot.status(),
-      "check-updates": (args) => checkReleaseInformation(app.getVersion(), args?.includePrerelease === true),
+      "codex-status": () => codex.status(),
+      "codex-login": () => codex.login(),
+      "codex-cancel-login": () => codex.cancelLogin(),
+      "codex-send": args => { checkVault(args); return codex.send(args); },
+      "codex-cancel": args => codex.cancel(args?.requestId),
+      "claude-status": () => claude.status(),
+      "claude-login": () => claude.login(),
+      "claude-cancel-login": () => claude.cancelLogin(),
+      "claude-send": args => { checkVault(args); return claude.send(args); },
+      "claude-cancel": args => claude.cancel(args?.requestId),
+      "check-updates": () => updates.check(true),
+      "update-state": () => updates.state,
+      "update-settings": args => updates.configure(args),
+      "update-download": () => updates.download(),
+      "update-show": async () => {shell.showItemInFolder(await updates.readyPath());return true;},
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
       "copilot-login": () => copilot.login(),
       "copilot-cancel-login": () => copilot.cancelLogin(),
@@ -288,6 +317,8 @@ app
       },
       "forget-vault": async (args) => { await registry.forget(args?.root); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
       "git-history": (args) => { checkVault(args); return new GitHistory(vault).list(args.month); },
+      "classification-preview": args => { checkVault(args); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args);return new JournalClassifier(vault).preview(args.input);}); },
+      "classification-apply": args => { checkVault(args); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args);return new JournalClassifier(vault).apply(args.input,args.revision);}); },
       "composer-preview": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args); return new NoteComposer(vault).preview(args.input); }); },
       "composer-apply": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args); return new NoteComposer(vault).apply(args.input, args.revision); }); },
       "pdf-preview": (args) => { checkVault(args); return gitBackup.enqueue(async () => { const { PdfEditor } = await import("../core/pdf-editing.mjs"); checkVault(args); return new PdfEditor(vault).preview(args.input); }); },
@@ -426,8 +457,8 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply", "pdf-apply"].includes(name);
-        const readOnly = name.startsWith("copilot-") || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply"].includes(name);
+        const readOnly = /^(copilot|codex|claude|update)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -438,7 +469,7 @@ app
           }
           const id = vault?.id;
           const value = await action(args);
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash", "composer-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };
@@ -472,6 +503,11 @@ app
     });
     await window.loadURL("notes://app/index.html");
     await plugins.activate(vault);
+    const checkUpdates = () => updates.check().catch(error=>console.error("Update check:",error.message));
+    const updateTimer = setInterval(checkUpdates,60*60*1000);updateTimer.unref();
+    const initialUpdate = setTimeout(checkUpdates,10000);initialUpdate.unref();
+    powerMonitor.on("resume",checkUpdates);
+    app.once("before-quit",()=>{clearInterval(updateTimer);clearTimeout(initialUpdate);powerMonitor.removeListener("resume",checkUpdates);});
   })
   .catch((error) => {
     console.error(error);
@@ -480,7 +516,7 @@ app
 
 app.on("window-all-closed", async () => {
   gitBackup?.close();
-  await Promise.race([Promise.allSettled([copilot?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  await Promise.race([Promise.allSettled([copilot?.close(), codex?.close(), claude?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
   app.quit();
 });
 

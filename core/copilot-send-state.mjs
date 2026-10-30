@@ -4,11 +4,11 @@ export function defaultCopilotModel(models, current) {
   return models.some(model => model.id === current) ? current : models.find(model => model.id === "auto")?.id ?? "";
 }
 
-export function sendBlock({ connection, model, prompt, checking, authBusy, busy, applying, running, vaultId, note, scope, selection, mode, ready, blocked }) {
+export function sendBlock({ connection, model, prompt, checking, authBusy, busy, applying, running, vaultId, note, scope, selection, mode, ready, blocked, label = "Copilot", accountLabel = "GitHub" }) {
   const reason = (code, message) => ({ code, message });
-  if (checking) return reason("checking", "Copilot 연결 상태를 확인하고 있습니다.");
-  if (authBusy) return reason("authBusy", "GitHub 연결을 마치거나 로그인 취소를 눌러 주세요.");
-  if (!connection.authenticated) return reason("auth", "GitHub Copilot에 연결해 주세요.");
+  if (checking) return reason("checking", `${label} 연결 상태를 확인하고 있습니다.`);
+  if (authBusy) return reason("authBusy", `${accountLabel} 연결을 마치거나 로그인 취소를 눌러 주세요.`);
+  if (!connection.authenticated) return reason("auth", `${accountLabel} ${label}에 연결해 주세요.`);
   if (!vaultId) return reason("vault", "노트 폴더를 열어 현재 노트를 불러와 주세요.");
   if (running) return reason("running", "응답을 기다리거나 중지한 뒤 다시 보낼 수 있습니다.");
   if (busy) return reason("busy", "노트 저장 작업이 끝나면 보낼 수 있습니다.");

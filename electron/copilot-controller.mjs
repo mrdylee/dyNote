@@ -9,7 +9,7 @@ const message = (error) => String(error?.message ?? error).replace(/\b(?:gh[pous
 // Do not inherit unrelated Git/API tokens or provider overrides from the host.
 export function runtimeEnvironment(env = process.env) {
   return Object.fromEntries(Object.entries(env).filter(([name]) =>
-    /^(PATH|HOME|USERPROFILE|USER|LOGNAME|APPDATA|LOCALAPPDATA|SystemRoot|SYSTEMROOT|WINDIR|windir|COMSPEC|PATHEXT|TEMP|TMP|TMPDIR|LANG|LC_[A-Z_]+|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE)$/.test(name)));
+    /^(PATH|HOME|USERPROFILE|USER|LOGNAME|APPDATA|LOCALAPPDATA|SystemRoot|SYSTEMROOT|WINDIR|windir|COMSPEC|PATHEXT|TEMP|TMP|TMPDIR|LANG|LC_[A-Z_]+|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE)$/i.test(name)));
 }
 
 export class CopilotController {

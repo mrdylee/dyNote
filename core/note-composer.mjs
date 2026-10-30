@@ -20,7 +20,7 @@ function subpaths(source,from,to){
   for(let i=0;i<textLines.length;i++)if(!excluded.has(i)&&lines[i]>=from&&lines[i]+textLines[i].length<=to){const match=textLines[i].match(/(?:^|\s)\^([\w-]+)\s*$/);if(match)blocks.add(match[1]);}
   return fragment=>{let decoded;try{decoded=decodeURIComponent(fragment.replace(/^#/,''));}catch{return false;}return decoded.startsWith('^')?blocks.has(decoded.slice(1)):!!decoded&&headings.has(headingId(decoded));};
 }
-function relocate(content,from,to,files,redirect){
+export function relocate(content,from,to,files,redirect=value=>value){
   let result=content;
   for(const link of scanLinks(content).reverse()){
     const resolved=resolvePath(link.target,from,files,{kind:link.kind});if(resolved.status!=='resolved')continue;

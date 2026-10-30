@@ -1896,3 +1896,27 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .copilot-account-options button { width: 100%; padding: 7px 4px; border-radius: 4px; text-align: left; }
 .copilot-account-options button:hover { background: var(--soft); }
 .copilot-auth-notice { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.ai-provider-select { max-width: 105px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--soft); color: inherit; font: inherit; }
+
+/* Document comparisons share file buffers but retain independent scrolling. */
+.document-workspace { display:flex; height:100%; min-height:300px; overflow:auto; }
+.pane-slot { min-width:180px; flex-shrink:0; height:100%; }
+.document-pane { position:relative; height:100%; overflow:auto; border-top:2px solid transparent; }
+.document-pane.focused { border-top-color:#8e70bc; }
+.document-pane .document-content { padding:24px; min-height:calc(100% - 36px); }
+.pane-heading { position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--surface,#faf8fc); font-size:11px; border-bottom:1px solid var(--border); }
+.pane-heading span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:grab; }
+.pane-heading button { border:0; background:none; }
+.document-separator { width:6px; flex-shrink:0; cursor:col-resize; background:var(--border); touch-action:none; }
+.document-separator:focus { outline:2px solid #8e70bc; }
+.pane-drop-target { position:absolute; top:40px; bottom:0; width:50%; background:#ede3facf; border:2px dashed #8e70bc; pointer-events:none; z-index:4; padding:25px 10px; }
+.pane-drop-target.left { left:0; } .pane-drop-target.right { right:0; }
+.journal-feed { max-width:850px; margin:auto; padding:30px; }
+.journal-entry { margin:24px 0; padding:24px; border:1px solid var(--border); border-radius:12px; }
+.journal-entry header { display:flex; align-items:center; justify-content:space-between; }
+.journal-entry h2 { margin:0 0 16px; }
+
+.classification-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 20px; background:#f4effb; font-size:12px; }
+.classification-review fieldset { border:1px solid var(--border); border-radius:8px; margin:12px 0; padding:12px; }
+.classification-review input:not([type=checkbox]) { width:100%; padding:8px; }
+.classification-review pre { white-space:pre-wrap; max-height:300px; overflow:auto; background:#f8f6fa; padding:12px; }
