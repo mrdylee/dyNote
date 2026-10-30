@@ -17,7 +17,7 @@ export function claudeCandidates({ platform = process.platform, home = os.homedi
   if (platform === "win32") {
     for (const dir of [...dirs, ...(env.APPDATA ? [p.join(env.APPDATA, "npm")] : [])]) {
       const npm = p.join(dir, "node_modules", "@anthropic-ai");
-      candidates.push(p.join(npm, "claude-code", "bin", "claude.exe"), p.join(npm, "claude-code-win32-x64", "claude.exe"), p.join(npm, "claude-code", "cli.js"));
+      candidates.push(p.join(npm, "claude-code-win32-x64", "claude.exe"), p.join(npm, "claude-code", "bin", "claude.exe"), p.join(npm, "claude-code", "cli.js"));
     }
   }
   return [...new Set(candidates)];

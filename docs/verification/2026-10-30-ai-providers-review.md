@@ -11,5 +11,6 @@
 - 최종 Mac 단위 테스트 315개 모두 통과. 기존 Copilot Agent의 참고 문서, 문서 간 전환, 두 문서 초안 유지·확정, CRLF 보존도 실제 Electron 화면에서 통과.
 - 현재 Mac의 기존 Claude CLI는 구버전이므로 변경하지 않고 별도 임시 설치로 검증함.
 - Windows 공개 배포는 새 워크플로의 네이티브 테스트·패키지 실행을 통과한 뒤 진행. 게시 결과와 다운로드 검증은 별도 보고서에 기록.
+- 첫 Windows 실행(41068592468): 단위 테스트 313 통과·Windows 비대상 2 제외. 공식 Codex 0.166.0의 Windows 바이너리가 기존 `codex/codex.exe`에서 `bin/codex.exe`로 바뀐 것을 아카이브에서 확인하고 두 경로를 지원하도록 수정. 실패한 v0.12.0 태그는 보존하고 v0.12.1로 검증·배포. 이번에는 네이티브 검사 성공 후 공개 단계에서 태그를 생성.
 
 재실행: `npm test`, `npm run build`, `node scripts/verify-ai-cli-runtime.mjs`, Playwright 경로 지정 후 `node scripts/verify-ai-providers.mjs` 및 `node scripts/verify-journal-workspace.mjs`.

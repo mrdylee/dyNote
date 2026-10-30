@@ -8,6 +8,7 @@ import { CodexRpc, codexEnvironment, codexConfig, codexCandidates } from "../ele
 test("Codex discovers Windows npm native binary at a custom global prefix", () => {
   const candidates = codexCandidates({ platform: "win32", env: { PATH: "C:\\npm" } });
   assert.ok(candidates.includes("C:\\npm\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\codex\\codex.exe"));
+  assert.ok(candidates.includes("C:\\npm\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"));
   assert.ok(!candidates.some(p => p.endsWith(".cmd")));
 });
 

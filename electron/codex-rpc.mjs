@@ -33,7 +33,8 @@ export function codexCandidates({ platform = process.platform, env = process.env
     for (const dir of [...directories, ...(env.APPDATA ? [p.join(env.APPDATA, "npm")] : [])]) {
       const npm = p.join(dir, "node_modules", "@openai");
       for (const root of [npm, p.join(npm, "codex", "node_modules", "@openai")])
-        candidates.push(p.join(root, "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "codex", "codex.exe"));
+        for (const folder of ["bin", "codex"])
+          candidates.push(p.join(root, "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", folder, "codex.exe"));
     }
   }
   return [...new Set(candidates)];
@@ -73,7 +74,7 @@ export class CodexRpc {
     this.child.on("error", () => this.fail(new Error("Codex 실행에 실패했습니다. CLI 설치 상태를 확인해 주세요.")));
     this.child.on("exit", () => this.fail(new Error("Codex 연결이 종료되었습니다. 다시 연결해 주세요.")));
     this.child.stdin.on("error", () => this.fail(new Error("Codex 연결이 종료되었습니다.")));
-    await this.request("initialize", { clientInfo: { name: "dynote", title: "Dynote", version: "0.12.0" }, capabilities: { experimentalApi: true } });
+    await this.request("initialize", { clientInfo: { name: "dynote", title: "Dynote", version: "0.12.1" }, capabilities: { experimentalApi: true } });
     this.write({ method: "initialized", params: {} });
     // Managed/global MCP configuration must not silently add external tools.
     const { config } = await this.request("config/read", { includeLayers: false });
