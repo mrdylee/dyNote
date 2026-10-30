@@ -1,0 +1,96 @@
+name: Publish Windows v0.11.0
+on:
+  push:
+    branches: [release/windows-v0.11.0]
+permissions:
+  contents: write
+concurrency:
+  group: release-windows-v0.11.0
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ae3f292ff6712dd1d0119897be3f8bbd2a9d4281
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Unit tests on Windows
+        run: npm test
+      - name: Build Windows x64 package
+        run: npm run package:win
+      - name: Check package and start actual Windows executable
+        run: |
+          $package = Join-Path $PWD 'release/v0.11.0/Dynote-win32-x64'
+          $exe = Join-Path $package 'Dynote.exe'
+          $runtime = Join-Path $package 'resources/app.asar.unpacked/node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe'
+          if (!(Test-Path $exe) -or !(Test-Path $runtime)) { throw 'Missing Windows executable or Copilot runtime' }
+          $env:OPEN_NOTES_DATA = Join-Path $env:RUNNER_TEMP 'dynote-release-smoke'
+          New-Item -ItemType Directory -Force $env:OPEN_NOTES_DATA | Out-Null
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 10
+            $process.Refresh()
+            if ($process.HasExited) { throw "Dynote exited early: $($process.ExitCode)" }
+            if (!$process.MainWindowHandle) { throw 'Dynote did not create a native window' }
+            Write-Host "Native Windows window: $($process.MainWindowTitle)"
+          } finally {
+            if (!$process.HasExited) {
+              $null = $process.CloseMainWindow()
+              if (!$process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+            }
+          }
+      - name: Archive Windows folder and checksum
+        run: |
+          $zip = Join-Path $PWD 'release/v0.11.0/Dynote-0.11.0-windows-x64.zip'
+          Compress-Archive -Path 'release/v0.11.0/Dynote-win32-x64' -DestinationPath $zip -CompressionLevel Optimal
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            if (!$archive.GetEntry('Dynote-win32-x64/Dynote.exe')) { throw 'Archive root is invalid' }
+            foreach ($entry in $archive.Entries) {
+              $stream = $entry.Open()
+              try { $stream.CopyTo([System.IO.Stream]::Null) } finally { $stream.Dispose() }
+            }
+          } finally { $archive.Dispose() }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Dynote-0.11.0-windows-x64.zip" | Set-Content 'release/v0.11.0/SHA256SUMS-windows-x64.txt' -Encoding ascii
+          Write-Host "Windows archive SHA256: $hash"
+      - name: Publish verified Windows assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = 'mrdylee/dyNote'
+          $tag = 'v0.11.0'
+          $releaseJson = gh release view $tag --repo $repo --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --verify-tag --draft --prerelease --title 'Dynote v0.11.0 — Windows 먼저 배포' --notes-file docs/RELEASE-NOTES-0.11.0.md
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot create release draft' }
+          } else {
+            $release = $releaseJson | ConvertFrom-Json
+            if (!$release.isDraft) { throw 'Release is already public; refusing to replace it' }
+            if (@($release.assets).Count) { throw 'Draft already has assets; inspect before publishing' }
+          }
+          gh release upload $tag 'release/v0.11.0/Dynote-0.11.0-windows-x64.zip' 'release/v0.11.0/SHA256SUMS-windows-x64.txt' --repo $repo
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed' }
+          $notes = Get-Content docs/RELEASE-NOTES-0.11.0.md -Raw
+          $notes = $notes.Replace('- Apple Silicon Mac: `Dynote-0.11.0-macos-arm64.zip` 전체 압축 해제 후 `Dynote-darwin-arm64/Dynote.app`을 실행합니다.', '- Apple Silicon Mac: 후속 배포 예정입니다.')
+          $notes = $notes.Replace('`SHA256SUMS.txt`', '`SHA256SUMS-windows-x64.txt`')
+          $notes = $notes.Replace('Windows 패키지는 macOS에서 교차 생성하며 실제 Windows 실행은 검증하지 않았습니다.', 'Windows 패키지는 Windows GitHub runner에서 생성하고 단위 테스트와 실제 실행 파일의 창 생성을 확인했습니다. Windows 전체 UI 수동 검증은 별도입니다.')
+          $notes += "`n`n## Windows 우선 배포`nWindows x64 파일을 먼저 게시합니다. Mac 다운로드와 설치 업데이트는 후속 진행합니다. Windows GitHub runner에서 단위 테스트, 패키징, 실제 실행 파일의 창 생성 검사를 수행했습니다. 전체 UI 수동 검증은 별도입니다.`n"
+          $notesPath = Join-Path $env:RUNNER_TEMP 'dynote-windows-release-notes.md'
+          $notes | Set-Content $notesPath -Encoding utf8
+          gh release edit $tag --repo $repo --draft=false --prerelease --title 'Dynote v0.11.0 — Markdown 서식·패널과 AI 작업 개선' --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          gh release view $tag --repo $repo --json url,isDraft,isPrerelease,assets
+          if ($LASTEXITCODE -ne 0) { throw 'Published release readback failed' }
