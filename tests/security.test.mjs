@@ -1,15 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { assetPath, safeExternalUrl, trustedFrame } from "../core/security.mjs";
 
 test("app protocol serves only bundled assets inside the distribution folder", () => {
   assert.equal(
     assetPath("notes://app/index.html", "/safe/dist"),
-    "/safe/dist/index.html",
+    resolve("/safe/dist/index.html"),
   );
   assert.equal(
     assetPath("notes://app/assets/app.js", "/safe/dist"),
-    "/safe/dist/assets/app.js",
+    resolve("/safe/dist/assets/app.js"),
   );
   for (const url of [
     "file:///etc/passwd",
@@ -30,9 +31,9 @@ test("only an exact main-frame application origin can invoke native operations",
 });
 
 test('ESS frame serves bundled assets and exactly the ESS model, without native trust', () => {
-  assert.equal(assetPath('notes://ess/ess.html','/safe/dist'),'/safe/dist/ess.html');
-  assert.equal(assetPath('notes://ess/assets/ess-a1.js','/safe/dist'),'/safe/dist/assets/ess-a1.js');
-  assert.equal(assetPath('notes://ess/ess/ess-container.glb','/safe/dist'),'/safe/dist/ess/ess-container.glb');
+  assert.equal(assetPath('notes://ess/ess.html','/safe/dist'),resolve('/safe/dist/ess.html'));
+  assert.equal(assetPath('notes://ess/assets/ess-a1.js','/safe/dist'),resolve('/safe/dist/assets/ess-a1.js'));
+  assert.equal(assetPath('notes://ess/ess/ess-container.glb','/safe/dist'),resolve('/safe/dist/ess/ess-container.glb'));
   for(const url of ['notes://ess/index.html','notes://ess/plugin.html','notes://ess/secret.glb','notes://ess/ess/other.glb','notes://app/secret.glb','notes://ess/ess/%2e%2e/private.glb','notes://ess/ess/ess-container.glb?path=secret','notes://ess/ess/ess-container.glb#x'])assert.throws(()=>assetPath(url,'/safe/dist'));
   assert.equal(trustedFrame('notes://ess/ess.html',true),false);
 });
@@ -59,7 +60,7 @@ test("explicit external links cannot invoke operating system handlers or executa
 });
 
 test("bundled WASM is allowed without widening vault or traversal access", () => {
-  assert.equal(assetPath("notes://app/assets/graph.wasm", "/safe/dist"), "/safe/dist/assets/graph.wasm");
+  assert.equal(assetPath("notes://app/assets/graph.wasm", "/safe/dist"), resolve("/safe/dist/assets/graph.wasm"));
   for (const url of ["notes://vault/graph.wasm", "notes://app/%2e%2e%2fgraph.wasm", "notes://app/.hidden/graph.wasm", "notes://app/secret.dll"])
     assert.throws(() => assetPath(url, "/safe/dist"));
 });
