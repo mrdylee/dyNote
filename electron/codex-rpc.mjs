@@ -13,7 +13,7 @@ export const codexConfig = Object.freeze({
   "memories.generate_memories": false, "memories.use_memories": false,
   "history.persistence": "none", "analytics.enabled": false,
   ...Object.fromEntries([
-    "shell_tool", "shell_snapshot", "unified_exec", "apps", "plugins",
+    "shell_tool", "shell_snapshot", "unified_exec", "view_image", "apps", "plugins",
     "remote_plugin", "hooks", "memories", "chronicle", "multi_agent",
     "browser_use", "in_app_browser", "computer_use", "image_generation",
     "code_mode", "code_mode_host", "tool_suggest", "workspace_dependencies",
@@ -74,7 +74,7 @@ export class CodexRpc {
     this.child.on("error", () => this.fail(new Error("Codex 실행에 실패했습니다. CLI 설치 상태를 확인해 주세요.")));
     this.child.on("exit", () => this.fail(new Error("Codex 연결이 종료되었습니다. 다시 연결해 주세요.")));
     this.child.stdin.on("error", () => this.fail(new Error("Codex 연결이 종료되었습니다.")));
-    await this.request("initialize", { clientInfo: { name: "dynote", title: "Dynote", version: "0.12.1" }, capabilities: { experimentalApi: true } });
+    await this.request("initialize", { clientInfo: { name: "dynote", title: "Dynote", version: "0.12.2" }, capabilities: { experimentalApi: true } });
     this.write({ method: "initialized", params: {} });
     // Managed/global MCP configuration must not silently add external tools.
     const { config } = await this.request("config/read", { includeLayers: false });

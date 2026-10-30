@@ -1,11 +1,11 @@
-name: Publish Windows v0.12.1
+name: Publish Windows v0.12.2
 on:
   push:
-    branches: [release/windows-v0.12.1]
+    branches: [release/windows-v0.12.2]
 permissions:
   contents: write
 concurrency:
-  group: release-windows-v0.12.1
+  group: release-windows-v0.12.2
   cancel-in-progress: false
 jobs:
   release:
@@ -25,10 +25,16 @@ jobs:
           cache: npm
       - name: Verify immutable release source
         run: |
-          if (git tag --list 'v0.12.1') {
-            if ((git rev-parse HEAD) -ne (git rev-parse v0.12.1)) { throw 'Existing tag differs from HEAD' }
+          if (git tag --list 'v0.12.2') {
+            if ((git rev-parse HEAD) -ne (git rev-parse v0.12.2)) { throw 'Existing tag differs from HEAD' }
           }
-          if ((Get-Content package.json | ConvertFrom-Json).version -ne '0.12.1') { throw 'Version mismatch' }
+          if ((Get-Content package.json | ConvertFrom-Json).version -ne '0.12.2') { throw 'Version mismatch' }
+      - name: Withdraw superseded preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit v0.12.1 --repo mrdylee/dyNote --draft=true
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot withdraw superseded preview' }
       - name: Install locked dependencies
         run: npm ci
       - name: Unit tests on Windows
@@ -36,12 +42,15 @@ jobs:
       - name: Install official CLI runtimes on isolated runner
         run: npm install --global --allow-scripts=@anthropic-ai/claude-code @openai/codex@0.166.0 @anthropic-ai/claude-code@2.1.314
       - name: Verify native CLI discovery and local streaming without real credentials
-        run: node scripts/verify-ai-cli-runtime.mjs
+        run: |
+          node scripts/verify-ai-cli-runtime.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verify-codex-protocol.mjs
       - name: Build Windows x64 package
         run: npm run package:win
       - name: Check package and start actual Windows executable
         run: |
-          $package = Join-Path $PWD 'release/v0.12.1/Dynote-win32-x64'
+          $package = Join-Path $PWD 'release/v0.12.2/Dynote-win32-x64'
           $exe = Join-Path $package 'Dynote.exe'
           $runtime = Join-Path $package 'resources/app.asar.unpacked/node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe'
           if (!(Test-Path $exe) -or !(Test-Path $runtime)) { throw 'Missing Windows executable or Copilot runtime' }
@@ -61,8 +70,8 @@ jobs:
           }
       - name: Archive Windows folder and checksum
         run: |
-          $zip = Join-Path $PWD 'release/v0.12.1/Dynote-0.12.1-windows-x64.zip'
-          Compress-Archive -Path 'release/v0.12.1/Dynote-win32-x64' -DestinationPath $zip -CompressionLevel Optimal
+          $zip = Join-Path $PWD 'release/v0.12.2/Dynote-0.12.2-windows-x64.zip'
+          Compress-Archive -Path 'release/v0.12.2/Dynote-win32-x64' -DestinationPath $zip -CompressionLevel Optimal
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
@@ -73,23 +82,23 @@ jobs:
             }
           } finally { $archive.Dispose() }
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Dynote-0.12.1-windows-x64.zip" | Set-Content 'release/v0.12.1/SHA256SUMS-windows-x64.txt' -Encoding ascii
+          "$hash  Dynote-0.12.2-windows-x64.zip" | Set-Content 'release/v0.12.2/SHA256SUMS-windows-x64.txt' -Encoding ascii
           Write-Host "Windows archive SHA256: $hash"
       - name: Publish verified Windows assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $repo = 'mrdylee/dyNote'
-          $tag = 'v0.12.1'
+          $tag = 'v0.12.2'
           $releaseJson = gh release view $tag --repo $repo --json isDraft,assets 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $repo --target "$env:GITHUB_SHA" --draft --prerelease --title 'Dynote v0.12.1 — 문서 비교·저널·Codex·Claude' --notes-file docs/RELEASE-NOTES-0.12.1.md
+            gh release create $tag --repo $repo --target "$env:GITHUB_SHA" --draft --prerelease --title 'Dynote v0.12.2 — 문서 비교·저널·Codex·Claude' --notes-file docs/RELEASE-NOTES-0.12.2.md
             if ($LASTEXITCODE -ne 0) { throw 'Cannot create release draft' }
           } else {
             $release = $releaseJson | ConvertFrom-Json
             if (!$release.isDraft -or @($release.assets).Count) { throw 'Existing release needs inspection; refusing to replace assets' }
           }
-          gh release upload $tag 'release/v0.12.1/Dynote-0.12.1-windows-x64.zip' 'release/v0.12.1/SHA256SUMS-windows-x64.txt' --repo $repo
+          gh release upload $tag 'release/v0.12.2/Dynote-0.12.2-windows-x64.zip' 'release/v0.12.2/SHA256SUMS-windows-x64.txt' --repo $repo
           if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed' }
           gh release edit $tag --repo $repo --draft=false --prerelease
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

@@ -213,6 +213,7 @@ test("Codex environment excludes ambient credentials and disables unrelated capa
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.NODE_OPTIONS, undefined);
   assert.equal(codexConfig["features.shell_tool"], false);
+  assert.equal(codexConfig["features.view_image"], false);
   assert.equal(codexConfig["features.apps"], false);
   assert.equal(codexConfig["features.plugins"], false);
   assert.equal(codexConfig["orchestrator.skills.enabled"], false);
