@@ -14,9 +14,9 @@ v0.11.0 프리릴리스는 Markdown 서식·글자 색상·우클릭·패널 너
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.11.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 이 결과물은 Mac에서 교차 패키징하며 실제 Windows 실행은 아직 검증하지 않았습니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.11.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. v0.11.0 Windows 배포본은 Windows GitHub runner에서 단위 테스트와 실제 실행 창 생성 검사를 통과했습니다. 전체 UI 수동 검증은 별도입니다. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases)에서 Mac Apple Silicon·Windows x64 ZIP과 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.11.0)에서 Windows x64 ZIP과 전용 SHA-256 파일을 받을 수 있습니다. v0.11.0은 Windows를 먼저 공개했으며 Mac은 후속 배포 예정입니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱을 열면 가상의 예제 문서가 나타납니다. 왼쪽 보관함 이름 옆 화살표로 **다른 폴더 열기**를 선택할 수 있습니다. 처음에는 실제 보관함의 복사본으로 확인하는 것을 권합니다.
 

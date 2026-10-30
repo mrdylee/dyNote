@@ -29,3 +29,5 @@ Windows is cross-packaged; native Windows runtime has not been tested. Capture r
 | Dynote-0.11.0-windows-x64.zip | 380446919 | 00f148360b508fff5334ab6aa868e4fb82c9f85db6543812802f57469c0371c6 |
 
 Public publication, exact downloaded hashes, installed-app replacement and launch are verified separately after publication. Build artifacts and receipts under `release/` and `output/` are ignored and do not ship as source.
+
+Windows was subsequently built and launched on a Windows runner and publicly published. The public native Windows ZIP differs from the earlier local cross-package above; use [Windows publication verification](windows-release-0.11.0.md) for the actual download digest and runtime evidence.
