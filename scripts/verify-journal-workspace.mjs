@@ -17,6 +17,7 @@ const launch=async()=>{
 let app=await launch();
 try {
   const page=await app.firstWindow();page.setDefaultTimeout(10000);
+  console.log('Journal verification viewport',await page.evaluate(()=>({width:innerWidth,height:innerHeight})));
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.getByRole('region',{name:'저널 피드'}).waitFor();
   assert.equal(await page.getByRole('button',{name:'편집 보기',exact:true}).count(),0,'journal feed must not expose actions for a hidden document');
@@ -74,6 +75,9 @@ try {
   await page.getByRole('button',{name:'분류 미리보기',exact:true}).click();
   await page.getByRole('region',{name:'분류 변경 미리보기'}).waitFor();
   await assert.rejects(readFile(`${vault}/Projects/Projects.md`));
+  const preview=page.getByRole('region',{name:'분류 변경 미리보기'});
+  assert.match(await preview.locator('pre').innerText(),/Ship safely/);
+  await preview.getByText('Projects/Projects.md · 새 문서',{exact:true}).click();
   await page.getByRole('button',{name:'확정하여 분류',exact:true}).click();
   await page.getByRole('dialog',{name:'저널 폴더 분류'}).waitFor({state:'hidden'});
   assert.equal(await readFile(`${vault}/Journal/${localDate()}.md`,'utf8'),original);
