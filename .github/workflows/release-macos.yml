@@ -1,0 +1,64 @@
+name: Publish macOS v0.12.2
+on:
+  push:
+    branches: [release/macos-v0.12.2]
+permissions:
+  contents: write
+concurrency:
+  group: release-macos-v0.12.2
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify target and released product source
+        run: |
+          test "$(uname -m)" = arm64
+          node -e "if(require('./package.json').version !== '0.12.2') process.exit(1)"
+          test "$(git rev-parse 'v0.12.2^{commit}')" = d3a2c51d3c37cfec77d30ef323cd183b563b9f79
+          git diff --exit-code v0.12.2 -- core electron src public assembly licenses package.json package-lock.json vite.config.mjs
+      - run: npm ci
+      - name: Unit tests on macOS
+        run: npm test
+      - name: Build signed bundle and distribution files
+        run: |
+          npm run package:mac
+          node scripts/package-mac-distribution.mjs
+      - name: Verify archives and packaged app UI
+        run: |
+          package="$PWD/release/v0.12.2"
+          hdiutil verify "$package/Dynote-0.12.2-macos-arm64.dmg"
+          ditto -x -k "$package/Dynote-0.12.2-macos-arm64.zip" "$RUNNER_TEMP/dynote-extracted"
+          codesign --verify --deep --strict "$RUNNER_TEMP/dynote-extracted/Dynote.app"
+          test -x "$RUNNER_TEMP/dynote-extracted/Dynote.app/Contents/MacOS/Dynote"
+          npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
+          export DYNOTE_PLAYWRIGHT_MODULE="$RUNNER_TEMP/dynote-ui-tools/node_modules/playwright/index.mjs"
+          export DYNOTE_EXECUTABLE="$RUNNER_TEMP/dynote-extracted/Dynote.app/Contents/MacOS/Dynote"
+          node scripts/verify-ai-providers.mjs
+          node scripts/verify-journal-workspace.mjs
+      - name: Add Mac assets to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/mrdylee/dyNote/releases/tags/v0.12.2 > "$RUNNER_TEMP/release-before.json"
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import assert from "node:assert/strict";
+            const r=JSON.parse(readFileSync(process.env.RUNNER_TEMP+"/release-before.json"));
+            assert.equal(r.draft,false);
+            assert.ok(r.assets.some(a=>a.id===692353362 && a.digest==="sha256:7b37e79f899b3ae342125407ed406f8810c622d1ac280075d48f93ec16027664"));
+            assert.ok(r.assets.some(a=>a.id===692353372));
+            assert.ok(!r.assets.some(a=>a.name.includes("macos-arm64")),"Mac assets already exist; inspect before retrying");
+          '
+          gh release upload v0.12.2 --repo mrdylee/dyNote release/v0.12.2/Dynote-0.12.2-macos-arm64.dmg release/v0.12.2/Dynote-0.12.2-macos-arm64.zip release/v0.12.2/SHA256SUMS-macos-arm64.txt
+          gh release edit v0.12.2 --repo mrdylee/dyNote --notes-file docs/RELEASE-NOTES-0.12.2.md
+          gh release view v0.12.2 --repo mrdylee/dyNote --json url,isDraft,isPrerelease,assets

@@ -2,23 +2,23 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.11.0 프리릴리스는 Markdown 서식·글자 색상·우클릭·패널 너비 조절, 버전 표시와 AI 전송·계정 메뉴, 개발 플래너 캡처 검토를 개선합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.11.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
+v0.12.2 프리릴리스는 최대 3문서 비교, 날짜별 저널과 원본을 보존하는 폴더 분류 제안, 주간 업데이트 확인, Codex·Claude CLI 연결을 제공합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.12.2.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
 ## 실행
 
-패키징 결과의 Apple Silicon Mac 앱:
+Apple Silicon Mac에서는 `Dynote-0.12.2-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.11.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.12.2/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.11.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. v0.11.0 Windows 배포본은 Windows GitHub runner에서 단위 테스트와 실제 실행 창 생성 검사를 통과했습니다. 전체 UI 수동 검증은 별도입니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.12.2/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. v0.12.2 Windows 배포본은 Windows GitHub runner에서 단위 테스트와 실제 실행 창 생성 검사를 통과했습니다. 전체 UI 수동 검증은 별도입니다. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.11.0)에서 Windows x64 ZIP과 전용 SHA-256 파일을 받을 수 있습니다. v0.11.0은 Windows를 먼저 공개했으며 Mac은 후속 배포 예정입니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.12.2)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
-앱을 열면 가상의 예제 문서가 나타납니다. 왼쪽 보관함 이름 옆 화살표로 **다른 폴더 열기**를 선택할 수 있습니다. 처음에는 실제 보관함의 복사본으로 확인하는 것을 권합니다.
+앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 
 개발 환경에서는 Node.js 22.13 이상과 npm을 준비합니다.
 
@@ -95,11 +95,12 @@ ZIP 가져오기, Git 자동 pull·충돌 해결, 모바일, Obsidian 플러그�
 
 ```sh
 npm run package:mac
+node scripts/package-mac-distribution.mjs
 npm run package:win
 npm run package:linux
 ```
 
-공식 Electron Packager를 사용해 `release/`에 독립 실행 앱 디렉터리를 만듭니다. **Mac 앱과 Windows x64 실행 폴더를 생성했으며, 실행 검증은 macOS에서만 완료했습니다.** Linux는 패키징 명령만 제공합니다. 설치 마법사나 자동 업데이트는 없습니다. 결과물은 개발용으로 코드 서명하지 않았으며, macOS 공증도 진행하지 않았습니다.
+공식 Electron Packager를 사용해 `release/`에 독립 실행 앱 디렉터리를 만듭니다. Mac 패키징 후 배포 스크립트를 macOS에서 실행하면 DMG·ZIP·체크섬을 생성합니다. Mac 실제 앱 화면과 Windows 네이티브 실행 창을 검증했습니다. Linux는 패키징 명령만 제공합니다. 업데이트 확인·다운로드 후 설치는 수동입니다. Mac은 ad-hoc 무결성 서명이며 Developer ID 배포 서명·Apple 공증은 없습니다.
 
 ## 검증과 분석 근거
 
