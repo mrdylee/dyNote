@@ -8,7 +8,12 @@ await mkdir(profile);await mkdir(vault);await mkdir(`${vault}/Projects`);
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 for(const name of ['A','B','C','D'])await writeFile(`${vault}/${name}.md`,`# ${name}\noriginal ${name}\n`);
 await writeFile(`${vault}/Projects/Plan.md`,'# Projects\n');
-const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const launch=async()=>{
+  const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+  await app.firstWindow();
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1280,900));
+  return app;
+};
 let app=await launch();
 try {
   const page=await app.firstWindow();page.setDefaultTimeout(10000);
