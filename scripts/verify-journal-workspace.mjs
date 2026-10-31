@@ -57,7 +57,7 @@ try {
   const firstPane=page.getByRole('region',{name:'문서 A.md',exact:true});
   await firstPane.getByRole('textbox',{name:'Markdown 편집기'}).click();
   const beforeB=await readFile(`${vault}/B.md`,'utf8'),beforeC=await readFile(`${vault}/C.md`,'utf8');
-  await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill('일지 시간 기록 삽입');await page.keyboard.press('Enter');
+  await page.getByRole('button',{name:'명령 팔레트',exact:true}).click();await page.getByRole('textbox',{name:'명령 검색'}).fill('일지 시간 기록 삽입');await page.keyboard.press('Enter');
   await page.keyboard.press('Meta+s');await page.waitForFunction(()=>document.querySelector('.save-status')?.classList.contains('saved'));
   assert.match(await readFile(`${vault}/A.md`,'utf8'),/\d{1,2}:\d{2}/);
   assert.equal(await readFile(`${vault}/B.md`,'utf8'),beforeB);assert.equal(await readFile(`${vault}/C.md`,'utf8'),beforeC);
@@ -82,7 +82,7 @@ try {
   await page.getByRole('dialog',{name:'저널 폴더 분류'}).waitFor({state:'hidden'});
   assert.equal(await readFile(`${vault}/Journal/${localDate()}.md`,'utf8'),original);
   const classified=await readFile(`${vault}/Projects/Projects.md`,'utf8');assert.match(classified,/Ship safely/);assert.doesNotMatch(classified,/Keep here/);
-  await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill('Dynote 업데이트 확인');await page.keyboard.press('Enter');
+  await page.getByRole('button',{name:'명령 팔레트',exact:true}).click();await page.getByRole('textbox',{name:'명령 검색'}).fill('Dynote 업데이트 확인');await page.keyboard.press('Enter');
   await page.getByRole('checkbox',{name:'매주 업데이트 자동 확인'}).uncheck();
   await page.getByRole('checkbox',{name:'백그라운드 다운로드'}).uncheck();
   await page.getByRole('checkbox',{name:'시험 버전 포함'}).check();
@@ -97,7 +97,7 @@ try {
   await reopened.getByRole('region',{name:`문서 Journal/${localDate()}.md`,exact:true}).waitFor();
   assert.equal(await reopened.getByRole('region',{name:'저널 피드'}).count(),0);
   const restored=await reopened.evaluate(()=>window.notes.updateState());assert.equal(restored.value.preferences.enabled,false);assert.equal(restored.value.preferences.includePrerelease,true);
-  await reopened.keyboard.press('Meta+p');await reopened.getByRole('textbox',{name:'명령 검색'}).fill('Dynote 업데이트 확인');await reopened.keyboard.press('Enter');
+  await reopened.getByRole('button',{name:'명령 팔레트',exact:true}).click();await reopened.getByRole('textbox',{name:'명령 검색'}).fill('Dynote 업데이트 확인');await reopened.keyboard.press('Enter');
   await reopened.getByRole('button',{name:'시작 화면',exact:true}).click();await reopened.getByRole('combobox',{name:'시작 화면'}).selectOption('journal');
   await app.close();app=await launch();const feed=await app.firstWindow();await feed.getByRole('region',{name:'저널 피드'}).waitFor();
   assert.equal(await readFile(`${vault}/Journal/${localDate()}.md`,'utf8'),original);
