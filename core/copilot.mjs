@@ -1,5 +1,14 @@
 const bytes = (text) => new TextEncoder().encode(text).length;
 export const MAX_ANSWER = 128 * 1024;
+export const MAX_IMAGE_DATA = 8 * 1024 * 1024;
+const validEffort = value => typeof value === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
+export function reasoningCapabilities(values, defaultValue) {
+  const reasoningEfforts = [...new Set((values ?? []).filter(validEffort))];
+  return reasoningEfforts.length ? { reasoningEfforts, ...(reasoningEfforts.includes(defaultValue) ? { defaultReasoningEffort: defaultValue } : {}) } : {};
+}
+export function validateReasoningEffort(model, value) {
+  if (value && !model.reasoningEfforts?.includes(value)) throw new Error("선택한 모델의 추론 강도를 다시 선택해 주세요.");
+}
 const bounded = (value, limit, message) => {
   if (typeof value !== "string" || bytes(value) > limit) throw new Error(message);
   return value;
@@ -41,6 +50,7 @@ export function prepareRequest(args) {
   const model = bounded(args.model, 200, "모델을 선택해 주세요.");
   if (!model.trim()) throw new Error("모델을 선택해 주세요.");
   if (!["chat", "edit", "agent"].includes(args.mode)) throw new Error("작업 방식을 선택해 주세요.");
+  if (args.reasoningEffort !== undefined && args.reasoningEffort !== "" && !validEffort(args.reasoningEffort)) throw new Error("추론 강도를 확인해 주세요.");
   const input = args.context;
   if (!input || !["none", "document", "selection"].includes(input.kind)) throw new Error("문서 범위를 선택해 주세요.");
   const context = input.kind === "none" ? { kind: "none" } : {
@@ -75,17 +85,18 @@ export function prepareRequest(args) {
   if (args.image != null) {
     const value = args.image;
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(value.mimeType) ||
-        typeof value.data !== 'string' || !value.data.length || value.data.length > 8 * 1024 * 1024 ||
+        typeof value.data !== 'string' || !value.data.length || value.data.length > MAX_IMAGE_DATA ||
         value.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.data))
       throw new Error('이미지는 PNG/JPEG/WebP, 최대 6MB로 보내 주세요.');
     image = { mimeType: value.mimeType, data: value.data };
   }
-  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, vaultAccess: args.vaultAccess === true, ...(image ? { image } : {}) };
+  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, vaultAccess: args.vaultAccess === true, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}), ...(image ? { image } : {}) };
 }
 
-export function sessionOptions(model, mode, tools = []) {
+export function sessionOptions(model, mode, tools = [], reasoningEffort) {
   return {
     ...(model ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     streaming: true,
     availableTools: mode === "agent" ? tools.map((tool) => tool.name) : [],
     ...(mode === "agent" ? { tools } : {}),

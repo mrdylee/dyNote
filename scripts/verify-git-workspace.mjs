@@ -12,6 +12,8 @@ const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/e
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill('Git 변경 관리');await page.keyboard.press('Enter');
+ assert.equal(await page.locator('.settings-tabs [aria-current=page]').innerText(),'백업·복원');
+ assert.equal(await page.getByRole('button',{name:'고급 Git 관리',exact:true}).getAttribute('aria-pressed'),'true');
  const panel=page.getByRole('region',{name:'Git 변경 관리'});await panel.waitFor();await panel.getByRole('button',{name:'A.md 스테이징',exact:true}).click();
  await panel.getByRole('button',{name:'A.md 스테이징 해제',exact:true}).waitFor();await panel.getByRole('button',{name:'A.md',exact:true}).click();assert.match(await page.getByLabel('Git 파일 차이').textContent(),/\+native changed/);
  await page.getByRole('textbox',{name:'Git 커밋 메시지'}).fill('native UI commit');await page.getByRole('button',{name:'스테이징한 변경 커밋',exact:true}).click();await page.getByText('노트 변경사항이 없습니다.',{exact:true}).waitFor();

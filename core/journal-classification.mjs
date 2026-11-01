@@ -37,7 +37,6 @@ function plan(capture,input) {
     const repeated=previous.includes(`<!-- dynote-journal:${sourceId}:`);
     const block=`${marker}\n> 출처: ${sourceLink}${repeated?' · 추가 발췌 (기존 내용 유지)':''}\n\n${excerpt}`;
     const result=previous+(previous.trim()?'\n\n':'')+block;
-    if(Buffer.byteLength(result)>8*1024*1024)throw new Error('분류 문서는 8MB 이하여야 합니다.');
     changes.set(targetPath,result);
   }
   return {input:{items},edits:[...changes].map(([path,content])=>({path,content})),changes:[...changes].map(([path,after])=>({path,before:capture.notes.find(n=>n.path===path)?.content??'',after}))};

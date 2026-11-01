@@ -31,14 +31,14 @@ function DocumentPane(props) {
     FORBID_TAGS:['iframe','style','form','svg','math'],ADD_ATTR:['data-note','data-external','data-anchor','data-attachment','data-attachment-fragment','data-task-line','data-embed'],ADD_URI_SAFE_ATTR:['src'],
   }),[note.content,note.path,notes,vault.id,vault.attachments,mode]);
   return <Pane {...props} onFocus={focus}>
-    {pending&&<section className="copilot-live-banner" aria-label="Copilot 실시간 변경">
-      <strong>Copilot · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
+    {pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+      <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
       {pending.userEdited&&<p>직접 편집하여 AI 추가 반영을 멈췄습니다.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
       {compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
     </section>}
     <div className="editor-preview">
-      {mode!=='read'&&<Editor note={note} notes={notes} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={onImportFiles} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{focus();onLink(target,kind,note.path);}} jump={active?jump:null} readOnly={disabled||edits.working}/>}
+      {mode!=='read'&&<Editor note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={onImportFiles} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{focus();onLink(target,kind,note.path);}} jump={active?jump:null} readOnly={disabled||edits.working}/>}
       {(mode==='read'||mode==='split')&&<DiagramPreview previewRef={preview} html={html} onClick={event=>{focus();onPreviewLink(event,note.path,preview.current);}}/>}
     </div>
     {mode==='read'&&<div className="document-bottom"><button onClick={()=>{focus();props.onEdit();}}>이 문서 편집</button></div>}

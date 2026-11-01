@@ -10,6 +10,16 @@ test('calendar dates reject rollover and preserve missing years as undated', () 
   assert.equal(rows[0].start,''); assert.match(rows[0].uncertainty,/연도/);
   assert.throws(()=>item({end:'2026-11-19'}),/종료/);
 });
+test('AI captures are saveable drafts without dates or optional details',()=>{
+  const rows=parseCapture(JSON.stringify({items:[{title:'일정 초안',sourceText:'일정 TBD'}]}),{path:'_attachments/source.png',hash:'original'});
+  assert.equal(rows[0].status,'draft');
+  assert.equal(rows[0].start,'');assert.equal(rows[0].end,'');assert.equal(rows[0].target,'');assert.equal(rows[0].stage,'');
+  assert.deepEqual(rows[0].tasks,[]);
+  const saved=readBoard(writeBoard(registerItems({version:1,items:[]},rows).board));
+  assert.deepEqual(saved.items,rows);
+  assert.equal(normalizeItem({title:'수동 일정'}).start,'');
+  assert.equal(normalizeItem({title:'기존 일정',status:'active'}).status,'active');
+});
 test('model data is validated; literal tasks never become recommendations', () => {
   const rows=parseCapture('```json\n'+JSON.stringify({items:[{title:'Review',tasks:['시험 준비'],bbox:[0.1,0.2,0.5,0.3]}]})+'\n```');
   assert.equal(rows[0].tasks[0].origin,'source'); assert.equal(rows[0].tasks[0].done,false);

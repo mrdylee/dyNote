@@ -32,7 +32,7 @@ export default function GitWorkspace({onStatus,onDiff,onAction,backupEnabled,bus
       {!state.files.length&&<p className="muted">노트 변경사항이 없습니다.</p>}
       {diff&&<pre className="git-diff" aria-label="Git 파일 차이">{diff}</pre>}
       <form onSubmit={e=>{e.preventDefault();action('commit',{message});}}><label>커밋 메시지<input aria-label="Git 커밋 메시지" value={message} disabled={locked} onChange={e=>setMessage(e.target.value)}/></label><button className="primary-button" disabled={locked||!message.trim()||!state.files.some(f=>f.index!==' '&&f.index!=='?')}>스테이징한 변경 커밋</button></form>
-      <h4>로컬 브랜치</h4>{backupEnabled&&<p className="muted">브랜치 변경 전 Git 백업 탭에서 자동 백업을 꺼 주세요.</p>}
+      <h4>로컬 브랜치</h4>{backupEnabled&&<p className="muted">브랜치 변경 전 위의 자동 백업에서 자동 백업을 꺼 주세요.</p>}
       <div className="git-workspace-actions"><select aria-label="전환할 Git 브랜치" value={state.branches.includes(state.branch)?state.branch:''} disabled={locked||backupEnabled} onChange={e=>action('switch-branch',{branch:e.target.value})}>
         {!state.branches.includes(state.branch)&&<option value="">브랜치 선택</option>}{state.branches.map(b=><option key={b}>{b}</option>)}
       </select></div>

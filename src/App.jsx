@@ -62,6 +62,7 @@ import GitHistory from "./GitHistory.jsx";
 import GitWorkspace from "./GitWorkspace.jsx";
 import UpdateSettings from "./UpdateSettings.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
+import useAiSession from "./useAiSession.jsx";
 import useCopilotEdits from "./useCopilotEdits.jsx";
 import { overlayNotes } from "./copilotEdits.mjs";
 import { applyProposal } from "../core/copilot.mjs";
@@ -208,6 +209,7 @@ function Modal({ title, children, onClose, wide = false, className = "" }) {
 }
 
 export default function App() {
+  const aiSession = useAiSession(api);
   const [fonts, setFonts] = useState(() => {
     try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
   });
@@ -300,7 +302,11 @@ export default function App() {
     if (editorCommand.path !== active) { setEditorCommand(null); return; }
     const view = editorView.current;
     if (!view) return;
-    if (editorCommand.type === "timestamp" && !view.state.readOnly) {
+    if (editorCommand.type === "focus-end") {
+      if (busy || view.state.readOnly) return;
+      view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+      view.focus();
+    } else if (editorCommand.type === "timestamp" && !view.state.readOnly) {
       const cursor = editorCommand.atEnd ? view.state.doc.length : view.state.selection.main.head;
       const date = periodicEntries([{ path: active }], "daily", { ...journalPreferences.daily, locale: journalPreferences.locale })[0]?.date;
       const edit = timestampInsertion(view.state.doc.toString(), cursor, date, new Date(editorCommand.now), journalPreferences);
@@ -308,7 +314,7 @@ export default function App() {
       view.focus();
     } else if (editorCommand.type !== "timestamp") runOutlineCommand(view, editorCommand.action);
     setEditorCommand(null);
-  }, [editorCommand, mode, active]);
+  }, [editorCommand, mode, active, busy]);
   const [navigation, setNavigation] = useState(normalizeNavigation(null));
   const navigationRef = useRef(navigation);
   const [journalPreferences, setJournalPreferences] = useState({});
@@ -345,7 +351,8 @@ export default function App() {
   const note = section === "journal" ? null : model.notes.find((n) => n.path === active);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
   const structured = section === "journal" ? null : documents.find((d) => d.path === active);
-  const journalNote = note && periodicEntries([note], "daily", {...journalPreferences.daily,locale:journalPreferences.locale}).length > 0;
+  const journalPaths = useMemo(() => new Set(periodicEntries(model.notes, "daily", {...journalPreferences.daily,locale:journalPreferences.locale}).map(n => n.path)), [model.notes, journalPreferences]);
+  const journalNote = note && journalPaths.has(note.path);
   const classification = useMemo(()=>journalNote && status === "saved" ? classificationSuggestions(note,model.notes) : [],[journalNote,note,model.notes,status]);
   const statistics = useMemo(() => wordStatistics(note?.content ?? ""), [note?.content]);
   const results = useMemo(
@@ -530,12 +537,13 @@ export default function App() {
       const templatePath = journalPreferences[target.period]?.template;
       const template = templatePath ? effectiveNotes.find(n => n.path === templatePath) : null;
       if (templatePath && !template) throw new Error("템플릿을 찾을 수 없습니다. 일지 설정을 확인해 주세요.");
-      const content = template ? renderTemplate(template.content, target) : `# ${target.title}\n\n`;
+      const content = template ? renderTemplate(template.content, target) : `# ${target.title}\n\n${target.period === "daily" ? "- " : ""}`;
       const created = await invoke(api.openOrCreateNote({ vaultId, path: target.path, content }));
       if (currentVault.current !== vaultId) return;
       revisions.current.set(created.path, created.revision);
       setRaw(old => [...old.filter(n => n.path !== created.path), created]);
       openNote(created.path); setMode("edit"); setError("");
+      setEditorCommand({ path: created.path, type: "focus-end" });
     } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
     finally { setBusy(false); }
   };
@@ -1344,7 +1352,7 @@ export default function App() {
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={path=>{openNote(path);setMode("edit");}} onCreate={createPeriodic} disabled={busy}/>
             : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
-            : section === "planner" ? <Planner key={vault.id} api={api} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
+            : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
               onSave={async (content, expectedRevision) => {
@@ -1402,7 +1410,7 @@ export default function App() {
               </div>
             ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || edits.blocked()} onError={setError}/>
             : note ? (
-              <DocumentWorkspace workspace={workspace} notes={model.notes} vault={vault} onOpen={openNote} onAdd={addPane}
+              <DocumentWorkspace workspace={workspace} notes={model.notes} journalPaths={journalPaths} vault={vault} onOpen={openNote} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
                 fonts={fonts} onFontSettings={()=>{setSettingsTab("fonts");setModal("settings");}}
                 onChange={changeFile} onImportFiles={importFiles} onLink={followEditorLink} onPreviewLink={followLink}
@@ -1465,7 +1473,7 @@ export default function App() {
               </button>
               <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />AI 채팅</button>
             </div>
-            <CopilotPanel key={vault.id ?? "missing"} api={api}
+            <CopilotPanel key={vault.id ?? "missing"} api={api} session={aiSession}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
               notes={raw} liveEdits={edits} onOpenVault={pickFolder}
               onBeginLive={async (requestId) => { await flush(); edits.begin(requestId); }}
@@ -1943,9 +1951,13 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["git", "Git 백업"], ["git-workspace", "Git 변경"], ["history", "백업 복원"], ["updates", "업데이트"]].map(([key, label]) =>
-              <button key={key} aria-current={settingsTab === key ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+              <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
+          {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
+            {[["git", "자동 백업"], ["history", "복원"], ["git-workspace", "고급 Git 관리"]].map(([key, label]) =>
+              <button key={key} aria-pressed={settingsTab === key} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+          </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
             onList={() => invoke(api.vaults())}
@@ -1979,7 +1991,7 @@ export default function App() {
                 return result.status;
               } finally { setBusy(false); }
             }}/>}
-          {["git", "history"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
+          {["git", "history", "git-workspace"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
             onClone={async (config) => {

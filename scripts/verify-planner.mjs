@@ -26,7 +26,6 @@ const start=async()=>{
     });
   },captureAuditPrompt);
 };
-const confirmSource=async()=>{for(const box of await page.getByRole('checkbox',{name:/원본 대조 확인$/}).all())await box.check();};
 const disk=async predicate=>{let board;for(let i=0;i<60;i++){try{board=readBoard(await readFile(`${vault}/${BOARD_PATH}`,'utf8'));if(predicate(board))return board;}catch{}await page.waitForTimeout(80);}assert.ok(predicate(board),JSON.stringify(board));return board;};
 try{
   await start();await page.screenshot({path:`${output}/empty.png`});
@@ -36,14 +35,11 @@ try{
   await app.evaluate(async({clipboard,ClipboardItem},base64)=>{ globalThis.previousPlannerClipboard=await Promise.all((await clipboard.read()).filter(item=>item.types.length).map(async item=>new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type=>[type,await item.getType(type)])))))); await clipboard.write([new ClipboardItem({'image/png':new Blob([Buffer.from(base64,'base64')],{type:'image/png'})})]); },image);
   await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');
 
-  await page.getByLabel('추출 제목',{exact:true}).waitFor();
-  assert.equal(await page.getByLabel('추출 시작일',{exact:true}).inputValue(),'2026-11-20');
-  await page.getByLabel('추출 종료일',{exact:true}).fill('2026-11-22');
-  await page.screenshot({path:`${output}/capture-review.png`});
-  await confirmSource();await page.getByRole('button',{name:'선택한 2개 등록',exact:true}).click();
-  let board=await disk(b=>b.items.length===2);assert.equal(board.items[0].end,'2026-11-22');assert.equal(board.items[1].start,'');assert.match(board.items[1].uncertainty,/연도/);assert.equal(board.items[0].tasks[0].origin,'source');
-  checks.push('clipboard image → actual attachment → editable extraction review → Markdown registration');
-  await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');await page.getByLabel('추출 제목',{exact:true}).waitFor();await page.getByLabel('BMS 설계 확인 등록 선택',{exact:true}).uncheck();await confirmSource();await page.getByRole('button',{name:'선택한 1개 등록',exact:true}).click();await page.locator('.planner-notice').filter({hasText:'0개 등록 · 중복 1개 제외'}).waitFor();await disk(b=>b.items.length===2);checks.push('selection review and duplicate capture preserve user-corrected dates');
+  await page.locator('.planner-card').filter({hasText:'DV 준비 검토'}).waitFor();
+  let board=await disk(b=>b.items.length===2);assert.equal(board.items[0].end,'2026-11-21');assert.equal(board.items[1].start,'');assert.match(board.items[1].uncertainty,/연도/);assert.equal(board.items[0].tasks[0].origin,'source');assert.ok(board.items.every(item=>item.status==='draft'));
+  checks.push('clipboard image → actual attachment → automatic AI draft save including an undated row');
+  await page.getByRole('button',{name:/Link DV.*DV 준비 검토/}).click();await page.getByLabel('종료일',{exact:true}).fill('2026-11-22');await page.getByRole('button',{name:'저장',exact:true}).click();
+  await page.locator('.planner-heading h1').click();await page.keyboard.press(process.platform==='darwin'?'Meta+v':'Control+v');await page.locator('.planner-notice').filter({hasText:'중복 2개 제외'}).waitFor();board=await disk(b=>b.items.length===2);assert.equal(board.items[0].end,'2026-11-22');checks.push('automatic duplicate capture preserves user-corrected dates');
   await page.getByRole('button',{name:/Link DV.*DV 준비 검토/}).click();
   await page.getByRole('textbox',{name:'새 준비 작업',exact:true}).fill('장비 준비');await page.getByRole('button',{name:'준비 작업 추가',exact:true}).click();
   await page.getByRole('combobox',{name:'근거 문서',exact:true}).selectOption('REQ.md');await page.getByRole('button',{name:'근거 연결',exact:true}).click();

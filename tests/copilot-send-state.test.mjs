@@ -28,3 +28,11 @@ test("fresh connection uses advertised Auto; valid explicit choice survives refr
   assert.equal(defaultCopilotModel(models,"other"),"other");
   assert.equal(defaultCopilotModel([{id:"other"}],"stale"),"");
 });
+test("disconnected providers use their own names and surface connection errors",()=>{
+  for(const label of ["Copilot","Codex","Claude"]){
+    const state={...ready,label,accountLabel:label==="Codex"?"ChatGPT":"GitHub",connection:{authenticated:false,models:[]}};
+    assert.equal(sendBlock(state).message,`${label} 로그인이 필요합니다.`);
+    assert.match(sendBlock({...state,authBusy:true}).message,new RegExp(`${label} 로그인`));
+    assert.equal(sendBlock({...state,connection:{...state.connection,error:"CLI를 업데이트해 주세요."}}).message,"CLI를 업데이트해 주세요.");
+  }
+});

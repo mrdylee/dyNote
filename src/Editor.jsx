@@ -30,6 +30,7 @@ import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor } from "./editorCommands.mjs";
+import { journalOutline, addJournalBlock } from "./journal-outline.mjs";
 
 export default function Editor({
   note,
@@ -37,6 +38,7 @@ export default function Editor({
   onChange,
   onImportFiles,
   live = false,
+  journal = false,
   vaultId,
   attachments,
   onLink,
@@ -60,6 +62,7 @@ export default function Editor({
   const wasPending = useRef(false);
   const readonly = useRef(new Compartment());
   const rendering = useRef(new Compartment());
+  const outlining = useRef(new Compartment());
   const pendingMarks = useRef(new Compartment());
   const latest = useRef(null);
   latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
@@ -86,6 +89,7 @@ export default function Editor({
           bracketMatching(),
           markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
           rendering.current.of(live ? liveExtensions() : []),
+          outlining.current.of(journal ? journalOutline() : []),
           autocompletion({
             override: [
               (context) => {
@@ -218,6 +222,7 @@ export default function Editor({
     });
   }, [readOnly]);
   useEffect(() => { editor.current?.requestMeasure(); }, [fontSettings]);
+  useEffect(() => { editor.current?.dispatch({ effects: outlining.current.reconfigure(journal ? journalOutline() : []) }); }, [journal]);
   useEffect(() => {
     const view = editor.current;
     if (!view) return;
@@ -270,6 +275,12 @@ export default function Editor({
     }
   }, [jump, note.path]);
   return <div className="code-editor">
+    {journal && <div className="journal-outline-toolbar" role="toolbar" aria-label="저널 블록 작성">
+      <span>Enter 새 블록 · Tab 하위 · Shift+Tab 상위 · Shift+Enter 줄바꿈</span>
+      <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => addJournalBlock(editor.current)}>저널 블록 추가</button>
+      <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runOutlineCommand(editor.current, "fold")}>하위 블록 접기</button>
+      <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runOutlineCommand(editor.current, "unfold")}>하위 블록 펼치기</button>
+    </div>}
     <div className="format-toolbar" role="toolbar" aria-label="Markdown 서식">
       {[["bold", "굵게", "B"], ["italic", "기울임", "I"], ["strike", "취소선", "S"], ["code", "인라인 코드", "</>"]].map(([format, label, text]) =>
         <button key={format} className={`format-${format}`} type="button" aria-label={label} title={label} disabled={readOnly}

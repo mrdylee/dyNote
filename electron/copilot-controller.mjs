@@ -1,8 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { MAX_ANSWER, prepareRequest, safeLoginUrl, sessionOptions } from "../core/copilot.mjs";
+import { MAX_ANSWER, prepareRequest, reasoningCapabilities, safeLoginUrl, sessionOptions, validateReasoningEffort } from "../core/copilot.mjs";
 import { noteTools } from "../core/copilot-agent.mjs";
+import { skillTools } from "./ai-skills.mjs";
 
 const message = (error) => String(error?.message ?? error).replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, "[redacted]").slice(0, 800);
 
@@ -13,11 +14,12 @@ export function runtimeEnvironment(env = process.env) {
 }
 
 export class CopilotController {
-  constructor({ directory, onEvent, openExternal, createClient, getNotes }) {
+  constructor({ directory, onEvent, openExternal, createClient, getNotes, getExtensions = async () => ({}) }) {
     this.directory = directory;
     this.onEvent = onEvent;
     this.openExternal = openExternal;
     this.getNotes = getNotes;
+    this.getExtensions = getExtensions;
     this.createClient = createClient ?? (async () => {
       const { CopilotClient, RuntimeConnection } = await import("@github/copilot-sdk");
       // Executables must live outside app.asar; the platform package is unpacked
@@ -64,7 +66,8 @@ export class CopilotController {
       try {
         result.models = (await client.listModels())
           .filter((model) => model.policy?.state !== "disabled")
-          .map((model) => ({ id: model.id, name: model.name || model.id, vision: model.capabilities?.supports?.vision === true }));
+          .map((model) => ({ id: model.id, name: model.name || model.id, vision: model.capabilities?.supports?.vision === true,
+            ...reasoningCapabilities(model.capabilities?.supports?.reasoningEffort ? model.supportedReasoningEfforts : [], model.defaultReasoningEffort) }));
       } catch (error) { result.error = message(error); }
     }
     return result;
@@ -90,15 +93,47 @@ export class CopilotController {
       if (!status.authenticated) throw new Error("먼저 GitHub Copilot에 연결해 주세요.");
       if (!status.models.some((model) => model.id === args.model))
         throw new Error(status.error || "선택한 모델을 사용할 수 없습니다. 연결 상태를 새로 확인해 주세요.");
+      validateReasoningEffort(status.models.find(model => model.id === args.model), args.reasoningEffort);
       if (args.image && !status.models.find(model => model.id === args.model)?.vision)
         throw new Error('이미지를 지원하는 모델을 선택해 주세요.');
       const tools = args.mode === "agent" ? noteTools({ args, getNotes: this.getNotes, emit, canceled: () => job.canceled || !!job.failure || this.closed }) : [];
-      job.session = await client.createSession(sessionOptions(args.model, args.mode, tools));
+      const extensions = args.mode === "agent" ? await this.getExtensions() : {};
+      if (job.canceled) return;
+      const servers = extensions.mcpServers ?? {}, directories = extensions.skillDirectories ?? [];
+      const options = sessionOptions(args.model, args.mode, tools, args.reasoningEffort);
+      if (Object.keys(servers).length || directories.length) {
+        const selectedSkills = await skillTools({ directories, emit, canceled: () => job.canceled || !!job.failure || this.closed });
+        if (job.canceled) return;
+        options.tools = [...tools, ...selectedSkills];
+        options.availableTools = [...options.availableTools, ...selectedSkills.map(tool => tool.name), ...(Object.keys(servers).length ? ["mcp:*"] : []), ...(directories.length ? ["builtin:skill"] : [])];
+        options.mcpServers = Object.fromEntries(Object.entries(servers).map(([name, { cwd, ...server }]) => [name, { ...server, ...(cwd ? { workingDirectory: cwd } : {}) }]));
+        options.enableSkills = directories.length > 0;
+        options.skillDirectories = directories;
+        options.onPermissionRequest = (request, invocation) => {
+          if (job.canceled || job.failure || this.closed || request.kind !== "mcp" || request.managedApprovalRequired || invocation?.promptRequest?.managedApprovalRequired || !Object.hasOwn(servers, request.serverName)) return { kind: "reject" };
+          const allowed = servers[request.serverName].tools ?? ["*"];
+          const tool = request.toolName.startsWith(`${request.serverName}-`) ? request.toolName.slice(request.serverName.length + 1) : request.toolName;
+          return { kind: allowed.includes("*") || allowed.includes(tool) ? "approve-once" : "reject" };
+        };
+        options.systemMessage = { ...options.systemMessage, content: options.systemMessage.content
+          .replace("Use only the Dynote tools to read permitted notes and prepare writing changes.", "Use Dynote tools to read permitted notes and prepare writing changes. You may also use the configured MCP tools and skills when relevant. Use dynote_list_skills to discover selected skills and dynote_use_skill to read their instructions or relative resources; scripts are not executed by that tool.")
+          .replace("No shell or external filesystem access is available.", "Do not use MCP tools or skills to bypass Dynote note permissions or draft review.") };
+      }
+      job.session = await client.createSession(options);
       if (job.canceled) return;
       await job.session.rpc.options.update({ installedPlugins: [] });
       if (job.canceled) return;
+      const activeTools = new Map();
       unsubscribe = job.session.on((event) => {
         if (job.canceled || job.failure) return;
+        if (args.mode === "agent" && event.type === "tool.execution_start" && !event.data.toolName.startsWith("dynote_")) {
+          activeTools.set(event.data.toolCallId, event.data.toolName);
+          emit("tool", { message: `도구 실행 · ${event.data.toolName.slice(0, 120)}` });
+        }
+        if (event.type === "tool.execution_complete" && activeTools.has(event.data.toolCallId)) {
+          emit("tool", { message: `도구 ${event.data.success ? "완료" : "실패"} · ${activeTools.get(event.data.toolCallId).slice(0, 120)}` });
+          activeTools.delete(event.data.toolCallId);
+        }
         if (event.type === "assistant.message_delta") {
           const delta = event.data.deltaContent;
           if (typeof delta !== "string") return;

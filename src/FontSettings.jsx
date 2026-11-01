@@ -29,20 +29,24 @@ function FontFamily({ label, value, families, onChange }) {
 }
 
 export default function FontSettings({ value, onChange }) {
-  const [families, setFamilies] = useState([]), [message, setMessage] = useState("");
+  const [families, setFamilies] = useState([]), [message, setMessage] = useState("설치 글꼴을 불러오는 중…");
   const update = (key, next) => onChange({ ...value, [key]: next });
-  const load = async () => {
-    try {
-      if (!window.queryLocalFonts) throw new Error("unavailable");
-      const fonts = await window.queryLocalFonts();
-      const names = [...new Set(fonts.map((font) => font.family))].sort((a, b) => a.localeCompare(b, "ko"));
-      setFamilies(names); setMessage(`${names.length}개 설치 글꼴을 불러왔습니다.`);
-    } catch { setMessage("설치 글꼴 목록을 불러오지 못했습니다. 글꼴 이름을 직접 입력할 수 있습니다."); }
-  };
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        if (!window.queryLocalFonts) throw new Error("unavailable");
+        const fonts = await window.queryLocalFonts();
+        const names = [...new Set(fonts.map((font) => font.family))].sort((a, b) => a.localeCompare(b, "ko"));
+        if (mounted) { setFamilies(names); setMessage(`${names.length}개 설치 글꼴을 불러왔습니다.`); }
+      } catch { if (mounted) setMessage("설치 글꼴 목록을 불러오지 못했습니다. 글꼴 이름을 직접 입력할 수 있습니다."); }
+    };
+    load();
+    return () => { mounted = false; };
+  }, []);
   const styles = fontVariables(value);
   return <div className="font-settings">
     <p>이 기기에 설치된 글꼴을 사용합니다. 다른 기기에 없는 글꼴은 기본 글꼴로 표시됩니다.</p>
-    <button className="secondary-button" onClick={load}>설치 글꼴 불러오기</button>
     <p role="status" className="muted">{message}</p>
     {[["ui", "화면", 11, 20], ["body", "본문", 12, 32], ["code", "코드", 10, 24]].map(([key, label, min, max]) => <div className="font-setting-row" key={key}>
       <FontFamily label={label} value={value[`${key}Family`]} families={families} onChange={(next) => update(`${key}Family`, next)} />

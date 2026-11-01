@@ -32,7 +32,31 @@ test("Claude status strips credentials and offers explicit model aliases", async
   const f = fixture(); const status = await f.controller.status();
   assert.equal(status.authenticated, true); assert.equal(status.login, "user@example.test");
   assert.deepEqual(status.models.map(m => m.id), ["sonnet", "opus", "haiku"]);
+  assert.ok(status.models.every(m => m.vision));
   assert.ok(!JSON.stringify(status).includes("private-token")); await f.controller.close();
+});
+test("Claude does not silently ignore an unsupported reasoning override", async () => {
+  const f = fixture();
+  try { assert.throws(() => f.controller.send(request({ reasoningEffort: "low" })), /추론/); }
+  finally { await f.controller.close(); }
+});
+test("Claude sends captures as structured image input using the existing account", async () => {
+  const f = fixture();
+  try {
+    f.controller.send(request({ mode: "chat", image: { mimeType: "image/jpeg", data: "aGVsbG8=" } }));
+    const call = await waitFor(f, c => c.args.includes("--print"));
+    assert.equal(call.args[call.args.indexOf("--input-format") + 1], "stream-json");
+    const input = JSON.parse(call.input);
+    assert.equal(input.type, "user");
+    assert.equal(input.message.role, "user");
+    assert.equal(JSON.parse(input.message.content[0].text).references[0].content, "참고");
+    assert.deepEqual(input.message.content[1], { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "aGVsbG8=" } });
+    call.child.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: "capture result" }) + "\n");
+    call.child.emit("close", 0);
+    await f.controller.settled();
+    assert.equal(f.events.at(-1).type, "done");
+    assert.ok(!f.calls.some(c => c.args.includes("login")));
+  } finally { await f.controller.close(); }
 });
 test("Claude streams bounded text, sends references through stdin, and completes only on successful exit", async () => {
   const f = fixture(); f.controller.send(request());

@@ -15,6 +15,7 @@ async function setup() {
   page = await app.firstWindow(); page.setDefaultTimeout(12000);
   page.on("pageerror", (e) => report.errors.push(e.message));
   await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   report.packaged = await app.evaluate(({ app }) => app.isPackaged);
   await app.evaluate(({ ipcMain, app }) => {
     const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
@@ -49,12 +50,12 @@ async function edit(content) {
 async function done() {
   await app.evaluate(() => globalThis.liveEmit("done", { content: "변경을 확인해 주세요." }));
   await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor({ state: "hidden" });
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
 }
 async function waitText(text) { await page.waitForFunction((text) => document.querySelector(".cm-content")?.textContent.includes(text), text); }
 async function resolve(name) {
   await page.getByRole("button", { name, exact: true }).click();
-  await page.getByLabel("Copilot 실시간 변경").waitFor({ state: "hidden" });
+  await page.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
 }
 try {
   await setup();
@@ -79,7 +80,7 @@ try {
   report.checks.push("Keep writes exact CRLF content through real vault API");
   await ask(); await edit("\nStopped"); await waitText("Stopped");
   await page.getByRole("button", { name: "Copilot 응답 중지" }).click();
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.match(await page.locator(".cm-content").innerText(), /Stopped/);
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), kept);
   await resolve("변경 되돌리기");
@@ -108,7 +109,7 @@ try {
   report.checks.push("Typing stops further AI application; destructive Undo disabled; Keep preserves user edits; late tool output ignored");
   await ask(); await edit("\nRecover after restart"); await waitText("Recover after restart"); await done();
   await page.locator('.file-row[title="Ref.md"]').click();
-  assert.equal(await page.getByLabel("Copilot 실시간 변경").count(), 0);
+  assert.equal(await page.getByLabel("AI 실시간 변경").count(), 0);
   await page.locator(".copilot-pending-list").getByRole("button", { name: "Home.md", exact: true }).click();
   await waitText("Recover after restart");
   await app.evaluate(({ session }) => session.defaultSession.flushStorageData());
@@ -121,7 +122,7 @@ try {
   await ask(); await edit("\nConflicting draft"); await waitText("Conflicting draft"); await done();
   await writeFile(`${vaultRoot}/Home.md`, "external version");
   await page.getByRole("button", { name: "변경 유지", exact: true }).click();
-  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  await page.getByLabel("AI 실시간 변경").getByRole("alert").waitFor();
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), "external version");
   await resolve("복구본 저장");
   const snapshot = await page.evaluate(() => window.notes.snapshot());
@@ -140,9 +141,9 @@ try {
   await ask();
   await writeFile(`${vaultRoot}/Created.md`, "# External before first batch");
   await edit("\nFirst batch conflict");
-  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  await page.getByLabel("AI 실시간 변경").getByRole("alert").waitFor();
   await page.getByRole("button", { name: "변경 유지", exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# External before first batch");
   await resolve("복구본 저장");
   const firstConflict = (await page.evaluate(() => window.notes.snapshot())).value.notes.filter((n) => n.path.startsWith("Copilot 복구")).find((n) => n.content.includes("First batch conflict"));
@@ -151,7 +152,7 @@ try {
   await ask();
   await writeFile(`${vaultRoot}/Collision.md`, "# Created externally");
   await app.evaluate(() => globalThis.liveTools.find((t) => t.name === "dynote_create_note").handler({ path: "Collision.md", content: "# AI collision draft" }));
-  await page.getByLabel("Copilot 실시간 변경").getByRole("alert").waitFor();
+  await page.getByLabel("AI 실시간 변경").getByRole("alert").waitFor();
   await resolve("복구본 저장");
   assert.equal(await readFile(`${vaultRoot}/Collision.md`, "utf8"), "# Created externally");
   assert.ok((await page.evaluate(() => window.notes.snapshot())).value.notes.some((n) => n.path.startsWith("Copilot 복구") && n.content.includes("# AI collision draft")));
@@ -159,7 +160,7 @@ try {
   await page.locator('.file-row[title="Created.md"]').click();
   await ask(); await edit("\nBefore error"); await waitText("Before error");
   await app.evaluate(() => globalThis.liveEmit("error", { error: "Synthetic model failure" }));
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.match(await page.locator(".cm-content").innerText(), /Before error/);
   await resolve("변경 되돌리기");
   report.checks.push("Response errors retain completed batches for explicit Undo");
@@ -175,7 +176,7 @@ try {
   report.checks.push("Immediate request flushes unsaved text before live edits; another request waits for pending drafts");
   await ask(); await edit("\nPanel closed draft"); await waitText("Panel closed draft");
   await page.getByRole("button", { name: "문서 정보 패널", exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.equal(await page.getByLabel("Copilot 채팅", { exact: true }).count(), 0);
   await resolve("변경 되돌리기");
   report.checks.push("Closing right panel stops generation while center draft and Undo remain accessible");

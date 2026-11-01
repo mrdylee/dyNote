@@ -27,6 +27,7 @@ try {
  assert.match(await page.getByLabel("Copilot 전송 상태",{exact:true}).innerText(),/노트 폴더/);
  report.checks.push("missing vault reproduces disabled send with explicit reason and prompt retained");
  await page.getByRole("button",{name:"AI용 노트 폴더 열기",exact:true}).click();
+ await page.getByRole("button",{name:"파일 목록",exact:true}).click();
  await page.locator('.file-row[title="Home.md"]').click();
  await refresh();
  assert.equal(await page.getByLabel("Copilot 모델",{exact:true}).inputValue(),"auto");
@@ -42,7 +43,7 @@ try {
   const snapshot=(await window.notes.snapshot()).value,note=snapshot.notes.find(note=>note.path==="Other.md");
   localStorage.setItem(`dynote.copilot.drafts.${snapshot.id}`,JSON.stringify([{kind:"edit",path:note.path,content:note.content+"\n미확정",original:note.content,aiContent:note.content+"\n미확정",revision:note.revision,requestId:"fixture-draft"}]));
  });
- await page.reload();await page.locator('.file-row[title="Other.md"]').click();
+ await page.reload();await page.getByRole("button",{name:"파일 목록",exact:true}).click();await page.locator('.file-row[title="Other.md"]').click();
  await refresh();await prompt.fill("미확정 노트를 읽기만 해 줘");
  assert.equal(await send.isDisabled(),true);assert.match(await page.getByLabel("Copilot 전송 상태").innerText(),/미확정 AI 변경/);
  await page.getByRole("button",{name:"Ask로 대화",exact:true}).click();assert.equal(await send.isEnabled(),true);await send.click();
@@ -52,7 +53,7 @@ try {
  await prompt.fill("입력 유지 확인");
  await app.evaluate(()=>{globalThis.sendState={authenticated:false,models:[]};});
  await refresh();
- assert.equal(await send.isDisabled(),true);assert.match(await page.getByLabel("Copilot 전송 상태").innerText(),/연결/);assert.equal(await prompt.inputValue(),"입력 유지 확인");
+ assert.equal(await send.isDisabled(),true);assert.match(await page.getByLabel("Copilot 전송 상태").innerText(),/로그인/);assert.equal(await prompt.inputValue(),"입력 유지 확인");
  await app.evaluate(()=>{globalThis.sendState={authenticated:true,models:[],error:"모델 목록 읽기 실패"};});
  await refresh();
  assert.equal(await send.isDisabled(),true);assert.match(await page.getByLabel("Copilot 전송 상태").innerText(),/모델 목록 읽기 실패/);

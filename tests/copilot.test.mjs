@@ -7,6 +7,40 @@ const note = { path: "BMS.md", content: "# 시험\r\n\r\n원문\r\n끝" };
 const context = { kind: "document", path: note.path, content: note.content };
 const request = (extra = {}) => ({ requestId: "request-1", vaultId: "vault-1", model: "test-model", mode: "chat", prompt: "요약해 줘", context, history: [], ...extra });
 
+test("requests preserve a bounded optional reasoning effort and omit the default", () => {
+  assert.equal(prepareRequest(request({ reasoningEffort: "low" })).reasoningEffort, "low");
+  assert.equal(Object.hasOwn(prepareRequest(request({ reasoningEffort: "" })), "reasoningEffort"), false);
+  for (const reasoningEffort of [42, {}, "HIGH", "x".repeat(33)])
+    assert.throws(() => prepareRequest(request({ reasoningEffort })), /추론/);
+});
+
+test("Copilot advertises model effort choices and passes the selected effort to its SDK", async () => {
+  const f = fixture();
+  f.client.listModels = async () => [{ id: "test-model", capabilities: { supports: { reasoningEffort: true } }, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "high" }];
+  try {
+    const model = (await f.controller.status()).models[0];
+    assert.deepEqual(model.reasoningEfforts, ["low", "high"]);
+    assert.equal(model.defaultReasoningEffort, "high");
+    f.controller.send(request({ reasoningEffort: "low" }));
+    await f.controller.settled();
+    assert.equal(f.events.at(-1).type, "done");
+    assert.equal(f.configurations[0].reasoningEffort, "low");
+  } finally { await f.controller.close(); }
+});
+
+test("Copilot rejects unsupported effort before starting inference and leaves the default unset", async () => {
+  const f = fixture();
+  try {
+    f.controller.send(request({ reasoningEffort: "high" }));
+    await f.controller.settled();
+    assert.match(f.events.at(-1).error, /추론/);
+    assert.equal(f.configurations.length, 0);
+    f.controller.send(request({ requestId: "default" }));
+    await f.controller.settled();
+    assert.equal(Object.hasOwn(f.configurations[0], "reasoningEffort"), false);
+  } finally { await f.controller.close(); }
+});
+
 test('image requests accept bounded image blobs and reject invalid media, paths and oversize data', () => {
   const image={mimeType:'image/png',data:'iVBORw0KGgo='};
   assert.deepEqual(prepareRequest(request({image})).image,image);

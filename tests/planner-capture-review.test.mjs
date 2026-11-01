@@ -63,11 +63,43 @@ test('audit context contains only current capture labels and refuses oversized c
   assert.throws(()=>planner.captureAuditContext(Array.from({length:40},()=>({...rows[0],source:{...source,text:'가'.repeat(2000)}}))),/64KB/);
 });
 
+test('draft saving treats audit warnings as advisory and preserves unknown dates and existing uncertainty',()=>{
+  const rows=planner.parseCapture(payload([rawRow('날짜 미정'),rawRow('불확실',{uncertainty:'연도 미표기'})]),source);
+  const result=planner.captureDraftItems(rows,[{ids:rows.map(row=>row.id),unverified:true,missing:[],merged:[],retained:[]}]);
+  assert.ok(result.every(row=>row.status==='draft'&&!row.start&&!row.end));
+  assert.equal(result[0].uncertainty,'원본 대조 필요');assert.equal(result[1].uncertainty,'연도 미표기');
+  assert.equal(rows[0].uncertainty,'');
+  assert.equal(planner.registerItems({version:1,items:[]},result).board.items.length,2);
+});
+
 test('exact short source labels are reconciled without duplicate retained candidates',()=>{
   const rows=[rawRow('CV'),rawRow('DV')];
   const previous=planner.parseCapture(payload(rows),source);
   const result=planner.parseCaptureAudit(audit([{target:'LCS',labels:['CV','DV'],items:rows}]),source,previous);
   assert.equal(result.items.length,2);assert.deepEqual(result.groups[0].retained,[]);
+});
+
+test('audit reconciles real Codex rows when only the separate target prefix is omitted',()=>{
+  const rows=[rawRow('LINK DV 검토',{target:'LINK',stage:'DV REVIEW',start:'2026-11-20',end:'2026-11-21',sourceText:'LINK  DV REVIEW  2026-11-20 - 2026-11-21'}),rawRow('BMS PD 검토',{target:'BMS',stage:'PD REVIEW',start:'2026-12-02',end:'2026-12-02',sourceText:'BMS  PD REVIEW  2026-12-02'})];
+  for(const reverse of [false,true]){
+    const initial=rows.map(row=>({...row,sourceText:reverse?row.sourceText.replace(`${row.target}  `,''):row.sourceText}));
+    const audited=rows.map(row=>({...row,sourceText:reverse?row.sourceText:row.sourceText.replace(`${row.target}  `,'')}));
+    const previous=planner.parseCapture(payload(initial),source);
+    const result=planner.parseCaptureAudit(audit(audited.map(row=>({target:row.target,labels:[row.sourceText],items:[row]}))),source,previous);
+    assert.equal(result.items.length,2);
+    assert.ok(result.groups.every(group=>!group.retained.length&&!group.missing.length&&!group.merged.length));
+    assert.equal(planner.registerItems({version:1,items:[]},result.items).board.items.length,2);
+  }
+});
+
+test('audit preserves distinct target-name words, stages and dates when reconciling labels',()=>{
+  const cases=[['LINKAGE DV REVIEW','AGE DV REVIEW'],['LINK PD REVIEW','PV REVIEW'],['LINK DV 2026-11-20','DV 2026-11-21']];
+  for(const [before,after] of cases){
+    const previous=planner.parseCapture(payload([rawRow('Initial',{target:'LINK',sourceText:before})]),source);
+    const result=planner.parseCaptureAudit(audit([{target:'LINK',labels:[after],items:[rawRow('Audited',{sourceText:after})]}]),source,previous);
+    assert.equal(result.items.length,2);
+    assert.deepEqual(result.groups[0].retained,[previous[0].id]);
+  }
 });
 
 test('overlapping source labels use the longest match instead of reporting a false merge',()=>{

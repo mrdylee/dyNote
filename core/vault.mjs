@@ -123,7 +123,7 @@ export class Vault {
     );
     try {
       const stat = await handle.stat();
-      if (stat.size > MAX_BYTES)
+      if (!validNotePath(relative) && stat.size > MAX_BYTES)
         throw new Error("8MB보다 큰 문서는 이 버전에서 열 수 없습니다.");
       const bytes = await handle.readFile();
       const content = new TextDecoder("utf-8", {
@@ -167,7 +167,8 @@ export class Vault {
         if ((!validNotePath(change.path) && !documentKind(change.path)) || seen.has(change.path)) throw new Error("잘못되었거나 중복된 문서 경로입니다.");
         seen.add(change.path);
         if (change.content !== null) {
-          if (typeof change.content !== "string" || Buffer.byteLength(change.content) > MAX_BYTES) throw new Error("문서는 8MB 이하여야 합니다.");
+          if (typeof change.content !== "string") throw new Error("문서 내용이 잘못되었습니다.");
+          if (!validNotePath(change.path) && Buffer.byteLength(change.content) > MAX_BYTES) throw new Error("문서는 8MB 이하여야 합니다.");
           if (documentKind(change.path)) validateDocument(change.path, change.content);
         } else if (!current.has(change.path)) throw new Error("삭제할 문서를 찾을 수 없습니다.");
       }
@@ -373,8 +374,8 @@ export class Vault {
       if (!validNotePath(relative))
         throw new Error("허용되지 않는 Markdown 경로입니다.");
       const content = initialContent === undefined ? `# ${path.basename(relative, ".md")}\n\n` : initialContent;
-      if (typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES)
-        throw new Error("문서 내용이 잘못되었거나 너무 큽니다.");
+      if (typeof content !== "string")
+        throw new Error("문서 내용이 잘못되었습니다.");
       const target = await this.#file(relative, true);
       try {
         await writeFile(target, content, { flag: "wx", mode: 0o600 });
@@ -419,7 +420,9 @@ export class Vault {
   async #save(relative, content, expectedRevision) {
     if (!validFilePath(relative) || (!validNotePath(relative) && !documentKind(relative)))
       throw new Error("저장할 수 없는 문서 형식입니다.");
-    if (typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES)
+    if (typeof content !== "string")
+      throw new Error("문서 내용이 잘못되었습니다.");
+    if (!validNotePath(relative) && Buffer.byteLength(content) > MAX_BYTES)
       throw new Error("문서는 8MB 이하여야 합니다.");
     if (documentKind(relative)) validateDocument(relative, content);
     const current = await this.#read(relative);

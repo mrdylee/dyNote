@@ -26,7 +26,7 @@ export function normalizeItem(input) {
   if (start && end && end<start) throw new Error('종료일은 시작일보다 빠를 수 없습니다.');
   return {
     id:text(input.id,100) || id(), title, target:text(input.target,80), stage:text(input.stage,80), start,end,
-    status:['planned','active','blocked','done'].includes(input.status)?input.status:'planned',
+    status:['draft','planned','active','blocked','done'].includes(input.status)?input.status:'planned',
     uncertainty:text(input.uncertainty), description:text(input.description,6000),
     source:input.source ? { path:notePath(input.source.path), hash:text(input.source.hash,128), text:text(input.source.text,4000), bbox:box(input.source.bbox) } : null,
     tasks:list(input.tasks,100).map(t=>({id:text(t.id,100)||id(),text:text(typeof t==='string'?t:t.text,500),origin:t.origin==='suggested'?'suggested':'source',done:t.done===true})).filter(t=>t.text),
@@ -45,7 +45,7 @@ function jsonResult(raw) {
 export function parseCapture(raw, source = null) {
   const data=jsonResult(raw);
   if (!Array.isArray(data?.items)) throw new Error('AI 응답에 일정 목록이 없습니다.');
-  return list(data.items,60).map(row=>normalizeItem({...row,id:id(),status:'planned',evidence:[],decisions:[],tasks:list(row.tasks,100).map(t=>({text:typeof t==='string'?t:t.text,origin:'source',done:false})),source:source?{...source,text:row.sourceText,bbox:row.bbox}:null}));
+  return list(data.items,60).map(row=>normalizeItem({...row,id:id(),status:'draft',evidence:[],decisions:[],tasks:list(row.tasks,100).map(t=>({text:typeof t==='string'?t:t.text,origin:'source',done:false})),source:source?{...source,text:row.sourceText,bbox:row.bbox}:null}));
 }
 export const CAPTURE_REVIEW_SIZE = 60;
 const CAPTURE_TOTAL_LIMIT = 500;
@@ -64,8 +64,17 @@ export const captureReviewPage = (items, index = 0) => {
   const start = Math.floor(Math.max(0,index)/CAPTURE_REVIEW_SIZE)*CAPTURE_REVIEW_SIZE;
   return items.slice(start,start+CAPTURE_REVIEW_SIZE);
 };
+export function captureDraftItems(items, groups = []) {
+  const pending=new Set(groups.filter(group=>group.unverified||group.missing.length||group.merged.length||group.retained.length).flatMap(group=>group.ids));
+  return items.map(item=>({...item,status:'draft',uncertainty:item.uncertainty||(pending.has(item.id)?'원본 대조 필요':'')}));
+}
 const captureKey = value => value.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
 const sourceText = item => item.source?.text || item.title;
+const captureSourceKey = item => {
+  const value=sourceText(item).normalize('NFKC').trim(), target=(item.target||'').normalize('NFKC').trim();
+  const prefixed=target&&value.slice(0,target.length).toLocaleLowerCase()===target.toLocaleLowerCase()&&/^\s/.test(value.slice(target.length));
+  return captureKey(prefixed?value.slice(target.length):value);
+};
 
 const matchedCaptureLabels = (labels, item) => {
   const found=labels.filter(label=>captureKey(sourceText(item)).includes(captureKey(label)));
@@ -85,9 +94,9 @@ export function parseCaptureAudit(raw, source, initial = []) {
   });
   const audited = groups.flatMap(group=>group.items);
   for (const item of initial) {
-    const key = captureKey(sourceText(item));
-    const matches = audited.filter(next=>{const nextKey=captureKey(sourceText(next));return captureKey(next.target||'대상 미지정')===captureKey(item.target||'대상 미지정') && key && (key===nextKey || (nextKey.length>=4 && key.includes(nextKey)));});
-    if (matches.some(next=>captureKey(sourceText(next))===key) || matches.length>1) continue;
+    const key = captureSourceKey(item);
+    const matches = audited.filter(next=>{const nextKey=captureSourceKey(next);return captureKey(next.target||'대상 미지정')===captureKey(item.target||'대상 미지정') && key && (key===nextKey || (nextKey.length>=4 && key.includes(nextKey)));});
+    if (matches.some(next=>captureSourceKey(next)===key) || matches.length>1) continue;
     let group = groups.find(group=>captureKey(group.target||'대상 미지정')===captureKey(item.target||'대상 미지정'));
     if (!group) {group={id:id(),target:item.target||'대상 미지정',labels:[],items:[],retained:[]};groups.push(group);}
     group.items.push(item);group.retained.push(item.id);

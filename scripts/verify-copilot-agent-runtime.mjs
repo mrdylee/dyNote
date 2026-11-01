@@ -26,6 +26,7 @@ try {
   app = await launch();
   page = await app.firstWindow();
   page.setDefaultTimeout(15000);
+  await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   page.on("pageerror", (e) => report.errors.push(e.message));
   assert.equal(await page.evaluate(() => localStorage.getItem("dynote.ai.provider")), "codex");
   assert.equal(await page.getByLabel("AI 제공자", { exact: true }).inputValue(), "codex");
@@ -66,7 +67,7 @@ try {
   await page.getByLabel("Copilot 질문").fill("추가하고 새 요약 문서도 만들어 줘");
   await page.getByRole("button", { name: "Copilot 보내기" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".copilot-pending-list button").length === 2);
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Copilot 실시간 변경"] button')?.disabled);
+  await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   const request = await app.evaluate(() => globalThis.agentRequests.at(-1));
   assert.equal(request.references[0].content, "# 참고\n배터리 시험");
   assert.equal(request.vaultAccess, false);
@@ -78,13 +79,13 @@ try {
   assert.equal(await page.locator(".copilot-pending-list button").count(), 2);
   await page.locator(".copilot-pending-list").getByRole("button", { name: "Home.md", exact: true }).click();
   await page.getByRole("button", { name: "변경 유지", exact: true }).click();
-  await page.getByLabel("Copilot 실시간 변경").waitFor({ state: "hidden" });
+  await page.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
   const appended = original + "\r\n추가한 체크리스트\r\n- [ ] 확인";
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), appended);
   report.checks.push("Agent conversation survives note switching; pending target opens in center editor; Keep preserves CRLF");
   await page.locator(".copilot-pending-list").getByRole("button", { name: "Agent Summary.md", exact: true }).click();
   await page.getByRole("button", { name: "변경 유지", exact: true }).click();
-  await page.getByLabel("Copilot 실시간 변경").waitFor({ state: "hidden" });
+  await page.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
   assert.equal(await readFile(`${vaultRoot}/Agent Summary.md`, "utf8"), "# 요약\n새 문서 내용");
   await page.locator('.file-row[title="Agent Summary.md"]').waitFor();
   assert.match(await page.locator(".cm-content").innerText(), /새 문서 내용/);

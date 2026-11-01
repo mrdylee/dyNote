@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
-import { captureAuditPrompt } from '../core/planner.mjs';
+import { BOARD_PATH, readBoard, captureAuditPrompt } from '../core/planner.mjs';
 import { prepareRequest } from '../core/copilot.mjs';
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
 const output = process.env.DYNOTE_PLANNER_OUTPUT || 'output/playwright/planner-capture';
@@ -43,7 +43,7 @@ try {
   }, small.toString('base64'));
   await page.getByRole('button', { name: '개발 플래너', exact: true }).click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-  await page.getByRole('status').filter({ hasText: 'GitHub 연결 후' }).waitFor();
+  await page.getByRole('status').filter({ hasText: /Copilot 로그인 후/ }).waitFor();
   checks.push('small screenshot pastes immediately after sidebar navigation without focusing planner body');
   await page.getByRole('button', { name: '캡처 닫기', exact: true }).click();
   await page.getByRole('button', { name: '일정 추가', exact: true }).click();
@@ -63,7 +63,7 @@ try {
   assert.equal(await page.getByLabel('캡처 검토', { exact: true }).count(), 0);
   checks.push('image paste leaves text fields and settings unchanged and stops listening after planner closes');
   await upload.setInputFiles({ name: 'small.png', mimeType: 'image/png', buffer: small });
-  await page.getByRole('status').filter({ hasText: 'GitHub 연결 후' }).waitFor();
+  await page.getByRole('status').filter({ hasText: /Copilot 로그인 후/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: '일정 인식하기', exact: true }).isDisabled(), true);
   assert.equal(await page.locator('.planner-source img').evaluate(el => el.naturalWidth), 900);
   checks.push('unconnected Copilot explicitly explains next step and preserves preview');
@@ -73,9 +73,10 @@ try {
   assert.equal((await app.evaluate(() => globalThis.captureRequests)).length, 0);
   checks.push('text-only model explains why recognition cannot start');
   await app.evaluate(() => { globalThis.captureStatus = { authenticated: true, models: [{ id: 'vision', name: 'Fixture vision', vision: true }], error: '' }; });
+  await page.getByRole('button', { name: '연결 확인', exact: true }).click();
+  await page.getByLabel('플래너 AI 모델', { exact: true }).selectOption('vision');
   await upload.setInputFiles({ name: 'small-vision.png', mimeType: 'image/png', buffer: small });
-  await page.getByLabel('추출 제목', { exact: true }).waitFor();
-  await page.getByRole('checkbox', { name: '대상 미지정 원본 대조 확인', exact: true }).check();
+  await page.locator('.planner-card').filter({hasText:'큰 캡처 일정'}).waitFor();
   let sent = (await app.evaluate(() => globalThis.captureRequests)).at(-1);
   assert.equal(sent.image.data, small.toString('base64'));
   prepareRequest(sent);
@@ -94,9 +95,7 @@ try {
   }), 'base64');
   assert.ok(large.length > 6 * 1024 * 1024 && large.length < 25 * 1024 * 1024);
   await upload.setInputFiles({ name: 'large.png', mimeType: 'image/png', buffer: large });
-  await page.getByRole('status').filter({ hasText: 'Copilot 연결을 확인' }).waitFor();
-  await page.getByLabel('추출 제목', { exact: true }).waitFor();
-  await page.getByRole('checkbox', { name: '대상 미지정 원본 대조 확인', exact: true }).check();
+  await page.waitForFunction(()=>document.querySelectorAll('.planner-card').length===2);
   const requests = await app.evaluate(() => globalThis.captureRequests);
   assert.equal(requests.length, 4);
   sent = requests.at(-1); prepareRequest(sent);
@@ -107,14 +106,11 @@ try {
     const result = [bitmap.width, bitmap.height]; bitmap.close(); return result;
   }, sent.image);
   assert.deepEqual(dimensions, [2400, 1400]);
-  const sourceUrl = await page.locator('.planner-source img').getAttribute('src');
-  const sourcePath = decodeURIComponent(new URL(sourceUrl).pathname.split('/').slice(2).join('/'));
+  const sourcePath = readBoard(await readFile(`${vault}/${BOARD_PATH}`,'utf8')).items.at(-1).source.path;
   assert.deepEqual(await readFile(`${vault}/${sourcePath}`), large);
   await page.screenshot({ path: `${output}/large-review.png` });
   checks.push('over-6MB capture preserves exact original and sends bounded full-resolution image');
-  await page.getByRole('button', { name: '선택한 1개 등록', exact: true }).click();
-  await page.locator('.planner-card').filter({ hasText: '큰 캡처 일정' }).waitFor();
-  checks.push('large capture produces review and registered schedule');
+  checks.push('large capture saves AI draft automatically without date/details input');
   await upload.setInputFiles({ name: 'oversized.png', mimeType: 'image/png', buffer: Buffer.alloc(25 * 1024 * 1024 + 1) });
   await page.getByRole('alert').filter({ hasText: '25MB' }).waitFor();
   await upload.setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('invalid image') });

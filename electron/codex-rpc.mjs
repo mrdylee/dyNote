@@ -4,6 +4,11 @@ import { access, mkdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { runtimeEnvironment } from "./copilot-controller.mjs";
+import { MAX_IMAGE_DATA } from "../core/copilot.mjs";
+
+// userMessage/turn notifications echo the input image, plus protocol metadata.
+// This is a per-frame transport bound; generated answers remain capped separately.
+const MAX_FRAME_BYTES = MAX_IMAGE_DATA + 2 * 1024 * 1024;
 
 export const codexConfig = Object.freeze({
   forced_login_method: "chatgpt", cli_auth_credentials_store: "keyring",
@@ -55,8 +60,8 @@ async function checkVersion(command, env) {
 }
 
 export class CodexRpc {
-  constructor({ directory, command, onNotification = () => {}, onClose = () => {}, spawnProcess = spawn, checkVersion: verify = checkVersion }) {
-    Object.assign(this, { directory, command, onNotification, onClose, spawnProcess, verify });
+  constructor({ directory, command, onNotification = () => {}, onRequest, onClose = () => {}, spawnProcess = spawn, checkVersion: verify = checkVersion }) {
+    Object.assign(this, { directory, command, onNotification, onRequest, onClose, spawnProcess, verify });
     this.pending = new Map(); this.sequence = 0; this.buffer = ""; this.child = null; this.closed = false;
   }
 
@@ -103,14 +108,21 @@ export class CodexRpc {
   receive(chunk) {
     if (this.closed) return;
     this.buffer += chunk;
-    if (Buffer.byteLength(this.buffer) > 2 * 1024 * 1024) return this.fail(new Error("Codex 응답이 너무 큽니다."));
     let end;
     while ((end = this.buffer.indexOf("\n")) >= 0) {
       const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
+      if (Buffer.byteLength(line) > MAX_FRAME_BYTES) return this.fail(new Error("Codex 통신 메시지가 너무 큽니다. 요청 범위를 줄여 다시 시도해 주세요."));
       if (!line.trim()) continue;
       let message;
       try { message = JSON.parse(line); } catch { return this.fail(new Error("Codex 응답 형식을 읽을 수 없습니다.")); }
       if (message.method && message.id != null) {
+        if (["item/tool/call", "mcpServer/elicitation/request"].includes(message.method) && this.onRequest) {
+          Promise.resolve().then(() => this.onRequest(message.method, message.params ?? {})).then(
+            result => { if (!this.closed) this.write({ id: message.id, result }); },
+            () => { if (!this.closed) this.write({ id: message.id, error: { code: -32601, message: "Tool request is not permitted." } }); },
+          );
+          continue;
+        }
         const result = /(?:commandExecution|fileChange)\/requestApproval$/.test(message.method)
           ? { result: { decision: "decline" } }
           : message.method === "item/permissions/requestApproval"
@@ -125,6 +137,7 @@ export class CodexRpc {
         else waiting.resolve(message.result);
       } else if (message.method) this.onNotification(message.method, message.params ?? {});
     }
+    if (Buffer.byteLength(this.buffer) > MAX_FRAME_BYTES) this.fail(new Error("Codex 통신 메시지가 너무 큽니다. 요청 범위를 줄여 다시 시도해 주세요."));
   }
 
   fail(error) {

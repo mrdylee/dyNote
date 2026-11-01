@@ -48,3 +48,17 @@ test('classification rejects conflicting reference labels rather than redirectin
  const note=(await vault.documentSnapshot()).notes.find(n=>n.path.startsWith('Journal/'));
  await assert.rejects(classifier.preview({items:[{...sections.journalSections(note)[0],sourcePath:note.path,sourceRevision:note.revision,targetPath:'Projects/Notes.md'}]}),/참조 링크/);
 });
+
+test('classification can cross 8 MiB while preserving the journal and target contents',async t=>{
+ const {root,source,vault,classifier}=await fixture(t),previous='t'.repeat(8*1024*1024-20);
+ await writeFile(`${root}/Projects/Notes.md`,previous);
+ const note=(await vault.documentSnapshot()).notes.find(n=>n.path.startsWith('Journal/'));
+ const input={items:[{...sections.journalSections(note)[0],sourcePath:note.path,sourceRevision:note.revision,targetPath:'Projects/Notes.md'}]};
+ const preview=await classifier.preview(input);
+ assert.ok(Buffer.byteLength(preview.changes[0].after)>8*1024*1024);
+ const result=await classifier.apply(preview.input,preview.revision);
+ assert.equal(await readFile(`${root}/Projects/Notes.md`,'utf8'),preview.changes[0].after);
+ assert.ok(preview.changes[0].after.startsWith(previous+'\n\n'));
+ assert.equal(await readFile(`${root}/Journal/2026-10-30.md`,'utf8'),source);
+ assert.equal(await readFile(`${result.recoveryPath}/files/Projects/Notes.md`,'utf8'),previous);
+});

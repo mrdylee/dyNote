@@ -38,7 +38,16 @@ try {
   assert.equal(result.code, 0); assert.equal(events.find(e => e.type === "result")?.result, "fixture answer");
   assert.deepEqual(events.find(e => e.subtype === "init")?.tools, []);
   assert.equal(requests.length, 1); assert.equal(requests[0].tools?.length ?? 0, 0);
-  console.log(JSON.stringify({ platform: process.platform, codexAppServer: true, claudeNativeAuthStatus: true, claudeNativeStreaming: true, offeredTools: [], realAccount: false, paidInference: false }));
+  const image = { mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5X8AAAAASUVORK5CYII=" };
+  const imageEvents = [];
+  const imageResult = await claude.process(cli, claudeArguments({ model: "sonnet", mode: "chat", image }), {
+    input: JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Describe this synthetic image" }, { type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } }] } }) + "\n",
+    onLine: event => imageEvents.push(event),
+  });
+  assert.equal(imageResult.code, 0); assert.equal(imageEvents.find(e => e.type === "result")?.result, "fixture answer");
+  const sentImage = requests.at(-1).messages.flatMap(message => Array.isArray(message.content) ? message.content : []).find(block => block.type === "image");
+  assert.equal(sentImage?.source.type, "base64"); assert.equal(sentImage?.source.media_type, "image/png"); assert.ok(sentImage?.source.data);
+  console.log(JSON.stringify({ platform: process.platform, codexAppServer: true, claudeNativeAuthStatus: true, claudeNativeStreaming: true, claudeNativeImageInput: true, offeredTools: [], realAccount: false, paidInference: false }));
 } finally {
   await Promise.allSettled([codex.close(), claude.close()]); server?.close(); await rm(root, { recursive: true, force: true });
 }

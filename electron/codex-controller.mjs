@@ -1,6 +1,8 @@
 import path from "node:path";
-import { MAX_ANSWER, prepareRequest, sessionOptions } from "../core/copilot.mjs";
+import { MAX_ANSWER, prepareRequest, reasoningCapabilities, sessionOptions, validateReasoningEffort } from "../core/copilot.mjs";
 import { CodexRpc } from "./codex-rpc.mjs";
+import { noteTools } from "../core/copilot-agent.mjs";
+import { skillTools } from "./ai-skills.mjs";
 
 const safeError = (error) => String(error?.message ?? error)
   .replace(/\b(?:sk-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g, "[redacted]")
@@ -16,8 +18,8 @@ export function safeCodexLoginUrl(value) {
 }
 
 export class CodexController {
-  constructor({ directory, onEvent, openExternal, createRpc = (options) => new CodexRpc(options) }) {
-    Object.assign(this, { directory, onEvent, openExternal, createRpc });
+  constructor({ directory, onEvent, openExternal, getNotes, getExtensions = async () => ({}), createRpc = (options) => new CodexRpc(options) }) {
+    Object.assign(this, { directory, onEvent, openExternal, getNotes, getExtensions, createRpc });
     this.rpcPromise = null; this.job = null; this.loginJob = null; this.closed = false;
   }
 
@@ -27,6 +29,7 @@ export class CodexController {
       this.rpcPromise = (async () => {
         const rpc = this.createRpc({
           directory: this.directory, onNotification: (method, params) => this.notification(method, params),
+          onRequest: (method, params) => this.toolRequest(method, params),
           onClose: (error) => {
             this.rpcPromise = null;
             if (this.job) { this.job.failure = safeError(error); this.job.finish?.(); }
@@ -47,13 +50,14 @@ export class CodexController {
       ({ account } = await rpc.request("account/read", { refreshToken: false }));
     } catch (error) { throw new Error(safeError(error)); }
     const result = { authenticated: account?.type === "chatgpt", login: account?.type === "chatgpt" ? account.email ?? "ChatGPT" : "", models: [], error: "" };
-    if (account && !result.authenticated) result.error = "ChatGPT 계정으로 연결해 주세요.";
+    if (account && !result.authenticated) result.error = "Codex 계정으로 다시 로그인해 주세요.";
     if (result.authenticated) {
       try {
         let cursor = null;
         do {
           const page = await rpc.request("model/list", { limit: 100, includeHidden: false, cursor });
-          result.models.push(...page.data.filter((model) => !model.hidden).map((model) => ({ id: model.model ?? model.id, name: model.displayName ?? model.model ?? model.id })));
+          result.models.push(...page.data.filter((model) => !model.hidden).map((model) => ({ id: model.model ?? model.id, name: model.displayName ?? model.model ?? model.id, vision: (model.inputModalities ?? ["text", "image"]).includes("image"),
+            ...reasoningCapabilities(model.supportedReasoningEfforts?.map(option => option.reasoningEffort), model.defaultReasoningEffort) })));
           cursor = page.nextCursor;
         } while (cursor);
       } catch (error) { result.error = safeError(error); }
@@ -64,8 +68,7 @@ export class CodexController {
   send(input) {
     if (this.job || this.loginJob) throw new Error("Codex 작업이 진행 중입니다.");
     const args = prepareRequest(input);
-    if (!["chat", "edit"].includes(args.mode) || args.image) throw new Error("Codex는 Ask와 Edit 텍스트 작업을 지원합니다.");
-    const job = { id: args.requestId, canceled: false, items: new Map() };
+    const job = { id: args.requestId, mode: args.mode, canceled: false, items: new Map() };
     this.job = job;
     job.promise = this.run(job, args);
     return { requestId: job.id };
@@ -78,21 +81,38 @@ export class CodexController {
       if (job.canceled) return;
       const status = await this.status();
       if (job.canceled) return;
-      if (!status.authenticated) throw new Error("먼저 ChatGPT 계정으로 Codex에 연결해 주세요.");
+      if (!status.authenticated) throw new Error("먼저 Codex에 로그인해 주세요.");
       if (!status.models.some((model) => model.id === args.model)) throw new Error(status.error || "선택한 모델을 사용할 수 없습니다.");
+      validateReasoningEffort(status.models.find(model => model.id === args.model), args.reasoningEffort);
+      if (args.image && !status.models.find(model => model.id === args.model)?.vision) throw new Error("이미지를 지원하는 모델을 선택해 주세요.");
+      const emit = (type, data) => this.onEvent({ requestId: job.id, type, ...data });
+      const canceled = () => job.canceled || !!job.failure || this.closed;
+      const extensions = args.mode === "agent" ? await this.getExtensions() : {};
+      const tools = args.mode === "agent" ? [...noteTools({ args, getNotes: this.getNotes, emit, canceled }), ...await skillTools({ directories: extensions.skillDirectories ?? [], emit, canceled })] : [];
+      job.tools = new Map(tools.map(tool => [tool.name, tool]));
+      if (job.canceled) return;
+      const mcpServers = Object.fromEntries(Object.entries(extensions.mcpServers ?? {}).map(([name, server]) => [name, {
+        ...(server.type === "local" ? { command: server.command, args: server.args, cwd: server.cwd, env: server.env } : { url: server.url, http_headers: server.headers }),
+        ...(server.tools && !server.tools.includes("*") ? { enabled_tools: server.tools } : {}), default_tools_approval_mode: "auto",
+      }]));
+      job.mcpServers = mcpServers;
+      const instructions = sessionOptions(args.model, args.mode).systemMessage.content;
       const { thread } = await rpc.request("thread/start", {
         model: args.model, modelProvider: "openai", cwd: path.join(this.directory, "workspace"),
-        ephemeral: true, environments: [], dynamicTools: [], sandbox: "read-only",
-        approvalPolicy: "untrusted", baseInstructions: sessionOptions(args.model, args.mode).systemMessage.content,
-        developerInstructions: "Use only the supplied JSON. Return text; no tools or environment access.",
+        ephemeral: true, environments: [], dynamicTools: tools.map(tool => ({ type: "function", name: tool.name, description: tool.description, inputSchema: tool.parameters })), sandbox: "read-only",
+        ...(Object.keys(mcpServers).length ? { config: { mcp_servers: mcpServers } } : {}),
+        approvalPolicy: "untrusted", baseInstructions: args.mode === "agent" ? instructions.replace("Use only the Dynote tools to read permitted notes and prepare writing changes.", "Use Dynote note tools for permitted notes. Configured MCP tools and selected skills may also be used when relevant. Discover selected skills with dynote_list_skills and read their instructions/resources with dynote_use_skill.") : instructions,
+        developerInstructions: args.mode === "agent" ? "Use the supplied context and permitted tools. Note edits are pending drafts for user review, never direct file saves. Skill scripts are not executed by the skill-reading tool." : "Use only the supplied JSON. Return text; no tools or environment access.",
       });
       job.threadId = thread.id;
       if (job.canceled) return;
       const completed = new Promise((resolve) => { job.finish = resolve; });
-      timer = setTimeout(() => { job.failure = "Codex 응답 시간이 초과되었습니다. 요청 범위를 줄여 다시 시도해 주세요."; job.finish(); }, 120000);
+      timer = setTimeout(() => { job.failure = "Codex 응답 시간이 초과되었습니다. 요청 범위를 줄여 다시 시도해 주세요."; job.finish(); }, args.mode === "agent" ? 240000 : 120000);
       const { turn } = await rpc.request("turn/start", {
         threadId: thread.id, environments: [],
-        input: [{ type: "text", text: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, dialogue: args.history }), text_elements: [] }],
+        ...(args.reasoningEffort ? { effort: args.reasoningEffort } : {}),
+        input: [{ type: "text", text: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, dialogue: args.history }), text_elements: [] },
+          ...(args.image ? [{ type: "image", url: `data:${args.image.mimeType};base64,${args.image.data}` }] : [])],
       });
       job.turnId = turn.id;
       if (!job.canceled && !job.failure) await completed;
@@ -118,10 +138,25 @@ export class CodexController {
     return [...job.items.values()].filter((item) => !item.phase || item.phase === "final_answer" || item.phase === "partial_answer").map((item) => item.text).join("\n");
   }
 
+  async toolRequest(method, params) {
+    const job = this.job;
+    const denied = () => { throw new Error("허용되지 않은 AI 도구 요청입니다."); };
+    if (!job || job.mode !== "agent" || job.canceled || job.failure || this.closed || params.threadId !== job.threadId || (job.turnId && params.turnId !== job.turnId)) return denied();
+    if (method === "mcpServer/elicitation/request") {
+      // The native MCP enabled_tools filter constrains tool names. Accept only
+      // its empty approval form, never OAuth, credentials or interactive forms.
+      if (!Object.hasOwn(job.mcpServers ?? {}, params.serverName) || params.mode !== "form" || params._meta?.codex_approval_kind !== "mcp_tool_call" || params.requestedSchema?.type !== "object" || !params.requestedSchema.properties || Object.keys(params.requestedSchema.properties).length || params.requestedSchema.required?.length) return denied();
+      return { action: "accept", content: {}, _meta: null };
+    }
+    if (method !== "item/tool/call" || params.namespace != null || !job.tools?.has(params.tool)) return denied();
+    const result = await job.tools.get(params.tool).handler(params.arguments);
+    return { success: result.resultType === "success", contentItems: [{ type: "inputText", text: result.textResultForLlm }] };
+  }
+
   notification(method, params) {
     if (method === "account/login/completed") {
       if (this.loginJob?.id === params.loginId)
-        this.finishLogin(params.success ? "connected" : "error", params.success ? "ChatGPT 계정이 연결되었습니다." : safeError(params.error || "로그인을 완료하지 못했습니다."));
+        this.finishLogin(params.success ? "connected" : "error", params.success ? "Codex 로그인이 완료되었습니다." : safeError(params.error || "로그인을 완료하지 못했습니다."));
       return;
     }
     const job = this.job;
@@ -131,6 +166,7 @@ export class CodexController {
       job.finish?.(); return;
     }
     if (method === "item/started" || method === "item/completed") {
+      if (params.item.type === "mcpToolCall") { this.onEvent({ type: "tool", requestId: job.id, message: `MCP · ${params.item.server} · ${params.item.tool}` }); return; }
       if (params.item.type !== "agentMessage") return;
       const previous = job.items.get(params.item.id);
       job.items.set(params.item.id, { phase: params.item.phase, text: params.item.text ?? previous?.text ?? "" });
@@ -157,7 +193,7 @@ export class CodexController {
     if (this.job || this.loginJob) throw new Error("Codex 작업이 진행 중입니다.");
     const job = { canceled: false };
     this.loginJob = job;
-    this.onEvent({ type: "auth", phase: "starting", message: "ChatGPT 연결 준비 중…" });
+    this.onEvent({ type: "auth", phase: "starting", message: "Codex 로그인 준비 중…" });
     let rpc;
     try {
       rpc = await this.client();
@@ -168,7 +204,7 @@ export class CodexController {
       await this.openExternal(safeCodexLoginUrl(response.authUrl));
       if (this.loginJob !== job || job.canceled) return;
       job.timer = setTimeout(() => this.cancelLogin().catch(() => {}), 5 * 60000);
-      this.onEvent({ type: "auth", phase: "waiting", message: "브라우저에서 ChatGPT 로그인을 완료해 주세요." });
+      this.onEvent({ type: "auth", phase: "waiting", message: "브라우저에서 Codex 로그인을 완료해 주세요." });
     } catch (error) {
       if (job.id) await rpc.request("account/login/cancel", { loginId: job.id }).catch(() => {});
       if (this.loginJob === job) this.finishLogin("error", safeError(error));

@@ -11,15 +11,24 @@ const app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABL
 const report = { checks: [], errors: [], inference: "deterministic IPC fixture; no live account or paid model request" };
 try {
   const page = await app.firstWindow(); page.setDefaultTimeout(10000); page.on("pageerror", e => report.errors.push(e.message));
-  await app.evaluate(({ ipcMain, BrowserWindow }) => {
+  await app.evaluate(async ({ ipcMain, BrowserWindow, app }) => {
+    const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
+    const { noteTools } = require(`${app.getAppPath()}/core/copilot-agent.mjs`);
     globalThis.providerRequests = []; globalThis.providerPending = null;
     BrowserWindow.getAllWindows()[0].setSize(1280, 900);
     for (const provider of ["copilot", "codex", "claude"]) {
       const replace = (action, callback) => { const channel = `notes:${provider}-${action}`; ipcMain.removeHandler(channel); ipcMain.handle(channel, callback); };
-      replace("status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: `${provider}-model`, name: `${provider} model` }] } }));
+      replace("status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: `${provider}-model`, name: `${provider} model`, ...(provider === "claude" ? {} : { reasoningEfforts: ["low", "high"], defaultReasoningEffort: "high" }) }] } }));
       replace("send", (event, args) => {
         globalThis.providerRequests.push({ provider, ...args }); globalThis.providerPending = { provider, args, sender: event.sender };
         event.sender.send(`notes:${provider}-event`, { type: "delta", requestId: args.requestId, content: "준비 중" });
+        if (args.mode === "agent") setTimeout(async () => {
+          const emit = (type, data) => event.sender.send(`notes:${provider}-event`, { requestId: args.requestId, type, ...data });
+          const tools = noteTools({ args, canceled: () => false, emit });
+          await tools.find(tool => tool.name === "dynote_read_note").handler({ path: args.context.path });
+          await tools.find(tool => tool.name === "dynote_edit_note").handler({ path: args.context.path, operation: "append", content: "\nCODEX_AGENT_DRAFT" });
+          emit("done", { content: "초안 준비" });
+        }, 50);
         return { ok: true, value: { requestId: args.requestId } };
       });
       replace("cancel", event => { const pending = globalThis.providerPending; if (pending) event.sender.send(`notes:${provider}-event`, { type: "canceled", requestId: pending.args.requestId }); return { ok: true }; });
@@ -34,7 +43,9 @@ try {
   for (const [provider, label] of [["codex", "Codex"], ["claude", "Claude"]]) {
     await selector.selectOption(provider);
     await page.getByLabel(`${label} 모델`, { exact: true }).selectOption(`${provider}-model`);
-    assert.deepEqual(await page.getByLabel(`${label} 작업`, { exact: true }).locator("option").evaluateAll(options => options.map(x => x.value)), ["chat", "edit"]);
+    assert.deepEqual(await page.getByLabel(`${label} 작업`, { exact: true }).locator("option").evaluateAll(options => options.map(x => x.value)), provider === "codex" ? ["agent", "chat", "edit"] : ["chat", "edit"]);
+    await page.getByLabel(`${label} 작업`, { exact: true }).selectOption("chat");
+    if (provider === "codex") await page.getByLabel("Codex 추론 강도", { exact: true }).selectOption("low");
     assert.equal(await page.locator(".copilot-message").count(), 0);
     await page.getByLabel(`${label} 질문`, { exact: true }).fill("요약"); await page.getByRole("button", { name: `${label} 보내기`, exact: true }).click();
     assert.equal(await selector.isDisabled(), true);
@@ -55,6 +66,23 @@ try {
   await selector.selectOption("codex");
   assert.equal(await page.getByLabel("Codex 모델", { exact: true }).inputValue(), "codex-model");
   assert.equal(await page.locator(".copilot-message").count(), 0);
+  const original = await readFile(`${vault}/Home.md`, "utf8");
+  await page.getByLabel("Codex 추론 강도", { exact: true }).selectOption("high");
+  await page.getByLabel("Codex 질문", { exact: true }).fill("원문에 체크리스트를 추가해 줘");
+  await page.getByRole("button", { name: "Codex 보내기", exact: true }).click();
+  await page.getByLabel("AI 실시간 변경", { exact: true }).waitFor();
+  assert.equal(await readFile(`${vault}/Home.md`, "utf8"), original);
+  assert.equal(await selector.isDisabled(), true);
+  await page.getByRole("button", { name: "변경 유지", exact: true }).click();
+  await page.getByLabel("AI 실시간 변경", { exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await readFile(`${vault}/Home.md`, "utf8"), original + "\nCODEX_AGENT_DRAFT");
+  const codexRequests = await app.evaluate(() => globalThis.providerRequests.filter(request => request.provider === "codex"));
+  assert.deepEqual(codexRequests.map(request => [request.mode, request.reasoningEffort]), [["chat", "low"], ["edit", "low"], ["agent", "high"]]);
+  await page.locator('.copilot-panel').evaluate(element => { element.style.width = '240px'; element.style.flex = '0 0 240px'; });
+  const bounds = await page.getByLabel("Codex 추론 강도", { exact: true }).boundingBox(), panel = await page.locator('.copilot-panel').boundingBox();
+  assert.ok(bounds.width > 50 && bounds.x >= panel.x && bounds.x + bounds.width <= panel.x + panel.width + 1);
+  await page.screenshot({ path: "output/playwright/ai-reasoning-narrow.png" });
+  report.checks.push("Codex Agent stages a draft without saving; Keep writes once, provider switch is locked, Ask/Edit/Agent forward selected effort, 240px reasoning control fits");
   await selector.selectOption("copilot");
   assert.ok((await page.getByLabel("Copilot 작업", { exact: true }).locator("option").evaluateAll(options => options.map(x => x.value))).includes("agent"));
   report.checks.push("Per-provider model persistence and clean histories; Copilot Agent preserved");

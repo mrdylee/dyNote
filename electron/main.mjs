@@ -28,6 +28,7 @@ import { PluginController } from "./plugin-controller.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
 import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
+import { AiExtensions } from "./ai-extensions.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -59,6 +60,7 @@ let activeMutations = 0;
 let gitBackup;
 let copilot;
 let codex, claude;
+let aiExtensions, aiExtensionsChanging = false;
 let plugins;
 let updates;
 
@@ -77,6 +79,20 @@ function validateSender(event) {
 function checkVault(args) {
   if (!vault || !args || args.vaultId !== vault.id)
     throw new Error("보관함이 변경되었습니다. 문서를 다시 열어 주세요.");
+}
+
+async function changeAiExtensions(action) {
+  if (aiExtensionsChanging || [copilot, codex, claude].some(controller => controller?.job || controller?.loginJob))
+    throw new Error("AI 작업이 끝난 뒤 MCP·스킬 연결을 변경해 주세요.");
+  aiExtensionsChanging = true;
+  try { return await action(); }
+  finally { aiExtensionsChanging = false; }
+}
+
+function sendAi(controller, args) {
+  checkVault(args);
+  if (aiExtensionsChanging) throw new Error("MCP·스킬 연결을 변경 중입니다. 잠시 후 다시 보내 주세요.");
+  return controller.send(args);
 }
 
 async function selectVault(root) {
@@ -118,6 +134,8 @@ app
     recovery = path.join(app.getPath("userData"), "recovery");
     registry = new VaultRegistry(path.join(app.getPath("userData"), "settings.json"));
     await mkdir(app.getPath("userData"), { recursive: true });
+    aiExtensions = new AiExtensions({ file: path.join(app.getPath("userData"), "ai-extensions.json") });
+    await aiExtensions.load().catch(() => {}); // The registry reports its preserved load error in the panel.
     vault = await initialVault();
     updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),current:app.getVersion(),
       onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
@@ -127,12 +145,10 @@ app
       onStatus: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status); },
     });
     if (vault) await gitBackup.open(vault);
+    const getNotes = async (vaultId) => { checkVault({ vaultId }); return (await vault.snapshot()).notes; };
+    const getExtensions = () => aiExtensions.getExtensions();
     copilot = new CopilotController({
-      directory: path.join(app.getPath("userData"), "copilot"),
-      getNotes: async (vaultId) => {
-        checkVault({ vaultId });
-        return (await vault.snapshot()).notes;
-      },
+      directory: path.join(app.getPath("userData"), "copilot"), getNotes, getExtensions,
       openExternal: (url) => shell.openExternal(url),
       onEvent: (event) => {
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
@@ -143,7 +159,7 @@ app
       openExternal: url => shell.openExternal(url),
       onEvent: event => { if (window && !window.webContents.isDestroyed()) window.webContents.send(`notes:${provider}-event`, event); },
     });
-    codex = new CodexController(cliOptions("codex"));
+    codex = new CodexController({ ...cliOptions("codex"), getNotes, getExtensions });
     claude = new ClaudeController(cliOptions("claude"));
     protocol.handle("notes", async (request) => {
       try {
@@ -288,16 +304,26 @@ app
       "plugin-show": args => { checkVault(args); plugins.show(args.id, args.settings === true); },
       "plugin-command": args => { checkVault(args); plugins.execute(args.id, args.command); },
       "plugin-context": args => { checkVault(args); plugins.update({ notes: args.notes, active: args.active, dailyOptions: args.dailyOptions }); },
+      "ai-extensions": () => aiExtensions.snapshot(),
+      "ai-import-mcp": () => changeAiExtensions(async () => {
+        const selected = await dialog.showOpenDialog(window, { title: "MCP 설정 JSON 파일 연결", filters: [{ name: "JSON", extensions: ["json"] }], properties: ["openFile"] });
+        return selected.canceled ? aiExtensions.snapshot() : aiExtensions.addConfig(selected.filePaths[0]);
+      }),
+      "ai-add-skills": () => changeAiExtensions(async () => {
+        const selected = await dialog.showOpenDialog(window, { title: "스킬 폴더 연결", properties: ["openDirectory"] });
+        return selected.canceled ? aiExtensions.snapshot() : aiExtensions.addSkills(selected.filePaths[0]);
+      }),
+      "ai-remove-extension": args => changeAiExtensions(() => aiExtensions.remove(args)),
       "copilot-status": () => copilot.status(),
       "codex-status": () => codex.status(),
       "codex-login": () => codex.login(),
       "codex-cancel-login": () => codex.cancelLogin(),
-      "codex-send": args => { checkVault(args); return codex.send(args); },
+      "codex-send": args => sendAi(codex, args),
       "codex-cancel": args => codex.cancel(args?.requestId),
       "claude-status": () => claude.status(),
       "claude-login": () => claude.login(),
       "claude-cancel-login": () => claude.cancelLogin(),
-      "claude-send": args => { checkVault(args); return claude.send(args); },
+      "claude-send": args => sendAi(claude, args),
       "claude-cancel": args => claude.cancel(args?.requestId),
       "check-updates": () => updates.check(true),
       "update-state": () => updates.state,
@@ -307,7 +333,7 @@ app
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
       "copilot-login": () => copilot.login(),
       "copilot-cancel-login": () => copilot.cancelLogin(),
-      "copilot-send": (args) => { checkVault(args); return copilot.send(args); },
+      "copilot-send": args => sendAi(copilot, args),
       "copilot-cancel": (args) => copilot.cancel(args?.requestId),
       snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
@@ -458,7 +484,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply"].includes(name);
-        const readOnly = /^(copilot|codex|claude|update)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

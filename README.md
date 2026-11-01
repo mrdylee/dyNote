@@ -2,23 +2,25 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.12.2 프리릴리스는 최대 3문서 비교, 날짜별 저널과 원본을 보존하는 폴더 분류 제안, 주간 업데이트 확인, Codex·Claude CLI 연결을 제공합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.12.2.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
+v0.13.0 프리릴리스는 저널 전용 계층형 블록 작성, Markdown 크기 제한 해제, 선택한 AI를 사용하는 캡처 인식과 Copilot·Codex Agent/MCP/스킬을 제공합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.13.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
 ## 실행
 
-Apple Silicon Mac에서는 `Dynote-0.12.2-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
+Apple Silicon Mac에서는 `Dynote-0.13.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.12.2/Dynote-darwin-arm64/Dynote.app`
+`release/v0.13.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.12.2/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. v0.12.2 Windows 배포본은 Windows GitHub runner에서 단위 테스트와 실제 실행 창 생성 검사를 통과했습니다. 전체 UI 수동 검증은 별도입니다. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.13.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.12.2)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.13.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
+
+일간 저널에서 Enter는 새 블록, Tab·Shift+Tab은 하위·상위 단계, Shift+Enter는 같은 블록 안의 줄바꿈입니다. 구조는 일반 Markdown 들여쓰기로 저장되어 AI 수정에도 그대로 전달됩니다. 기존 저널과 사용자 템플릿을 자동으로 변환하지 않습니다.
 
 개발 환경에서는 Node.js 22.13 이상과 npm을 준비합니다.
 
@@ -65,7 +67,7 @@ npm start
 
 ## 파일과 복구
 
-원본 형식은 일반 UTF-8 Markdown입니다. 다른 앱의 숨김 설정 디렉터리는 읽거나 수정하지 않습니다. UTF-8 이외 인코딩과 8MB 초과 문서는 경고와 함께 제외합니다. 첨부파일은 25MB 이하의 PNG·JPEG·GIF·WebP·PDF를 지원하며 `_attachments/`로 바이트 그대로 복사합니다. SVG·HTML·실행 파일은 가져오지 않습니다.
+원본 형식은 일반 UTF-8 Markdown입니다. 다른 앱의 숨김 설정 디렉터리는 읽거나 수정하지 않습니다. UTF-8 이외 인코딩은 경고와 함께 제외합니다. Markdown 문서에는 고정 파일 크기 제한이 없습니다. Canvas·Bases 문서는 8MB 이하를 지원합니다. 첨부파일은 25MB 이하의 PNG·JPEG·GIF·WebP·PDF를 지원하며 `_attachments/`로 바이트 그대로 복사합니다. SVG·HTML·실행 파일은 가져오지 않습니다.
 
 상단 **이름·이동**에서 확장자를 유지한 새 경로를 입력합니다. 대상 파일이 있거나 문서가 외부에서 바뀌었다면 덮어쓰지 않습니다. 파일 이동·삭제 전에 저장 대기 중인 초안을 먼저 저장합니다. 이동에 실패하면 자체 변경을 복구하며 외부 변경은 덮어쓰지 않습니다. 휴지통 사본은 앱 데이터 `recovery/<vault-id>/trash/<item-id>/`에 보존합니다. 현재 실행 중에는 **되돌리기**, 재시작 후에는 복구 사본 폴더의 `entry.json` 경로와 `content` 파일로 복구할 수 있습니다.
 

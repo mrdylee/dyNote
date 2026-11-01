@@ -6,7 +6,7 @@ import path from "node:path";
 import { MAX_ANSWER, prepareRequest, sessionOptions } from "../core/copilot.mjs";
 import { runtimeEnvironment } from "./copilot-controller.mjs";
 
-const models = ["sonnet", "opus", "haiku"].map(id => ({ id, name: `Claude ${id[0].toUpperCase()}${id.slice(1)}` }));
+const models = ["sonnet", "opus", "haiku"].map(id => ({ id, name: `Claude ${id[0].toUpperCase()}${id.slice(1)}`, vision: true }));
 export function claudeEnvironment(directory, env = process.env) {
   return { ...runtimeEnvironment(env), CLAUDE_CONFIG_DIR: directory, DISABLE_AUTOUPDATER: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" };
 }
@@ -40,6 +40,7 @@ async function resolveClaude() {
 }
 export function claudeArguments(args) {
   return ["--print", "--verbose", "--output-format", "stream-json", "--include-partial-messages",
+    ...(args.image ? ["--input-format", "stream-json"] : []),
     "--model", args.model, "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--settings", '{"disableAllHooks":true}', "--disable-slash-commands", "--no-session-persistence", "--permission-mode", "dontAsk",
     "--system-prompt", sessionOptions(args.model, args.mode).systemMessage.content];
@@ -110,7 +111,8 @@ export class ClaudeController {
   send(input) {
     if (this.closed || this.job || this.loginJob) throw new Error("Claude 작업이 진행 중이거나 연결이 종료되었습니다.");
     const args = prepareRequest(input);
-    if (!["chat", "edit"].includes(args.mode) || args.image) throw new Error("Claude는 Ask와 Edit 텍스트 작업을 지원합니다.");
+    if (args.reasoningEffort) throw new Error("Claude의 추론 강도 선택은 아직 지원하지 않습니다.");
+    if (!["chat", "edit"].includes(args.mode)) throw new Error("Claude는 Ask와 Edit 작업을 지원합니다.");
     const job = { id: args.requestId, canceled: false }; this.job = job;
     job.promise = this.run(job, args); return { requestId: job.id };
   }
@@ -122,8 +124,12 @@ export class ClaudeController {
       if (!status.authenticated) throw new Error("먼저 Claude 계정으로 연결해 주세요.");
       if (!models.some(m => m.id === args.model)) throw new Error("선택한 Claude 모델을 사용할 수 없습니다.");
       let content = "", result;
+      const text = JSON.stringify({ request: args.prompt, context: args.context, references: args.references, dialogue: args.history });
+      const input = args.image ? JSON.stringify({ type: "user", message: { role: "user", content: [
+        { type: "text", text }, { type: "image", source: { type: "base64", media_type: args.image.mimeType, data: args.image.data } },
+      ] } }) + "\n" : text;
       const { code } = await this.process(await this.client(), claudeArguments(args), {
-        input: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, dialogue: args.history }), timeout: 180000,
+        input, timeout: 180000,
         started: stop => { job.stop = stop; if (job.canceled) stop(); },
         onLine: event => {
           if (job.canceled) return;

@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { deflateSync } from "node:zlib";
 import { CodexRpc } from "../electron/codex-rpc.mjs";
 import { safeCodexLoginUrl } from "../electron/codex-controller.mjs";
 
@@ -13,7 +14,8 @@ const report = { liveAccountLoginVerified: false, liveModelResponseVerified: fal
 const requests = [];
 const server = createServer(async (req, res) => {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  try { for await (const chunk of req) chunks.push(chunk); }
+  catch (error) { if (error.code === "ECONNRESET") return; throw error; }
   const body = Buffer.concat(chunks).toString();
   requests.push(JSON.parse(body));
   res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -31,7 +33,7 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;
 const events = [];
 let finish;
-const completed = new Promise((resolve) => { finish = resolve; });
+let completed = new Promise((resolve) => { finish = resolve; });
 const rpc = new CodexRpc({
   directory,
   spawnProcess: (command, args, options) => spawn(command, [...args,
@@ -42,6 +44,7 @@ const rpc = new CodexRpc({
     events.push({ method, params });
     if (method === "turn/completed") finish(params);
   },
+  onClose: error => finish?.({ transportError: error.message }),
 });
 let timeout;
 try {
@@ -74,6 +77,29 @@ try {
   report.checks.push("Ephemeral no-environment thread reaches only the local fixture backend");
   report.checks.push("Actual native runtime exposes no file, shell, browser, connector or agent tools");
   report.checks.push("Native streaming and successful turn completion confirmed with synthetic answer");
+  // Deterministic noisy RGB pixels keep this valid PNG above the old 2 MiB
+  // RPC frame limit while remaining inside Dynote's supported image bound.
+  const pngChunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type), data]); let crc = 0xffffffff;
+    for (const byte of body) { crc ^= byte; for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+    const size = Buffer.alloc(4), checksum = Buffer.alloc(4); size.writeUInt32BE(data.length); checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+    return Buffer.concat([size, body, checksum]);
+  };
+  const width = 1200, height = 900, pixels = Buffer.alloc((width * 3 + 1) * height); let seed = 42;
+  for (let y = 0; y < height; y++) for (let x = 1; x <= width * 3; x++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; pixels[y * (width * 3 + 1) + x] = seed >>> 24; }
+  const header = Buffer.alloc(13); header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2;
+  const image = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), pngChunk("IHDR", header), pngChunk("IDAT", deflateSync(pixels)), pngChunk("IEND", Buffer.alloc(0))]);
+  const data = image.toString("base64"); assert.ok(data.length > 2 * 1024 * 1024 && data.length < 8 * 1024 * 1024);
+  completed = new Promise(resolve => { finish = resolve; });
+  await rpc.request("turn/start", { threadId: thread.id, environments: [], input: [{ type: "text", text: "Describe this synthetic image", text_elements: [] }, { type: "image", url: `data:image/png;base64,${data}` }] });
+  clearTimeout(timeout);
+  const imageResult = await Promise.race([completed, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Native image fixture timeout")), 20000); })]);
+  assert.equal(imageResult.transportError, undefined);
+  assert.equal(imageResult.turn.status, "completed", JSON.stringify(imageResult.turn.error));
+  assert.ok(events.some(event => event.params.item?.type === "userMessage" && event.params.item.content.some(input => input.type === "image" && input.url?.length > 2 * 1024 * 1024)));
+  assert.ok(JSON.stringify(requests.at(-1)).includes("data:image/png;base64,"));
+  report.checks.push("Native large-image echo does not count as model output or overflow the RPC frame");
+  report.syntheticImageBytes = image.length;
   await rpc.request("thread/unsubscribe", { threadId: thread.id });
   await mkdir("output/verification", { recursive: true });
   await writeFile("output/verification/codex-protocol.json", JSON.stringify(report, null, 2) + "\n");

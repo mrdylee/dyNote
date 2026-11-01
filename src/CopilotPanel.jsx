@@ -1,9 +1,10 @@
-import { sendBlock, defaultCopilotModel } from "../core/copilot-send-state.mjs";
+import { sendBlock } from "../core/copilot-send-state.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip, ChevronDown } from "lucide-react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import DiagramPreview from "./DiagramPreview.jsx";
+import AiExtensions from "./AiExtensions.jsx";
 import { captureContext, applyProposal, prepareRequest } from "../core/copilot.mjs";
 
 const invoke = async (promise) => {
@@ -11,38 +12,24 @@ const invoke = async (promise) => {
   if (!result.ok) throw new Error(result.error);
   return result.value;
 };
-const disconnected = { authenticated: false, login: "", models: [], error: "" };
 const markdown = new MarkdownIt({ html: false, breaks: true });
 // Model output must not fetch remote images or navigate the app.
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[이미지: ${tokens[index].content}]`);
 const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
-export default function CopilotPanel({ api, vaultId, ...props }) {
-  const [provider, setProvider] = useState(() => {
-    try { const saved = localStorage.getItem("dynote.ai.provider"); return ["copilot", "codex", "claude"].includes(saved) ? saved : "copilot"; } catch { return "copilot"; }
-  });
-  return <ProviderPanel key={`${vaultId}:${provider}`} {...props} api={api} vaultId={vaultId} provider={provider} onProvider={value => {
-    setProvider(value);
-    try { localStorage.setItem("dynote.ai.provider", value); } catch { /* Keep the choice in memory. */ }
-  }} />;
+export default function CopilotPanel({ api, vaultId, session, ...props }) {
+  return <ProviderPanel key={`${vaultId}:${session.provider}`} {...props} api={api} vaultId={vaultId} session={session} provider={session.provider} onProvider={session.setProvider} />;
 }
 
-function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive, onOpenVault }) {
+function ProviderPanel({ api, vaultId, session, provider, onProvider, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive, onOpenVault }) {
   const label = { copilot: "Copilot", codex: "Codex", claude: "Claude" }[provider];
-  const accountLabel = { copilot: "GitHub", codex: "ChatGPT", claude: "Claude" }[provider];
-  const modelKey = `dynote.${provider}.model`;
-  const ai = {
-    status: api[`${provider}Status`], login: api[`${provider}Login`],
-    cancelLogin: api[`${provider}CancelLogin`], send: api[`${provider}Send`],
-    cancel: api[`${provider}Cancel`], onEvent: api[`on${label}Event`],
-  };
+  const accountLabel = { copilot: "GitHub", codex: "Codex", claude: "Claude" }[provider];
+  const { ai, connection, checking, model, setModel, refresh, reasoningEfforts, reasoningEffort, setReasoningEffort, defaultReasoningEffort } = session;
+  const effortLabel = value => ({ none: "없음", minimal: "최소", low: "낮음", medium: "보통", high: "높음", xhigh: "매우 높음", max: "최대", ultra: "최상" }[value] ?? value);
   const accountMenu = useRef(null);
-  const [connection, setConnection] = useState(disconnected);
-  const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState(null);
-  const [model, setModel] = useState(() => { try { return localStorage.getItem(modelKey) ?? ""; } catch { return ""; } });
   const [scope, setScope] = useState("document");
-  const [mode, setMode] = useState(provider === "copilot" ? "agent" : "chat");
+  const [mode, setMode] = useState(provider !== "claude" ? "agent" : "chat");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState([]);
   const [running, setRunning] = useState(false);
@@ -50,6 +37,7 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
   const [proposals, setProposals] = useState([]);
   const [review, setReview] = useState(null);
   const [applying, setApplying] = useState(false);
+  const [extensionsBusy, setExtensionsBusy] = useState(false);
   const [progress, setProgress] = useState([]);
   const [references, setReferences] = useState([]);
   const [attachmentSearch, setAttachmentSearch] = useState("");
@@ -57,27 +45,15 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
   const [vaultAccess, setVaultAccess] = useState(false);
   const pending = useRef(null), transcript = useRef(null), mounted = useRef(true), loginPending = useRef(false);
   const previousPath = useRef(note?.path);
-  const checkedConnection = useRef(false);
   const latest = useRef(null);
   latest.current = { note, notes, vaultId, onApply, busy, liveEdits, onBeginLive };
-  const refresh = async () => {
-    setChecking(true); setError("");
-    try {
-      const next = await invoke(ai.status());
-      if (!mounted.current) return;
-      setConnection(next);
-      setModel((current) => defaultCopilotModel(next.models, current));
-      if (next.error) setError(next.error);
-    } catch (e) { if (mounted.current) setError(e.message); }
-    finally { if (mounted.current) setChecking(false); }
-  };
+  useEffect(() => { setError(connection.error || ""); }, [connection]);
   useEffect(() => {
     mounted.current = true;
     const unsubscribe = ai.onEvent((event) => {
       if (event.type === "auth") {
         setAuth(event);
         loginPending.current = ["starting", "waiting"].includes(event.phase);
-        if (event.phase === "connected") refresh();
         return;
       }
       const request = pending.current;
@@ -118,15 +94,6 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
     };
   }, []);
   useEffect(() => {
-    try { if (model) localStorage.setItem(modelKey, model); } catch { /* Keep the choice in memory. */ }
-  }, [model]);
-  useEffect(() => {
-    if (visible && !checkedConnection.current) {
-      checkedConnection.current = true;
-      refresh();
-    }
-  }, [visible]);
-  useEffect(() => {
     if (previousPath.current === note?.path) return;
     previousPath.current = note?.path;
     if (mode === "agent") return;
@@ -138,15 +105,20 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
     if (visible && transcript.current) transcript.current.scrollTop = messages.length ? transcript.current.scrollHeight : 0;
   }, [messages, progress, proposals, visible]);
   const authBusy = auth && ["starting", "waiting"].includes(auth.phase);
+  useEffect(() => {
+    session.setActivity("chat", !!(running || authBusy || extensionsBusy));
+    return () => session.setActivity("chat", false);
+  }, [running, authBusy, extensionsBusy, session.setActivity]);
   const newConversation = () => {
     setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
   const login = async () => {
-    setError(""); setAuth({ phase: "starting", message: `${accountLabel} 연결 준비 중…` }); loginPending.current = true;
+    if (loginPending.current) return;
+    setError(""); setAuth({ phase: "starting", message: `${label} 로그인 준비 중…` }); loginPending.current = true;
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy, applying, running, label, accountLabel,
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || extensionsBusy || session.activity.planner, applying, running, label,
     vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
@@ -161,7 +133,7 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
         if (!found) throw new Error(`첨부 문서가 없어졌습니다: ${path}`);
         return { path, content: found.content };
       });
-      const args = prepareRequest({ requestId, vaultId, model, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
+      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       pending.current = { ...args, target, inputPrompt: prompt };
       if (mode === "agent") await latest.current.onBeginLive(requestId);
@@ -198,7 +170,7 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-chat-heading">
       <select className="ai-provider-select" aria-label="AI 제공자" value={provider}
-        disabled={running || applying || authBusy || checking || proposals.length > 0 || liveEdits.blocked()} onChange={event => onProvider(event.target.value)}>
+        disabled={running || applying || extensionsBusy || authBusy || checking || session.activity.planner || proposals.length > 0 || liveEdits.blocked()} onChange={event => onProvider(event.target.value)}>
         <option value="copilot">Copilot</option><option value="codex">Codex</option><option value="claude">Claude</option>
       </select>
       <div className="copilot-heading-actions">
@@ -210,8 +182,8 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
           </summary>
           <div className="copilot-account-options" role="group" aria-label={`${accountLabel} 연결 설정`}>
             <p>{connection.authenticated ? `${accountLabel} · ${connection.login || "연결됨"}` : `${accountLabel} 계정으로 연결하세요.`}</p>
-            {provider !== "copilot" && <p>설치된 {label} CLI를 사용합니다. Dynote 전용 계정 연결이 필요합니다.</p>}
-            <button type="button" disabled={checking || running || applying || authBusy} onClick={() => { accountMenu.current.open = false; login(); }}>{connection.authenticated ? "계정 다시 연결" : `${accountLabel}로 연결`}</button>
+            {provider !== "copilot" && <p>{label} 로그인은 브라우저에서 진행하며, Dynote에서 한 번 완료하면 유지됩니다.</p>}
+            <button type="button" disabled={checking || running || applying || authBusy || session.activity.planner} onClick={() => { accountMenu.current.open = false; login(); }}>{connection.authenticated ? "계정 다시 연결" : provider === "copilot" ? "GitHub로 연결" : `${label} 로그인`}</button>
             <button type="button" disabled={checking || running || applying || authBusy} onClick={() => { accountMenu.current.open = false; refresh(); }}>이미 연결한 계정 확인</button>
           </div>
         </details>
@@ -242,7 +214,7 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
       </div>)}
     </div>
     {!!liveEdits.drafts.length && <div className="copilot-pending-list"><strong>미확정 문서 {liveEdits.drafts.length}개</strong>{liveEdits.drafts.map((draft) => <button key={draft.path} onClick={() => onReview(draft.path)}>{draft.path}</button>)}<small>가운데 편집기에서 유지하거나 되돌려 주세요.</small></div>}
-    {error && !review && <p className="copilot-error" role="alert">{error}</p>}
+    {error && !review && blockedSend?.message !== error && <p className="copilot-error" role="alert">{error}</p>}
     <form className="copilot-composer" onSubmit={send}>
       <div className="copilot-context-row">
         <select aria-label={`${label} 전달 범위`} title={`${label}에 보낼 내용`} value={scope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
@@ -258,30 +230,39 @@ function ProviderPanel({ api, vaultId, provider, onProvider, note, notes = [], s
           <div>{notes.filter((n) => n.path !== note?.path && !references.includes(n.path) && n.path.toLocaleLowerCase().includes(attachmentSearch.toLocaleLowerCase())).slice(0, 100).map((n) => <button type="button" disabled={references.length >= 5 || running} key={n.path} onClick={() => { setReferences((old) => [...old, n.path]); setAttachmentsOpen(false); }}>{n.path}</button>)}</div>
         </div>}
         {mode === "agent" && <label className="copilot-vault-access"><input type="checkbox" checked={vaultAccess} disabled={running} onChange={(e) => setVaultAccess(e.target.checked)} />보관함 검색·읽기 허용</label>}
-        {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 Copilot에 전송됩니다.</small>}
+        {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 {label}에 전송됩니다.</small>}
       </div>
       <div className="copilot-input-box">
         <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) send(); } }} />
         <div className="copilot-send-row">
           <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
-            {provider === "copilot" && <option value="agent">Agent</option>}<option value="chat">Ask</option><option value="edit" disabled={scope === "none" || !note}>Edit</option>
+            {provider !== "claude" && <option value="agent">Agent</option>}<option value="chat">Ask</option><option value="edit" disabled={scope === "none" || !note}>Edit</option>
           </select>
-        {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking} onChange={(e) => setModel(e.target.value)}>
+        {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking || session.activity.planner} onChange={(e) => setModel(e.target.value)}>
           <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
           {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select></label>}
           {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => { liveEdits.stop(); invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message)); }}><Square size={15} />중지</button>
             : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} aria-describedby="copilot-send-status" title={blockedSend?.message || "현재 전달 범위로 질문 보내기"} disabled={!canSend}><ArrowUp size={16} /></button>}
         </div>
+        {connection.authenticated && provider !== "claude" && <label className="copilot-reasoning"><span>추론 강도</span><select aria-label={`${label} 추론 강도`} value={reasoningEffort} disabled={running || applying || checking || session.activity.planner || !reasoningEfforts.length} onChange={event => setReasoningEffort(event.target.value)}>
+          <option value="">모델 기본값{defaultReasoningEffort ? ` (${effortLabel(defaultReasoningEffort)})` : ""}</option>
+          {reasoningEfforts.map(value => <option key={value} value={value}>{effortLabel(value)}</option>)}
+        </select></label>}
       </div>
       <div id="copilot-send-status" className="copilot-send-status" role="status" aria-label={`${label} 전송 상태`}>
         {blockedSend?.message}
+        {blockedSend?.code === "auth" && <div className="copilot-connect-actions">
+          <button type="button" className="primary-button" disabled={busy || running || applying} onClick={login}>{label} 로그인</button>
+          <button type="button" className="secondary-button" disabled={busy || running || applying} onClick={refresh}>연결 다시 확인</button>
+        </div>}
         {blockedSend?.code === "vault" && <button type="button" className="text-action" aria-label="AI용 노트 폴더 열기" onClick={onOpenVault}>노트 폴더 열기</button>}
         {blockedSend?.code === "drafts" && <button type="button" className="text-action" onClick={() => { newConversation(); setMode("chat"); }}>Ask로 대화</button>}
       </div>
+      {provider !== "claude" && <AiExtensions api={api} disabled={running || applying || authBusy || checking || busy || session.activity.planner} onBusy={setExtensionsBusy} />}
       <small className="copilot-shortcuts">Enter 전송 · Shift+Enter 줄바꿈</small>
-      <small className="copilot-allowance">선택한 내용과 대화가 전송되며 {label} 사용량이 적용됩니다.{provider !== "copilot" && " Ask·Edit 지원 · Agent는 Copilot에서 사용"}</small>
+      <small className="copilot-allowance">선택한 내용과 대화가 전송되며 {label} 사용량이 적용됩니다.{provider === "claude" && " Ask·Edit 지원"}</small>
     </form>
     {review && <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label={`${label} 수정안 확인`} className="modal wide copilot-review">
       <div className="modal-heading"><h2>수정안 확인</h2><button disabled={applying} onClick={() => setReview(null)}>닫기</button></div>

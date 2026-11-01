@@ -152,3 +152,55 @@ test('JOURNAL-01 concurrent open-or-create returns one file without overwriting 
   assert.equal((await store.openOrCreate(a.path,'template')).content,saved.content);
   await assert.rejects(store.openOrCreate('../escape.md','bad'),/경로/);
 });
+
+const largeMarkdown = () => '\ufeff# 큰 문서\r\n' + '한글'.repeat(1500000) + '\r\n끝 ✅\r\n';
+
+test('Markdown above 8 MiB opens, saves and retains exact recovery bytes', async (t) => {
+  const { store, root, recovery } = await fixture(t);
+  const original = largeMarkdown();
+  assert.ok(Buffer.byteLength(original) > 8 * 1024 * 1024);
+  await writeFile(join(root, 'Large.MD'), original);
+  const snapshot = await store.snapshot();
+  assert.deepEqual(snapshot.warnings, []);
+  const note = snapshot.notes.find(n => n.path === 'Large.MD');
+  assert.ok(note, 'large Markdown must be included');
+  assert.equal(note.content, original);
+  const edited = original + '추가\r\n';
+  const saved = await store.save(note.path, edited, note.revision);
+  assert.equal(saved.content, edited);
+  assert.equal(await readFile(join(root, note.path), 'utf8'), edited);
+  const backup = (await readdir(recovery, { recursive: true })).find(f => /\.md$/i.test(f));
+  assert.equal(await readFile(join(recovery, backup), 'utf8'), original);
+  const reopened = await Vault.open(root, recovery);
+  assert.equal((await reopened.snapshot()).notes.find(n => n.path === note.path).content, edited);
+  await assert.rejects(store.save(note.path, 'stale', note.revision), /외부|변경/);
+});
+
+test('Markdown above 8 MiB can be created and opened without overwriting it', async (t) => {
+  const { store, root } = await fixture(t);
+  const content = largeMarkdown();
+  const created = await store.create('Created.md', content);
+  assert.equal(created.content, content);
+  assert.equal((await store.openOrCreate(created.path, 'replacement')).content, content);
+  assert.equal((await store.openOrCreate('Journal/large.md', content)).content, content);
+  assert.equal(await readFile(join(root, created.path), 'utf8'), content);
+});
+
+test('batch document changes accept large Markdown and preserve type and structured-file guards', async (t) => {
+  const { store, root } = await fixture(t);
+  const content = largeMarkdown(), before = await store.documentSnapshot();
+  const result = await store.applyDocumentChanges([
+    { path: '한글.md', content }, { path: 'Batch.md', content },
+  ], before.revision);
+  assert.equal(result.snapshot.notes.find(n => n.path === 'Batch.md').content, content);
+  assert.equal(await readFile(join(root, '한글.md'), 'utf8'), content);
+  assert.equal(await readFile(join(result.recoveryPath, 'files/한글.md'), 'utf8'), '# 시작\n안녕하세요');
+  const board = await store.createDocument('Board.canvas');
+  const oversizedBoard = board.content + ' '.repeat(8 * 1024 * 1024);
+  await assert.rejects(store.saveDocument(board.path, oversizedBoard, board.revision), /8MB/);
+  const snapshot = await store.documentSnapshot();
+  await assert.rejects(store.applyDocumentChanges([{ path: board.path, content: oversizedBoard }], snapshot.revision), /8MB/);
+  await assert.rejects(store.applyDocumentChanges([{ path: 'Invalid.md', content: {} }], snapshot.revision), /내용/);
+  await assert.rejects(store.save('Batch.md', {}, result.snapshot.notes.find(n => n.path === 'Batch.md').revision), /내용/);
+  assert.equal(await readFile(join(root, board.path), 'utf8'), board.content);
+});

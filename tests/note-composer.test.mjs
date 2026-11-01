@@ -39,10 +39,15 @@ test('CORE-COMPOSER rejects collisions, invalid ranges and stale preview without
  assert.equal(await readFile(`${root}/Target.md`,'utf8'),'external\n');assert.equal(await readFile(`${root}/Source.md`,'utf8'),'# Source\nContent\n');
 });
 
-test('CORE-COMPOSER refuses an oversized merged result without changing either source',async t=>{
+test('CORE-COMPOSER merges above 8 MiB with exact contents and recoverable originals',async t=>{
  const source='s'.repeat(5*1024*1024),target='t'.repeat(4*1024*1024),{root,composer}=await fixture(t,{'Source.md':source,'Target.md':target});
- await assert.rejects(composer.preview({kind:'merge',sourcePath:'Source.md',targetPath:'Target.md'}),/8MB/);
+ const preview=await composer.preview({kind:'merge',sourcePath:'Source.md',targetPath:'Target.md'});
  assert.equal(await readFile(`${root}/Source.md`,'utf8'),source);assert.equal(await readFile(`${root}/Target.md`,'utf8'),target);
+ const result=await composer.apply(preview.input,preview.revision);
+ assert.equal(await readFile(`${root}/Target.md`,'utf8'),target+'\n\n'+source);
+ assert.equal(await readFile(`${result.recoveryPath}/files/Source.md`,'utf8'),source);
+ assert.equal(await readFile(`${result.recoveryPath}/files/Target.md`,'utf8'),target);
+ await assert.rejects(readFile(`${root}/Source.md`));
 });
 
 test('CORE-COMPOSER does not read or back up unrelated large PDF bytes',async t=>{

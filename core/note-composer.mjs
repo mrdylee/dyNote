@@ -101,7 +101,7 @@ function plan(capture,input){
     });
     if(changed)changes.set(document.path,JSON.stringify({...data,nodes},null,2)+'\n');
   }
-  for(const content of changes.values())if(content!==null&&Buffer.byteLength(content)>limit)throw new Error('작업 결과 문서는 8MB 이하여야 합니다.');
+  for(const [path,content]of changes)if(content!==null&&!validNotePath(path)&&Buffer.byteLength(content)>limit)throw new Error('작업 결과 문서는 8MB 이하여야 합니다.');
   const previous=[...notes,...capture.documents];
   for(const [path,content]of changes)if(content!==null && content===previous.find(n=>n.path===path)?.content)changes.delete(path);
   return {input:normalized,edits:[...changes].map(([path,content])=>({path,content})),changes:[...changes].map(([path,content])=>{const before=previous.find(n=>n.path===path)?.content??null;return {path,kind:content===null?'remove':before===null?'create':'edit',before:before?.slice(0,1800)||'',after:content?.slice(0,1800)||'',beforeLength:before?.length||0,afterLength:content?.length||0};})};

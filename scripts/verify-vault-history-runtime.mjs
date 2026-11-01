@@ -50,8 +50,9 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".vault-settings-list li").length === 1);
   await access(`${other}/Other.md`);
   report.checks.push("native Settings menu opens; folder selection persists across restart; switching and removing a recent entry preserves the actual folder");
-  await page.getByRole("button", { name: "백업 복원", exact: true }).click();
-  assert.equal(await page.locator(".settings-tabs [aria-current=page]").innerText(), "백업 복원");
+  await page.getByRole("button", { name: "백업·복원", exact: true }).click();
+  await page.getByRole("button", { name: "복원", exact: true }).click();
+  assert.equal(await page.locator(".settings-tabs [aria-current=page]").innerText(), "백업·복원");
   const month = `${firstDate.getFullYear()}-${String(firstDate.getMonth()+1).padStart(2,"0")}`;
   const day = `${month}-${String(firstDate.getDate()).padStart(2,"0")}`;
   await page.getByLabel("백업 월", { exact: true }).fill(month);
@@ -80,6 +81,12 @@ try {
   await page.getByRole("dialog", { name: "설정", exact: true }).waitFor();
   assert.match(await page.locator(".settings-section").innerText(), /보관함을 열지 못했습니다/);
   assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, vaultRoot);
+  await page.getByRole("button", { name: "백업·복원", exact: true }).click();
+  for (const name of ["자동 백업", "복원", "고급 Git 관리"]) {
+    await page.getByRole("button", { name, exact: true }).click();
+    await page.getByText("먼저 보관함에서 노트 폴더를 선택해 주세요.", { exact: true }).waitFor();
+  }
+  await page.getByRole("button", { name: "보관함", exact: true }).click();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, `${vaultRoot}-offline`);
   await page.getByRole("button", { name: "폴더 선택·추가", exact: true }).click();
   await page.locator(".vault-switch strong").filter({ hasText: "내 노트-offline" }).waitFor();

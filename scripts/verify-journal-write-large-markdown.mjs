@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {localDate} from '../core/periodic-notes.mjs';
+const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
+const root=await mkdtemp(`${tmpdir()}/dynote-journal-write-large-`),profile=`${root}/profile`,vault=`${root}/vault`;
+await mkdir(profile);await mkdir(vault);
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+let app=await launch();
+const errors=[],checks=[],journalPath=`Journal/${localDate()}.md`;
+const attach=async()=>{const page=await app.firstWindow();page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));return page;};
+const saved=page=>page.waitForFunction(()=>document.querySelector('.save-status')?.classList.contains('saved'));
+const editorFor=(page,path)=>page.getByRole('region',{name:`문서 ${path}`,exact:true}).getByRole('textbox',{name:'Markdown 편집기'});
+const open=async(page,path)=>{await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill(`path:${path}`);await page.locator('.switch-results button').filter({hasText:path}).first().click();await page.getByRole('region',{name:`문서 ${path}`,exact:true}).waitFor();};
+const atEnd=page=>page.waitForFunction(()=>{const el=document.activeElement,selection=window.getSelection();if(!el?.classList.contains('cm-content')||!selection?.isCollapsed||!el.contains(selection.focusNode))return false;const tail=document.createRange();tail.selectNodeContents(el);tail.setStart(selection.focusNode,selection.focusOffset);return tail.toString()==='';},{},{timeout:5000});
+try {
+ let page=await attach();
+ await page.getByRole('region',{name:'저널 피드'}).waitFor();
+ await assert.rejects(readFile(`${vault}/${journalPath}`));
+ await page.getByRole('button',{name:'오늘 기록 시작',exact:true}).click();
+ await editorFor(page,journalPath).waitFor();
+ await atEnd(page);
+ await page.keyboard.type('First journal entry');await page.keyboard.press('Meta+s');await saved(page);
+ const initial=`# ${localDate()}\n\n- First journal entry`;
+ assert.equal(await readFile(`${vault}/${journalPath}`,'utf8'),initial);
+ checks.push('first journal opens focused Write editor and accepts typing without an editor click');
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+ await page.getByRole('button',{name:'명령 팔레트',exact:true}).click();await page.getByRole('textbox',{name:'명령 검색'}).fill('오늘의 일지 열기 또는 만들기');await page.keyboard.press('Enter');
+ await atEnd(page);await page.keyboard.type('\nSecond entry');await page.keyboard.press('Meta+s');await saved(page);
+ assert.equal(await readFile(`${vault}/${journalPath}`,'utf8'),initial+'\n- Second entry');
+ await page.keyboard.press('Meta+k');
+ const search=page.getByRole('textbox',{name:'빠른 문서 검색'});await search.fill('keep focus');
+ assert.equal(await search.evaluate(el=>document.activeElement===el),true);
+ await page.keyboard.press('Escape');
+ checks.push('existing journal appends at end and subsequent dialogs retain focus');
+ if(!process.env.DYNOTE_JOURNAL_ONLY){
+  const line='한글 text '.repeat(128)+'\r\n';
+  const original='\ufeff# Large Markdown\r\n\r\n```text\r\n'+line.repeat(Math.ceil(9*1024*1024/Buffer.byteLength(line)))+'```\r\n끝 ✅\r\n';
+  await writeFile(`${vault}/Large.md`,original);
+  await page.getByRole('button',{name:'문서 새로고침',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('[aria-label="문서 새로고침"]')?.disabled===false);
+  await open(page,'Large.md');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+  const editor=editorFor(page,'Large.md');await editor.click();await page.keyboard.press('Meta+End');await page.keyboard.type('LARGE-END');await page.keyboard.press('Meta+s');await saved(page);
+  const edited=original+'LARGE-END';
+  assert.equal(await readFile(`${vault}/Large.md`,'utf8'),edited);
+  await app.close();app=await launch();page=await attach();
+  await page.getByRole('region',{name:'저널 피드'}).waitFor();await open(page,'Large.md');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+  const reopenedEditor=editorFor(page,'Large.md');await reopenedEditor.click();await page.keyboard.press('Meta+End');
+  assert.ok((await reopenedEditor.textContent()).endsWith('LARGE-END'));
+  assert.equal(await readFile(`${vault}/Large.md`,'utf8'),edited);
+  checks.push(`large UTF-8/BOM/CRLF Markdown edit/save/restart retains all ${Buffer.byteLength(edited)} bytes`);
+ }
+ assert.deepEqual(errors,[]);
+ await mkdir('output/playwright',{recursive:true});
+ const report={checks,errors,aiLoginRequired:false};await writeFile('output/playwright/journal-write-large-markdown.json',JSON.stringify(report,null,2)+'\n');console.log(report);
+}catch(error){
+ const page=app.windows()[0];
+ if(page)console.error('Editor diagnostic',await page.evaluate(()=>({active:document.activeElement?.outerHTML.slice(0,180),panes:[...document.querySelectorAll('.document-pane')].map(el=>el.getAttribute('data-document-path')),alerts:[...document.querySelectorAll('[role=alert]')].map(el=>el.textContent)})));
+ throw error;
+}finally{await app.close();await rm(root,{recursive:true,force:true});}
