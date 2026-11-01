@@ -33,7 +33,7 @@ function insert(view,from,text){
 export function journalEnter(view){
  const current=block(view);if(!current)return false;
  const {node,line,pos,first}=current,children=node.getChild('BulletList')??node.getChild('OrderedList');
- if(pos===line.to&&children&&children.from>pos){
+ if(pos>current.marker.to&&children&&children.from>pos){
   const indent=view.state.doc.lineAt(children.from).text.match(/^[\t ]*/)[0];
   return insert(view,pos,'\n'+indent+'- ');
  }

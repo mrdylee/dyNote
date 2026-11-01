@@ -8,6 +8,7 @@ await mkdir(profile);await mkdir(`${vault}/Journal`,{recursive:true});await mkdi
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 const old='# Old journal\n\nKeep this prose.\n',regular='Normal document\n';
 await writeFile(`${vault}/Journal/2020-01-01.md`,old);await writeFile(`${vault}/Regular.md`,regular);
+await writeFile(`${vault}/Guide.md`,'# Guide\n');
 await writeFile(`${vault}/Templates/journal.md`,'# Custom {{title}}\n\nTemplate prose\n');
 const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 let app=await launch(),page;const checks=[],errors=[],path=`Journal/${localDate()}.md`;
@@ -28,6 +29,12 @@ try{
  assert.equal(await content(),outline);assert.equal(await page.locator('.cm-journal-block[data-level="1"]').count(),1);
  await save();assert.equal(await readFile(`${vault}/${path}`,'utf8'),outline);
  checks.push('new journal starts focused with a bullet; Enter/Tab/Shift+Tab preserve parent and sibling structure');
+ await select(outline.indexOf('Project A')+3);await page.keyboard.press('Enter');
+ const split=outline.replace('- Project A\n','- Pro\n  - ject A\n');
+ assert.equal(await content(),split);await save();assert.equal(await readFile(`${vault}/${path}`,'utf8'),split);
+ await page.keyboard.press(`${mod}+z`);assert.equal(await content(),outline);await save();
+ checks.push('splitting a parent in the middle keeps existing children under the original parent and is undoable');
+ await select(outline.length);
  await page.keyboard.press('Shift+Enter');await page.keyboard.type('Continuation');
  const continued=outline+'\n  Continuation';assert.equal(await content(),continued);await save();
  await page.keyboard.press('Tab');assert.equal(await content(),continued.replace('- Action A','  - Action A').replace('\n  Continuation','\n    Continuation'));
@@ -41,6 +48,11 @@ try{
  assert.equal(await readFile(`${vault}/${path}`,'utf8'),continued);
  await page.getByRole('button',{name:'하위 블록 펼치기',exact:true}).click();assert.equal(await page.locator('.cm-foldPlaceholder').count(),0);
  checks.push('fold/unfold changes presentation without rewriting the saved hierarchy');
+ await select(continued.length);await page.keyboard.type(' [[Gui');await page.locator('.cm-tooltip-autocomplete').waitFor();await page.waitForTimeout(250);
+ await page.keyboard.press('Enter');assert.equal(await content(),continued+' [[Guide]]');
+ await editor().evaluate((el,from)=>{const view=el.cmTile.root.view;view.dispatch({selection:{anchor:from,head:view.state.doc.length}});view.focus();},continued.length);
+ await page.keyboard.press('Backspace');await save();assert.equal(await content(),continued);
+ checks.push('Enter accepts an active journal wiki-link completion without inserting a block');
  await app.evaluate(({ipcMain})=>{
   ipcMain.removeHandler('notes:copilot-status');ipcMain.handle('notes:copilot-status',()=>({ok:true,value:{authenticated:true,login:'synthetic',models:[{id:'outline-fixture',name:'outline fixture'}]}}));
   ipcMain.removeHandler('notes:copilot-send');ipcMain.handle('notes:copilot-send',(event,args)=>{globalThis.outlineRequest=args;setTimeout(()=>event.sender.send('notes:copilot-event',{type:'done',requestId:args.requestId,content:args.context.content.replace('Decision A','Confirmed decision A')}),30);return {ok:true,value:{requestId:args.requestId}};});

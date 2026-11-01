@@ -89,7 +89,6 @@ export default function Editor({
           bracketMatching(),
           markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
           rendering.current.of(live ? liveExtensions() : []),
-          outlining.current.of(journal ? journalOutline() : []),
           autocompletion({
             override: [
               (context) => {
@@ -118,6 +117,7 @@ export default function Editor({
               },
             ],
           }),
+          outlining.current.of(journal ? journalOutline() : []),
           syntaxHighlighting(defaultHighlightStyle),
           EditorView.lineWrapping,
           keymap.of([

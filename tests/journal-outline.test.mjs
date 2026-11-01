@@ -21,6 +21,22 @@ test('journal Enter on a parent inserts a child and preserves existing child own
  assert.equal(view.state.doc.toString(),'- Parent\n  - \n  - Existing\n- Other');
  assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);
 });
+test('splitting a parent in the middle retains its existing children and next siblings',()=>{
+ const cases=[
+  ['- AlphaBeta\n  - Decision\n- Other','- Alpha\n  - Beta\n  - Decision\n- Other'],
+  ['- Root\n  - AlphaBeta\n    - Decision\n      - Task\n  - Peer','- Root\n  - Alpha\n    - Beta\n    - Decision\n      - Task\n  - Peer'],
+ ];
+ for(const [before,after]of cases){
+  const view=editor(before,before.indexOf('Beta'));
+  assert.equal(run('journalEnter',view),true);assert.equal(view.state.doc.toString(),after);
+  assert.equal(view.state.selection.main.head,after.indexOf('Beta'));
+  assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);
+ }
+});
+test('Enter inside the list marker retains the prior Markdown behavior',()=>{
+ const before='- AlphaBeta\n  - Decision',view=editor(before,1);
+ assert.equal(run('journalEnter',view),true);assert.equal(view.state.doc.toString(),'-\n-  AlphaBeta\n  - Decision');
+});
 test('journal Enter on an empty nested block returns to the parent level',()=>{
  const view=editor('- Parent\n  - ');assert.equal(run('journalEnter',view),true);assert.equal(view.state.doc.toString(),'- Parent\n- ');
 });
