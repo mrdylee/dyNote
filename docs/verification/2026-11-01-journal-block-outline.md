@@ -27,3 +27,5 @@ Official references: [Logseq tutorial](https://github.com/logseq/docs/blob/maste
 - The first combined replay stopped at the previous large-document test's old expectation that Enter continued prose; the expected journal bullet was updated to match the new journal behavior, then the complete replay passed. No product workaround was added for that expectation.
 
 Canonical REA records, screenshots and JSON receipts are under ignored `output/verification/` and `output/playwright/`. Release CI independently tests the exact committed source and native Mac/Windows packages before publishing. Publication and local installation receipts are separate from this implementation report.
+
+The first remote Mac run passed the new journal, workspace and editor scenarios, then exposed a test race in the old large-file fixture: `reload()` does not set `busy`, so waiting for an enabled refresh button did not establish completion. The fixture now waits for the actual `Large.md` file row before opening quick search. This changes only verification; application source and package bytes remain unchanged.

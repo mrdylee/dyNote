@@ -39,7 +39,7 @@ try {
   const original='\ufeff# Large Markdown\r\n\r\n```text\r\n'+line.repeat(Math.ceil(9*1024*1024/Buffer.byteLength(line)))+'```\r\n끝 ✅\r\n';
   await writeFile(`${vault}/Large.md`,original);
   await page.getByRole('button',{name:'문서 새로고침',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('[aria-label="문서 새로고침"]')?.disabled===false);
+  await page.locator('.file-row[title="Large.md"]').waitFor();
   await open(page,'Large.md');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
   const editor=editorFor(page,'Large.md');await editor.click();await page.keyboard.press('Meta+End');await page.keyboard.type('LARGE-END');await page.keyboard.press('Meta+s');await saved(page);
   const edited=original+'LARGE-END';
