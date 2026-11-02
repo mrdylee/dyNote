@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
-const root=await realpath(await mkdtemp(`${tmpdir()}/dynote-spaces-ui-`)),profile=`${root}/profile`,personal=`${root}/Personal`,team=`${root}/Team`,nested=`${personal}/Nested`,config=`${root}/gitconfig`;
+const root=await realpath(await mkdtemp(`${tmpdir()}/dynote-spaces-ui-`)),profile=path.join(root,'profile'),personal=path.join(root,'Personal'),team=path.join(root,'Team'),nested=path.join(personal,'Nested'),config=path.join(root,'gitconfig');
 for(const folder of [profile,personal,team,nested])await mkdir(folder,{recursive:true});
 await mkdir('output/playwright',{recursive:true});
 const original='# Personal\n\nPrivate fixture only.\n',shared='# Team\n\nShared fixture only.\n';
@@ -14,7 +16,7 @@ const git=(...args)=>execFileSync('git',args,{env,encoding:'utf8',stdio:['pipe',
 git('config','--file',config,'user.name','Space Fixture');git('config','--file',config,'user.email','fixture@example.invalid');
 const remotes={personal:'https://spaces.test/personal.git',team:'https://spaces.test/team.git'};
 for(const [purpose,remote] of Object.entries(remotes)){
- const bare=`${root}/${purpose}.git`;git('init','--bare','--initial-branch=main',bare);git('config','--file',config,`url.file://${bare}.insteadOf`,remote);
+ const bare=path.join(root,`${purpose}.git`);git('init','--bare','--initial-branch=main',bare);git('config','--file',config,`url.${pathToFileURL(bare).href}.insteadOf`,remote);
 }
 const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env});
 let app,page;const report={checks:[],errors:[]};

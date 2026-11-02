@@ -11,7 +11,7 @@ await writeFile(`${vault}/A.md`,'original\n');await runGit(vault,['add','--','A.
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill('Git 변경 관리');await page.keyboard.press('Enter');
+ await page.getByRole('button',{name:'명령 팔레트',exact:true}).click();await page.getByRole('textbox',{name:'명령 검색'}).fill('Git 변경 관리');await page.keyboard.press('Enter');
  assert.equal(await page.locator('.settings-tabs [aria-current=page]').innerText(),'백업·복원');
  assert.equal(await page.getByRole('button',{name:'고급 Git 관리',exact:true}).getAttribute('aria-pressed'),'true');
  const panel=page.getByRole('region',{name:'Git 변경 관리'});await panel.waitFor();await panel.getByRole('button',{name:'A.md 스테이징',exact:true}).click();

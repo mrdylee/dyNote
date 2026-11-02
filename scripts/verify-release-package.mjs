@@ -20,15 +20,18 @@ const sources = ["README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"];
 for (const directory of ["core", "electron", "dist", "licenses"])
   sources.push(...await files(directory));
 const report = { version, packages: [], windowsRuntimeTested: false, distributionSigned: false, notarized: false };
-for (const [platform, relative] of [
+const packages = [
   ["darwin-arm64", "Dynote-darwin-arm64/Dynote.app/Contents/Resources/app.asar"],
   ["win32-x64", "Dynote-win32-x64/resources/app.asar"],
-]) {
+];
+const selected = process.argv[2];
+if (selected && !packages.some(([platform]) => platform === selected)) throw new Error("Choose darwin-arm64 or win32-x64.");
+for (const [platform, relative] of packages.filter(([platform]) => !selected || selected === platform)) {
   const archive = `${packageRoot}/${relative}`;
   if (platform === "darwin-arm64") {
     execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", `${packageRoot}/Dynote-darwin-arm64/Dynote.app`], { stdio: "pipe" });
   }
-  const contents = listPackage(archive);
+  const contents = listPackage(archive).map(name => name.replaceAll("\\", "/"));
   assert.ok(!contents.some((name) => name.includes("graph-simulation.wasm")));
   const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
   await access(path.join(`${archive}.unpacked`, runtime, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"));
@@ -40,6 +43,9 @@ for (const [platform, relative] of [
   const metadata = JSON.parse(extractFile(archive, "package.json"));
   assert.equal(metadata.version, version);
   assert.equal(metadata.productName, "Dynote");
+  const source = JSON.parse(await readFile("package.json", "utf8"));
+  assert.deepEqual(metadata.dependencies, source.dependencies);
+  assert.equal(JSON.parse(extractFile(archive, "node_modules/zod/package.json")).version, source.overrides["@github/copilot-sdk"].zod);
   assert.ok(contents.includes('/dist/ess.html'));
   assert.deepEqual(extractFile(archive, 'dist/ess/ess-container.glb'), await readFile('public/ess/ess-container.glb'));
   assert.ok(contents.includes('/licenses/three.txt'));

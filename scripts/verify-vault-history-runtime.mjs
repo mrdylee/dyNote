@@ -3,9 +3,10 @@ import { mkdtemp, mkdir, writeFile, readFile, rename, realpath, access } from "n
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 const root = await realpath(await mkdtemp(`${tmpdir()}/dynote-vault-history-`));
-const profile = `${root}/profile`, vaultRoot = `${root}/내 노트`, other = `${root}/다른 보관함`, config = `${root}/gitconfig`;
+const profile = path.join(root, "profile"), vaultRoot = path.join(root, "내 노트"), other = path.join(root, "다른 보관함"), config = path.join(root, "gitconfig");
 await mkdir(profile); await mkdir(vaultRoot); await mkdir(other); await writeFile(config, "");
 const env = { ...process.env, OPEN_NOTES_DATA: profile, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1" };
 const git = (args, date) => execFileSync("git", args, { cwd: vaultRoot, encoding: "utf8", env: { ...env, ...(date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {}) }, stdio: ["pipe", "pipe", "pipe"] }).trim();

@@ -36,7 +36,7 @@ try {
     globalThis.finishProvider = content => { const { provider, args, sender } = globalThis.providerPending; sender.send(`notes:${provider}-event`, { type: "done", requestId: args.requestId, content }); };
   });
   await page.getByRole("region", { name: "저널 피드" }).waitFor();
-  await page.keyboard.press("Meta+k"); await page.getByRole("textbox", { name: "빠른 문서 검색" }).fill("path:Home.md"); await page.keyboard.press("Enter");
+  await page.keyboard.press("ControlOrMeta+k"); await page.getByRole("textbox", { name: "빠른 문서 검색" }).fill("path:Home.md"); await page.keyboard.press("Enter");
   const selector = page.getByRole("combobox", { name: "AI 제공자", exact: true });
   await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 제공자"]').disabled);
