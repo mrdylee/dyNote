@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
 const packageRoot = process.env.DYNOTE_PACKAGE_OUT || `release/v${version}`;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const extract = (archive, file) => extractFile(archive, path.normalize(file));
 async function files(directory) {
   const result = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -39,20 +40,20 @@ for (const [platform, relative] of packages.filter(([platform]) => !selected || 
   assert.ok(!contents.some((name) => /^\/(?:research|output|tests|docs|assembly|src|public|examples)\//.test(name)));
   assert.ok(!contents.includes("/HANDOFF.md"), "local session handoff must not ship");
   for (const file of sources)
-    assert.deepEqual(extractFile(archive, file), await readFile(file), `${platform}: ${file}`);
-  const metadata = JSON.parse(extractFile(archive, "package.json"));
+    assert.deepEqual(extract(archive, file), await readFile(file), `${platform}: ${file}`);
+  const metadata = JSON.parse(extract(archive, "package.json"));
   assert.equal(metadata.version, version);
   assert.equal(metadata.productName, "Dynote");
   const source = JSON.parse(await readFile("package.json", "utf8"));
   assert.deepEqual(metadata.dependencies, source.dependencies);
-  assert.equal(JSON.parse(extractFile(archive, "node_modules/zod/package.json")).version, source.overrides["@github/copilot-sdk"].zod);
+  assert.equal(JSON.parse(extract(archive, "node_modules/zod/package.json")).version, source.overrides["@github/copilot-sdk"].zod);
   assert.ok(contents.includes('/dist/ess.html'));
-  assert.deepEqual(extractFile(archive, 'dist/ess/ess-container.glb'), await readFile('public/ess/ess-container.glb'));
+  assert.deepEqual(extract(archive, 'dist/ess/ess-container.glb'), await readFile('public/ess/ess-container.glb'));
   assert.ok(contents.includes('/licenses/three.txt'));
   const wasm = contents.find((name) => /^\/dist\/assets\/graph-.*\.wasm$/.test(name));
   assert.ok(wasm);
   assert.ok(contents.some((name) => /^\/dist\/assets\/graph.worker-.*\.js$/.test(name)));
-  report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extractFile(archive, wasm.slice(1))), copilotRuntimeIncluded: true });
+  report.packages.push({ platform, asarSha256: hash(await readFile(archive)), matchedSourceAndBundleFiles: sources.length, wasmSha256: hash(extract(archive, wasm.slice(1))), copilotRuntimeIncluded: true });
 }
 await writeFile(process.env.DYNOTE_PACKAGE_REPORT || (process.env.DYNOTE_PACKAGE_OUT ? "docs/verification/copilot-package.json" : `docs/verification/dynote-v${version}-release-package.json`), JSON.stringify(report, null, 2) + "\n");
 console.log(JSON.stringify(report, null, 2));
