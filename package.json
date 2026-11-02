@@ -54,9 +54,18 @@
     "@electron/packager": "20.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "assemblyscript": "0.28.20",
-    "electron": "44.9.0",
+    "electron": "44.9.1",
     "jsdom": "29.1.1",
     "vite": "8.3.4"
+  },
+  "overrides": {
+    "@electron/asar": {
+      "glob": "14.0.2",
+      "minimatch": "11.0.1"
+    },
+    "@github/copilot-sdk": {
+      "zod": "4.6.6"
+    }
   },
   "engines": {
     "node": ">=22.13.0"
