@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rename, symlink, unlink, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rename, symlink, unlink, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -36,6 +36,20 @@ test("legacy minute settings migrate to a daily schedule", () => {
   const normalized = validateGitConfig(config);
   assert.equal(normalized.schedule, "daily");
   assert.equal(normalized.interval, undefined);
+});
+
+test("missing app backup configuration does not claim an existing Git remote is disconnected", async (t) => {
+  const f = await fixture(); t.after(() => rm(f.dir, { recursive: true, force: true }));
+  f.git(f.root, "init", "--initial-branch=main"); f.git(f.root, "remote", "add", "origin", "https://existing.example.invalid/team.git");
+  const before = await readFile(path.join(f.root, ".git/config"));
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const controller = new GitController({ settingsFile: path.join(f.dir, "unset-backup.json"), run: f.run, setTimer: () => null });
+  t.after(() => controller.close());
+  assert.equal(controller.status().message, "Git 백업 미설정");
+  await controller.open({ id: "existing-origin", root: f.root });
+  assert.equal(controller.status().message, "Git 백업 미설정");
+  assert.equal(f.git(f.root, "remote", "get-url", "origin"), "https://existing.example.invalid/team.git");
+  assert.deepEqual(await readFile(path.join(f.root, ".git/config")), before);
 });
 
 test("Git processes ignore inherited repository redirects and leave the other repository untouched", async () => {

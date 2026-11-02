@@ -96,7 +96,7 @@ function sendAi(controller, args) {
 }
 
 async function selectVault(root, purpose) {
-  await registry.checkPurpose(root, purpose);
+  await registry.checkConnection(root, purpose);
   await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
@@ -393,7 +393,7 @@ app
         if (result.canceled) return null;
         checkVault(args);
         const purpose = registry.purposes[vault.root];
-        await registry.checkPurpose(result.filePaths[0], purpose);
+        await registry.checkConnection(result.filePaths[0], purpose);
         await GitBackup.clone(result.filePaths[0], config);
         const snapshot = await selectVault(result.filePaths[0], purpose);
         try { await gitBackup.connect(vault.id, config); }

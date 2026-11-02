@@ -10,7 +10,7 @@ export class GitController {
     Object.assign(this, { settingsFile, run, onStatus, setTimer, clearTimer, now });
     this.records = {}; this.tail = Promise.resolve(); this.timer = null; this.generation = 0;
     this.revision = 0; this.pendingSync = null; this.retryAfter = 0;
-    this.current = { enabled: false, phase: "off", message: "Git 연결 안 됨", config: null };
+    this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
   }
   status() { return { ...this.current, vaultId: this.vault?.id }; }
   publish(update) { Object.assign(this.current, update); this.onStatus(this.status()); return this.status(); }
@@ -43,7 +43,7 @@ export class GitController {
       this.vault = vault;
       this.service = new GitBackup(vault.root, this.run);
       this.retryAfter = 0;
-      this.current = { enabled: false, phase: "off", message: "Git 연결 안 됨", config: null };
+      this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
       try {
         this.records = JSON.parse(await readFile(this.settingsFile, "utf8"));
         const record = this.records[vault.id];

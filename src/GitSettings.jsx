@@ -1,9 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ status, space, onManageSpaces, onConnect, onClone, onSync, onDisconnect }) {
+export default function GitSettings({ status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect }) {
   const [form, setForm] = useState(() => ({ ...initial, ...status.config }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
+  const [repository, setRepository] = useState(null), [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    setRepository(null);
+    onRepositoryStatus().then(value => { if (mounted) setRepository(value); }).catch(error => { if (mounted) setRepository({ error: error.message }); });
+    return () => { mounted = false; };
+  }, [refresh]);
   const update = (key, value) => setForm((previous) => ({ ...previous, [key]: value }));
   const run = async (action) => {
     setPending(true); setError("");
@@ -14,7 +21,13 @@ export default function GitSettings({ status, space, onManageSpaces, onConnect, 
     <h3>자동 백업</h3>
     <div className="git-space-context" aria-label="현재 공간의 Git 연결">
       <strong>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"} · {space?.name ?? "현재 공간"}</strong>
-      <dl><dt>노트 폴더</dt><dd>{space?.root ?? "폴더 정보를 불러오는 중…"}</dd><dt>연결된 Git 주소</dt><dd>{status.config?.remote || "아직 연결하지 않았습니다."}</dd></dl>
+      <dl><dt>노트 폴더</dt><dd>{space?.root ?? "폴더 정보를 불러오는 중…"}</dd>
+        <dt>저장소 Git 원격</dt><dd>{!repository ? "Git 정보를 불러오는 중…" : repository.error ? <span role="status">Git 정보를 확인하지 못했습니다: {repository.error}</span> : !repository.available ? "이 폴더에 Git 저장소가 없습니다." : !repository.remoteUrls.length ? "등록된 원격 주소가 없습니다. 로컬 Git 저장소입니다." :
+          <ul className="git-remote-urls">{repository.remoteUrls.map(remote => <li key={remote.name}><strong>{remote.name}</strong>{[["fetch", "가져오기"], ["push", "업로드"]].map(([key, label]) => <div key={key}>{label}: {remote[key].length ? remote[key].map((url, index) => <code key={index}>{url}</code>) : "주소 미설정"}</div>)}</li>)}</ul>}</dd>
+        <dt>자동 백업 대상</dt><dd className="git-backup-target">{status.config?.remote || "자동 백업 대상 미설정"}</dd>
+      </dl>
+      <button className="secondary-button" disabled={busy || !repository} onClick={() => setRefresh(value => value + 1)}>원격 주소 새로고침</button>
+      <p>Git 원격은 로컬 저장소에 등록된 주소입니다. 인증정보는 제외하고 표시합니다. Dynote 자동 백업 대상은 아래에서 별도로 설정합니다.</p>
       <p>이 설정은 현재 공간에만 적용됩니다. 개인 공간과 팀 공간에 서로 다른 폴더·Git 저장소 주소를 사용하세요.</p>
       <p className="muted">개인·팀 표시는 Git 접근 권한을 바꾸지 않습니다. 업로드한 문서는 연결된 저장소의 접근 권한을 따릅니다.</p>
       <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>

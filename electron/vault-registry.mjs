@@ -41,8 +41,14 @@ export class VaultRegistry {
     return canonical;
   }
   async select(root, purpose) {
-    const canonical = await this.checkPurpose(root, purpose);
+    const canonical = await this.checkConnection(root, purpose);
     await this.save(canonical, [...new Set([canonical, ...this.roots])], { ...this.purposes, ...(purpose ? { [canonical]: purpose } : {}) });
+  }
+  async checkConnection(root, purpose) {
+    const canonical = await this.checkPurpose(root, purpose);
+    if (purpose && this.purposes[canonical] && this.purposes[canonical] !== purpose)
+      throw new Error("이미 다른 용도로 등록된 폴더입니다. 별도 폴더를 선택하거나 목록의 ‘공간 용도’에서 변경해 주세요.");
+    return canonical;
   }
   async setPurpose(root, purpose) {
     if (!this.roots.includes(root)) throw new Error("등록된 보관함을 선택해 주세요.");

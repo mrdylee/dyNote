@@ -51,3 +51,37 @@ test('GIT-01 initial staging can be undone even after further edits without dele
  await git.action({kind:'init'});await writeFile(`${dir}/A.md`,'first\n');await git.action({kind:'stage',path:'A.md'});await writeFile(`${dir}/A.md`,'newer unsaved in index\n');
  await git.action({kind:'unstage',path:'A.md'});assert.equal(await readFile(`${dir}/A.md`,'utf8'),'newer unsaved in index\n');assert.equal((await runGit(dir,['diff','--cached','--name-only'])).stdout,'');
 });
+
+test('configured Git fetch/push addresses are readable without backup setup or config changes',async t=>{
+ const {root}=await fixture(t),git=new tools.GitWorkspace(root);
+ await runGit(root,['remote','add','origin','https://team.example.invalid/docs.git']);
+ await runGit(root,['remote','set-url','--add','origin','ssh://git@mirror.example.invalid/docs.git']);
+ await runGit(root,['remote','set-url','--push','origin','git@write.example.invalid:docs.git']);
+ await runGit(root,['remote','add','upstream','https://source.example.invalid/docs.git']);
+ const config=await readFile(`${root}/.git/config`),note=await readFile(`${root}/A.md`);
+ const state=await git.status();assert.deepEqual(state.remoteUrls,[
+  {name:'origin',fetch:['https://team.example.invalid/docs.git','ssh://git@mirror.example.invalid/docs.git'],push:['git@write.example.invalid:docs.git']},
+  {name:'upstream',fetch:['https://source.example.invalid/docs.git'],push:['https://source.example.invalid/docs.git']},
+ ]);
+ assert.deepEqual(await readFile(`${root}/.git/config`),config);assert.deepEqual(await readFile(`${root}/A.md`),note);
+});
+
+test('Git remote details distinguish a local repository from a folder without Git',async t=>{
+ const {dir,root}=await fixture(t),git=new tools.GitWorkspace(root);
+ const initialized=await git.status();assert.equal(initialized.available,true);assert.deepEqual(initialized.remoteUrls,[]);
+ const plain=`${dir}/plain`;await mkdir(plain);
+ const state=await new tools.GitWorkspace(plain).status();assert.equal(state.available,false);assert.deepEqual(state.remoteUrls,[]);
+});
+
+test('remote display metadata omits URL credentials and tokens without changing stored URLs',async t=>{
+ const {root}=await fixture(t),git=new tools.GitWorkspace(root);
+ for(const host of ['example.invalid','invalid host']){
+  const url=`https://fixture-user:fixture-password@${host}/docs.git?token=fixture-token#fixture-secret`;
+  await runGit(root,['config','remote.origin.url',url]);
+  const config=await readFile(`${root}/.git/config`),state=await git.status();
+  assert.ok(Array.isArray(state.remoteUrls));assert.equal(state.remoteUrls[0].fetch.length,1);
+  assert.ok(state.remoteUrls[0].fetch[0].includes(`${host}/docs.git`));
+  assert.doesNotMatch(JSON.stringify(state.remoteUrls),/fixture-user|fixture-password|fixture-token|fixture-secret/);
+  assert.deepEqual(await readFile(`${root}/.git/config`),config);
+ }
+});

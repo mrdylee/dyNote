@@ -333,7 +333,7 @@ export default function App() {
   const [fileTarget, setFileTarget] = useState(null);
   const [propertiesDraft, setPropertiesDraft] = useState("");
   const [lastTrash, setLastTrash] = useState(null);
-  const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 연결 안 됨", enabled: false, config: null });
+  const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 백업 미설정", enabled: false, config: null });
   const acceptGitStatus = (value) => { if (value.vaultId === currentVault.current) setGitStatus(value); };
   useEffect(() => {
     if (!vault?.id) return;
@@ -1987,6 +1987,7 @@ export default function App() {
             }}/>}
           {["git", "history", "git-workspace"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus} space={space} onManageSpaces={() => setSettingsTab("vault")}
+            onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: vault.id }))}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);

@@ -103,3 +103,22 @@ test("personal and team roots cannot contain each other, regardless of assignmen
   await registry.setPurpose(child, "personal");
   await assert.rejects(registry.setPurpose(parent, "team"), /서로 포함/);
 });
+
+test("folder connections preserve opposite purposes while explicit purpose changes remain available", async (t) => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-spaces-connect-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const personal = path.join(root, "Personal"), team = path.join(root, "Team"), file = path.join(root, "settings.json");
+  await mkdir(personal); await mkdir(team); await writeFile(path.join(personal, "Private.md"), "private fixture\n");
+  const registry = new VaultRegistry(file); await registry.select(personal, "personal"); await registry.select(team, "team");
+  const before = await readFile(file);
+  for (const [folder, purpose] of [[personal, "team"], [team + "/../Team", "personal"]]) {
+    await assert.rejects(registry.select(folder, purpose), /다른 용도로 등록/);
+    assert.deepEqual(await readFile(file), before); assert.equal(registry.selected, team);
+  }
+  await registry.select(personal, "personal");
+  await registry.select(team);
+  assert.equal(registry.list().find(entry => entry.root === personal).purpose, "personal");
+  await registry.setPurpose(team, "personal");
+  assert.equal(registry.list().find(entry => entry.root === team).purpose, "personal");
+  assert.equal(await readFile(path.join(personal, "Private.md"), "utf8"), "private fixture\n");
+});

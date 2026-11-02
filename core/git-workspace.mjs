@@ -1,12 +1,23 @@
 import {GitBackup,runGit} from './git-backup.mjs';
 import {validFilePath} from './vault.mjs';
 
+function displayRemoteUrl(value){
+  if(!/^[a-z][\w+.-]*:\/\//i.test(value))return value;
+  try{
+    const url=new URL(value);
+    if(url.username&&['http:','https:'].includes(url.protocol))url.username='***';
+    if(url.password)url.password='***';
+    url.search='';url.hash='';
+    return url.href;
+  }catch{return value.replace(/^(https?:\/\/)[^/]*@/i,'$1***@').replace(/^([a-z][\w+.-]*:\/\/[^/@:]+):[^/@]*@/i,'$1:***@').split(/[?#]/,1)[0];}
+}
+
 export class GitWorkspace {
   constructor(root){this.root=root;this.backup=new GitBackup(root);}
   git(args,options){return runGit(this.root,args,options);}
   async repository(){if(!await this.backup.repository())throw new Error('먼저 Git 저장소를 초기화해 주세요.');}
   async status(){
-    if(!await this.backup.repository())return {available:false,branch:'',branches:[],files:[],excluded:0,remotes:[]};
+    if(!await this.backup.repository())return {available:false,branch:'',branches:[],files:[],excluded:0,remotes:[],remoteUrls:[]};
     const [state,branch,branches,remotes]=await Promise.all([
       this.git(['status','--porcelain=v1','-z']),this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),
       this.git(['for-each-ref','--format=%(refname:short)','refs/heads/']),this.git(['remote']),
@@ -18,7 +29,13 @@ export class GitWorkspace {
       if(/[RC]/.test(index+worktree))from=records[++i];
       if(validFilePath(path))files.push({path,index,worktree,...(from?{from}:{})});else excluded++;
     }
-    return {available:true,branch:branch.stdout.trim()||'(분리된 HEAD)',branches:branches.stdout.trim().split('\n').filter(Boolean),files,excluded,remotes:remotes.stdout.trim().split('\n').filter(Boolean)};
+    const names=remotes.stdout.trim().split('\n').filter(Boolean);
+    const remoteUrls=await Promise.all(names.map(async name=>{
+      const [fetch,push]=await Promise.all(['url','pushurl'].map(key=>this.git(['config','--null','--get-all',`remote.${name}.${key}`],{allow:[0,1]})));
+      const read=value=>value.stdout.split('\0').filter(Boolean).map(displayRemoteUrl),fetchUrls=read(fetch),pushUrls=read(push);
+      return {name,fetch:fetchUrls,push:pushUrls.length?pushUrls:fetchUrls};
+    }));
+    return {available:true,branch:branch.stdout.trim()||'(분리된 HEAD)',branches:branches.stdout.trim().split('\n').filter(Boolean),files,excluded,remotes:names,remoteUrls};
   }
   async checkPath(path){
     if(!validFilePath(path))throw new Error('허용되지 않는 노트 경로입니다.');
