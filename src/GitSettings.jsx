@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ status, onConnect, onClone, onSync, onDisconnect }) {
+export default function GitSettings({ status, space, onManageSpaces, onConnect, onClone, onSync, onDisconnect }) {
   const [form, setForm] = useState(() => ({ ...initial, ...status.config }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const update = (key, value) => setForm((previous) => ({ ...previous, [key]: value }));
@@ -12,6 +12,13 @@ export default function GitSettings({ status, onConnect, onClone, onSync, onDisc
   const busy = pending || status.phase === "saving";
   return <section className="settings-section">
     <h3>자동 백업</h3>
+    <div className="git-space-context" aria-label="현재 공간의 Git 연결">
+      <strong>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"} · {space?.name ?? "현재 공간"}</strong>
+      <dl><dt>노트 폴더</dt><dd>{space?.root ?? "폴더 정보를 불러오는 중…"}</dd><dt>연결된 Git 주소</dt><dd>{status.config?.remote || "아직 연결하지 않았습니다."}</dd></dl>
+      <p>이 설정은 현재 공간에만 적용됩니다. 개인 공간과 팀 공간에 서로 다른 폴더·Git 저장소 주소를 사용하세요.</p>
+      <p className="muted">개인·팀 표시는 Git 접근 권한을 바꾸지 않습니다. 업로드한 문서는 연결된 저장소의 접근 권한을 따릅니다.</p>
+      <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
+    </div>
     <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>
     <label>저장소 주소<input aria-label="Git 저장소 주소" placeholder="https://github.com/사용자/노트저장소.git" value={form.remote} disabled={busy} onChange={(e) => update("remote", e.target.value)} /></label>
     <div className="daily-backup-info"><strong>하루 한 번 · 매일 밤 11시</strong>

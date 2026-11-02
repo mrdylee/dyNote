@@ -215,10 +215,6 @@ kbd {
   place-items: center;
   color: #8e79ba;
 }
-.vault-switch > div:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
 .vault-switch strong {
   font-size: 12px;
   font-weight: 600;
@@ -1759,6 +1755,34 @@ kbd {
 .vault-settings-list li { border: 1px solid #d9dfeb; border-radius: 8px; padding: 14px; margin: 14px 0; }
 .vault-settings-list p { overflow-wrap: anywhere; font-size: 12px; }
 .vault-settings-list small { color: #5142ac; margin-left: 8px; }
+.vault-switch { width: 100%; text-align: left; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.vault-switch:hover { background: #f7f5fb; }
+.vault-switch:focus-visible { outline: 2px solid #8170b7; outline-offset: -3px; }
+.vault-switch .vault-icon { display: grid; margin: 0; flex-shrink: 0; color: #8e79ba; }
+.vault-switch .space-current { flex: 1; min-width: 0; display: grid; justify-items: start; gap: 5px; margin: 0; }
+.vault-switch .space-badge { display: inline-block; padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+.space-badge.personal { color: #57448c; background: #eee8fa; }
+.space-badge.team { color: #16625d; background: #def3ee; }
+.space-badge.unclassified { color: #755718; background: #fff0ce; }
+.space-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.space-choice { border: 1px solid var(--border); border-radius: 10px; padding: 17px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.space-choice.personal { background: #faf8ff; }
+.space-choice.team { background: #f3fbf8; }
+.space-choice h4, .space-choice p { margin: 0; }
+.space-choice p { flex: 1; line-height: 1.6; font-size: 13px; word-break: keep-all; overflow-wrap: anywhere; }
+.space-choice button { margin-top: 5px; }
+.space-guide, .git-space-context { background: #f5f7fa; border: 1px solid var(--border); border-radius: 8px; padding: 15px; line-height: 1.6; }
+.space-guide > div { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; font-size: 13px; }
+.space-guide p, .git-space-context p { font-size: 13px; margin: 10px 0; }
+.space-group { margin-top: 22px; }
+.space-group > h4 { margin-bottom: 8px; }
+.git-space-context dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; font-size: 12px; }
+.git-space-context dt { color: var(--muted); }
+.git-space-context dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 850px) {
+  .space-choices { grid-template-columns: 1fr; }
+  .git-space-context dl { grid-template-columns: 1fr; gap: 3px; }
+}
 .daily-backup-info { padding: 14px; background: #f7f6fc; border-radius: 8px; margin-top: 16px; }
 .backup-month { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .backup-month label { text-align: center; }

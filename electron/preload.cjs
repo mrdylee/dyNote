@@ -67,8 +67,9 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:copilot-event", listener);
       return () => ipcRenderer.removeListener("notes:copilot-event", listener);
     },
-    pickVault: () => call("pick-vault"),
+    pickVault: (args) => call("pick-vault", args),
     vaults: () => call("vaults"),
+    setVaultPurpose: (args) => call("set-vault-purpose", args),
     selectVault: (args) => call("select-vault", args),
     forgetVault: (args) => call("forget-vault", args),
     gitHistory: (args) => call("git-history", args),

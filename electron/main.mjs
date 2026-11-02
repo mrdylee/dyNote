@@ -95,12 +95,13 @@ function sendAi(controller, args) {
   return controller.send(args);
 }
 
-async function selectVault(root) {
+async function selectVault(root, purpose) {
+  await registry.checkPurpose(root, purpose);
   await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
   const selected = await Vault.open(root, recovery);
   const snapshot = await selected.snapshot();
   await plugins?.close();
-  await registry.select(selected.root);
+  await registry.select(selected.root, purpose);
   vault = selected; vaultError = "";
   await gitBackup.open(vault);
   await plugins?.activate(vault);
@@ -337,6 +338,7 @@ app
       "copilot-cancel": (args) => copilot.cancel(args?.requestId),
       snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
+      "set-vault-purpose": async (args) => { await registry.setPurpose(args?.root, args?.purpose); return true; },
       "select-vault": (args) => {
         if (!registry.roots.includes(args?.root)) throw new Error("등록된 보관함을 선택해 주세요.");
         return selectVault(args.root);
@@ -372,13 +374,13 @@ app
           return result;
         });
       },
-      "pick-vault": async () => {
+      "pick-vault": async (args) => {
         const result = await dialog.showOpenDialog(window, {
           properties: ["openDirectory", "createDirectory"],
-          title: "Markdown 보관함 선택",
+          title: args?.purpose === "personal" ? "개인 노트 폴더 선택" : args?.purpose === "team" ? "팀 공유 노트 폴더 선택" : "Markdown 보관함 선택",
         });
         if (result.canceled) return null;
-        return selectVault(result.filePaths[0]);
+        return selectVault(result.filePaths[0], args?.purpose);
       },
       "git-status": (args) => { checkVault(args); return gitBackup.status(); },
       "git-connect": (args) => { checkVault(args); return gitBackup.connect(vault.id, args.config); },
@@ -390,8 +392,10 @@ app
         const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
         if (result.canceled) return null;
         checkVault(args);
+        const purpose = registry.purposes[vault.root];
+        await registry.checkPurpose(result.filePaths[0], purpose);
         await GitBackup.clone(result.filePaths[0], config);
-        const snapshot = await selectVault(result.filePaths[0]);
+        const snapshot = await selectVault(result.filePaths[0], purpose);
         try { await gitBackup.connect(vault.id, config); }
         catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
         return snapshot;
@@ -483,7 +487,7 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply"].includes(name);
         const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {

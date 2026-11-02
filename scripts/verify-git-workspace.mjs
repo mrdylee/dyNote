@@ -8,7 +8,7 @@ await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursi
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 await runGit(vault,['init','--initial-branch=main']);await runGit(vault,['config','user.name','Fixture']);await runGit(vault,['config','user.email','fixture@example.test']);
 await writeFile(`${vault}/A.md`,'original\n');await runGit(vault,['add','--','A.md']);await runGit(vault,['commit','-m','initial']);await writeFile(`${vault}/A.md`,'native changed\n');
-const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();await page.keyboard.press('Meta+p');await page.getByRole('textbox',{name:'명령 검색'}).fill('Git 변경 관리');await page.keyboard.press('Enter');

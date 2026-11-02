@@ -220,6 +220,17 @@ export default function App() {
   const [vault, setVault] = useState(null);
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
+  const [spaces, setSpaces] = useState({ entries: [] });
+  const loadSpaces = useCallback(async () => {
+    const vaultId = currentVault.current;
+    const data = await invoke(api.vaults());
+    if (currentVault.current === vaultId) setSpaces({ ...data, vaultId });
+    return data;
+  }, []);
+  useEffect(() => {
+    if (api?.vaults && vault) loadSpaces().catch(error => setError(error.message));
+  }, [vault?.id, loadSpaces]);
+  const space = spaces.vaultId === vault?.id ? spaces.entries.find(entry => entry.root === spaces.current) : null;
   const [raw, setRaw] = useState([]);
   const [documents, setDocuments] = useState([]);
   const workspace = useDocumentWorkspace();
@@ -562,19 +573,6 @@ export default function App() {
     setStatus("dirty");
     clearTimeout(timer.current);
     timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
-  };
-
-  const pickFolder = async () => {
-    setBusy(true);
-    try {
-      await flush();
-      const snapshot = await invoke(api.pickVault());
-      if (snapshot) install(snapshot);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
   };
 
   const createNote = async (e) => {
@@ -1043,22 +1041,16 @@ export default function App() {
           </div>
         </nav>
         <aside className="navigator" style={{ width: panelLayout.left }}>
-          <div className="vault-switch">
-            <div className="vault-icon">
+          <button className="vault-switch" aria-label="공간 전환·관리" disabled={busy} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>
+            <span className="vault-icon">
               <FolderOpen size={18} />
-            </div>
-            <div>
+            </span>
+            <span className="space-current">
               <strong>{vault.name}</strong>
-              <span>로컬 보관함</span>
-            </div>
-            <IconButton
-              label="다른 폴더 열기"
-              onClick={pickFolder}
-              disabled={busy}
-            >
-              <ChevronDown size={16} />
-            </IconButton>
-          </div>
+              <span className={`space-badge ${space?.purpose ?? "unclassified"}`}>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"}</span>
+            </span>
+            <ChevronDown size={16} />
+          </button>
           <button
             className="search-shortcut"
             onClick={() => {
@@ -1475,7 +1467,7 @@ export default function App() {
             </div>
             <CopilotPanel key={vault.id ?? "missing"} api={api} session={aiSession}
               vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
-              notes={raw} liveEdits={edits} onOpenVault={pickFolder}
+              notes={raw} liveEdits={edits} onOpenVault={() => { setSettingsTab("vault"); setModal("settings"); }}
               onBeginLive={async (requestId) => { await flush(); edits.begin(requestId); }}
               selection={!note || mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
               onReview={(path) => { openNote(path); setMode("edit"); }}
@@ -1960,10 +1952,12 @@ export default function App() {
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
-            onList={() => invoke(api.vaults())}
-            onPick={async () => {
+            onList={loadSpaces}
+            onPurpose={async (root, purpose) => { await invoke(api.setVaultPurpose({ root, purpose })); }}
+            onOpenGit={() => setSettingsTab("git")}
+            onPick={async (purpose) => {
               setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.pickVault()); if (snapshot) install(snapshot); }
+              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) install(snapshot); }
               finally { setBusy(false); }
             }}
             onSelect={async (root) => {
@@ -1992,7 +1986,7 @@ export default function App() {
               } finally { setBusy(false); }
             }}/>}
           {["git", "history", "git-workspace"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
-          {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus}
+          {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus} space={space} onManageSpaces={() => setSettingsTab("vault")}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);

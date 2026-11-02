@@ -37,7 +37,7 @@ try {
   await menu();
   await page.locator(".vault-settings-list").getByText(vaultRoot, { exact: true }).waitFor();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, other);
-  await page.getByRole("button", { name: "폴더 선택·추가", exact: true }).click();
+  await page.getByRole("button", { name: "개인 노트 폴더 연결", exact: true }).click();
   await page.locator(".vault-switch strong").filter({ hasText: "다른 보관함" }).waitFor();
   assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, other);
   await app.close(); await start(); await menu();
@@ -88,7 +88,7 @@ try {
   }
   await page.getByRole("button", { name: "보관함", exact: true }).click();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, `${vaultRoot}-offline`);
-  await page.getByRole("button", { name: "폴더 선택·추가", exact: true }).click();
+  await page.getByRole("button", { name: "개인 노트 폴더 연결", exact: true }).click();
   await page.locator(".vault-switch strong").filter({ hasText: "내 노트-offline" }).waitFor();
   assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, `${vaultRoot}-offline`);
   report.checks.push("an unavailable saved folder opens Settings with an error and retains its path, without silently opening demo notes; choosing its new path recovers access");
