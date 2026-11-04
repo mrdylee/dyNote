@@ -4,6 +4,12 @@ contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
     snapshot: () => call("snapshot"),
+    captureStatus: args => call("capture-status", args),
+    configureCapture: args => call("capture-configure", args),
+    pickCaptureSource: args => call("capture-source", args),
+    syncCapture: args => call("capture-sync", args),
+    trashCapture: args => call("capture-trash", args),
+    restoreCapture: args => call("capture-restore", args),
     plugins: args => call("plugins-list", args),
     importPlugin: args => call("plugin-import", args),
     enablePlugin: args => call("plugin-enable", args),

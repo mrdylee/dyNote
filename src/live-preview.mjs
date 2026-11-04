@@ -1,3 +1,4 @@
+import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 import { colorInlineParser, readColorSpan } from "../core/text-color.mjs";
 import { Facet, RangeSet, RangeValue, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
@@ -220,8 +221,15 @@ export const livePreviewState = StateField.define({
   provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
 });
 
+function captureBoundaries(state){return Decoration.set(captureLinkRanges(state.doc.toString()).flatMap(group=>group.markers.map(line=>Decoration.replace({block:true,inclusive:false}).range(line.from,line.to))),true);}
+const captureMarkerState=StateField.define({
+  create:captureBoundaries,
+  update:(value,tr)=>tr.docChanged?captureBoundaries(tr.state):value,
+  provide:field=>[EditorView.decorations.from(field),EditorView.atomicRanges.of(view=>view.state.field(field))],
+});
+
 export function livePreview(options = {}) {
-  return [config.of(options), livePreviewState,
+  return [config.of(options), captureMarkerState, livePreviewState,
     EditorView.editorAttributes.of({ class: "cm-live-preview" }),
     ViewPlugin.fromClass(class {
       constructor(view) { this.view = view; this.timer = null; }

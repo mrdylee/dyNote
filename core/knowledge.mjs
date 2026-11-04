@@ -1,3 +1,4 @@
+import {installCaptureMarkers} from './copilot-journal-links.mjs';
 import { textWithoutColorMarkup } from "./text-color.mjs";
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
@@ -214,3 +215,4 @@ export function renderMarkdown(source, notes = [], from = "", options = {}) {
   });
 }
 installMarkdownExtensions(md, { resolveLink, renderMarkdown, attachmentUrl });
+installCaptureMarkers(md);

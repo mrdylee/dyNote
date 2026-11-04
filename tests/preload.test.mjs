@@ -35,3 +35,11 @@ test("desktop bridge routes each AI provider through its own channel", async () 
     ["notes:create", { path: "New.md", content: "# New" }],
   ]);
 });
+
+test('journal capture bridge keeps the vault and selected import/delete arguments intact',async()=>{
+ let api;const calls=[];
+ runInNewContext(await readFile(new URL('../electron/preload.cjs',import.meta.url),'utf8'),{require:()=>({contextBridge:{exposeInMainWorld(_name,value){api=value;}},ipcRenderer:{invoke:async(...args)=>calls.push(args)}})});
+ const input={vaultId:'personal',manual:true,dailyOptions:{folder:'Journal'}};
+ await api.syncCapture(input);await api.trashCapture({vaultId:'personal',id:'record',sessionId:'session'});await api.restoreCapture({vaultId:'personal',trashId:'trash'});
+ assert.deepEqual(calls,[['notes:capture-sync',input],['notes:capture-trash',{vaultId:'personal',id:'record',sessionId:'session'}],['notes:capture-restore',{vaultId:'personal',trashId:'trash'}]]);
+});

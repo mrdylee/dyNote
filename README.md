@@ -2,23 +2,31 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.15.2 프리릴리스는 폴더 휴지통의 보관함 경로 검증을 보완하고, 분류 설명 팝업의 마우스·Esc 동작과 안내문을 수정합니다. 저널 안내가 다른 화면에 남던 문제도 해결했으며, 기본 Live Preview와 구간별 Bullet Threading을 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.15.2.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
+v0.16.0 프리릴리스는 VS Code Copilot 대화를 개인 저널에 자동 기록하고, **가져오기**와 제목별 **휴지통·되돌리기**를 제공합니다. 프로젝트·날짜별로 기록을 모으며 새 세션도 같은 프로젝트 설정을 따릅니다. 기존 Live Preview·Bullet Threading과 저널 편집 안정화도 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.16.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증은 없습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
 설정 → 보관함에서 **개인 노트**와 **팀 공유 노트**를 서로 다른 폴더로 연결하고, 각 공간의 Git 설정에서 별도 저장소 주소를 연결합니다. 왼쪽 상단에는 현재 공간의 용도가 표시됩니다. 기존 폴더는 사용자가 선택하기 전까지 **용도 미지정**으로 남습니다. 용도 표시는 파일 이동이나 Git 접근 권한 변경을 하지 않으며, 다른 공간으로 문서를 자동 복사하지 않습니다. 개인·팀 폴더가 서로 포함되는 연결은 거부합니다.
 
+## Copilot 저널 자동기록
+
+설정 → 저널 자동기록에서 개인 공간의 VS Code 프로젝트를 선택하세요. 저널 상단의 **가져오기**는 선택한 프로젝트의 오늘 대화를 가져옵니다. **자동 기록**을 켜면 활성화 이후의 새 대화를 앱 실행 중 약 5초 간격으로 확인하며, 입력 중에는 반영을 미룹니다. 프로젝트·날짜별 문서와 저널 링크를 만들고 새 세션도 같은 날짜 기록에 합칩니다. VS Code 확장이나 MCP 설치는 필요하지 않습니다.
+
+기록 제목의 휴지통 버튼은 해당 날짜의 프로젝트 기록과 링크를 함께 정리합니다. ‘대화 제목 보기’를 펼치면 한 대화만 삭제할 수 있고 **삭제 되돌리기**로 복원합니다. 삭제한 항목은 자동/수동 가져오기에서 제외됩니다. VS Code 원본과 과거 Git 커밋은 삭제하지 않습니다. 수집 문서는 개인 보관함의 기존 Git 백업 정책을 따릅니다.
+
+로컬 `workspaceStorage`의 JSON/JSONL과 대응하는 Copilot transcript를 지원합니다. 내부 추론·도구 출력·첨부 바이너리와 미완료 응답은 가져오지 않습니다. 직접 수정하거나 이동한 수집 문서는 덮어쓰지 않고 오류를 표시합니다. 원격 WSL/SSH/Cloud 및 지원하지 않는 저장 형식은 자동 수집하지 않습니다.
+
 ## 실행
 
-Apple Silicon Mac에서는 `Dynote-0.15.2-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
+Apple Silicon Mac에서는 `Dynote-0.16.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.15.2/Dynote-darwin-arm64/Dynote.app`
+`release/v0.16.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.15.2/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.16.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.15.2)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.16.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 

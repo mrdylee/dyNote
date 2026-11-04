@@ -43,6 +43,8 @@ import { SaveQueue } from "./saveQueue.mjs";
 import DocumentWorkspace from "./DocumentWorkspace.jsx";
 import useDocumentWorkspace from "./useDocumentWorkspace.jsx";
 import JournalFeed from "./JournalFeed.jsx";
+import CopilotJournalEntries,{CopilotJournalToolbar} from "./CopilotJournalEntries.jsx";
+import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
 import { DOCUMENT_DRAG } from "../core/document-workspace.mjs";
@@ -333,6 +335,8 @@ export default function App() {
   const [navigation, setNavigation] = useState(normalizeNavigation(null));
   const navigationRef = useRef(navigation);
   const [journalPreferences, setJournalPreferences] = useState({});
+  const [captureState,setCaptureState]=useState(null);
+  const captureContext=useRef(null),captureWorking=useRef(false);
   const [attachment, setAttachment] = useState(null);
   const [fileTarget, setFileTarget] = useState(null);
   const [classificationHelpDismissed, setClassificationHelpDismissed] = useState(false);
@@ -493,6 +497,50 @@ export default function App() {
       }
     });
   }, [install, flush]);
+
+  captureContext.current={vaultId:vault?.id,dailyOptions:{...journalPreferences.daily,locale:journalPreferences.locale},busy,modal,state:captureState};
+  const acceptCapture=useCallback(result=>{
+    setCaptureState(result.status);
+    if(!result.snapshot)return;
+    setRaw(()=>result.snapshot.notes.map(file=>{
+      const draft=queue.current?.get(file.path);
+      return draft?{...file,content:draft.content}:file;
+    }));
+    for(const file of result.snapshot.notes)if(!queue.current?.get(file.path))revisions.current.set(file.path,file.revision);
+    const paths=[...result.snapshot.notes,...(result.snapshot.documents??[])].map(file=>file.path);
+    workspace.dispatch({type:"reconcile",paths});
+    setTabs(old=>old.filter(path=>paths.includes(path)));
+  },[workspace.dispatch]);
+  const captureAction=useCallback(async(action,manual=false,args={})=>{
+    const context=captureContext.current;
+    if(!context?.vaultId||captureWorking.current||context.busy)return;
+    if(action==="sync"&&!manual&&(context.modal||!context.state?.enabled||!context.state.personal||queue.current?.dirty||editsRef.current.blocked()))return;
+    captureWorking.current=true;setBusy(true);
+    try{
+      await flush();
+      const request={vaultId:context.vaultId,...args};
+      const result=await invoke(action==="trash"?api.trashCapture(request):action==="restore"?api.restoreCapture(request):api.syncCapture({...request,dailyOptions:context.dailyOptions,manual}));
+      if(currentVault.current===context.vaultId)acceptCapture(result);
+    }catch(error){
+      if(currentVault.current===context.vaultId)setCaptureState(old=>({...old,error:error.message}));
+      if(manual)throw error;
+    }finally{captureWorking.current=false;setBusy(false);}
+  },[flush,acceptCapture]);
+  useEffect(()=>{
+    if(!api?.captureStatus||!vault?.id)return;
+    let alive=true;setCaptureState(null);
+    invoke(api.captureStatus({vaultId:vault.id})).then(state=>{if(alive)setCaptureState(state);}).catch(error=>{if(alive)setCaptureState({enabled:false,projects:[],records:[],error:error.message});});
+    const interval=setInterval(()=>captureAction("sync"),5000);
+    return()=>{alive=false;clearInterval(interval);};
+  },[vault?.id,captureAction]);
+  const captureSettings=()=>{setSettingsTab("capture");setModal("settings");};
+  const importCapture=async()=>{
+    if(!captureState?.personal||!captureState.projects?.some(project=>project.selected)){captureSettings();return;}
+    await captureAction("sync",true);
+  };
+  const captureControls={state:captureState,onImport:()=>importCapture().catch(error=>setError(error.message)),onSettings:captureSettings,
+    onRestore:()=>captureAction("restore",true,{trashId:captureState.trashId}).catch(error=>setError(error.message)),
+    onTrash:(id,sessionId)=>captureAction("trash",true,{id,sessionId}).catch(error=>setError(error.message))};
 
   const openNote = useCallback((path) => {
     const next = navigationAction(navigationRef.current, { type: "visit", path });
@@ -1384,8 +1432,13 @@ export default function App() {
             </div>
           </div>}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
+          {section!=="journal"&&journalNote&&!attachment&&!["planner","graph","ess"].includes(section)&&<>
+            <CopilotJournalToolbar {...captureControls} disabled={busy||edits.blocked()}/>
+            <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
+          </>}
+          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&captureState?.records?.some(record=>record.path===note.path)&&<CopilotJournalEntries records={captureState.records.filter(record=>record.path===note.path)} disabled={busy||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={openNote} onCreate={createPeriodic} disabled={busy}/>
+            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={openNote} onCreate={createPeriodic} disabled={busy||edits.blocked()} capture={captureControls}/>
             : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
@@ -1990,7 +2043,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
@@ -2013,6 +2066,11 @@ export default function App() {
               finally { setBusy(false); }
             }}
             onForget={(root) => invoke(api.forgetVault({ root }))} />}
+          {settingsTab === "capture"&&vault.id&&<CopilotJournalSettings key={vault.id} state={captureState} disabled={busy}
+            onRefresh={async()=>{const id=vault.id,state=await invoke(api.captureStatus({vaultId:id}));if(currentVault.current===id)setCaptureState(state);return state;}}
+            onSource={async()=>{const id=vault.id,state=await invoke(api.pickCaptureSource({vaultId:id}));if(state&&currentVault.current===id)setCaptureState(state);return state;}}
+            onSave={async input=>{const id=vault.id,state=await invoke(api.configureCapture({vaultId:id,input}));if(currentVault.current===id){setCaptureState(state);captureContext.current={...captureContext.current,state};}return state;}}
+            onImport={()=>captureAction("sync",true)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
           {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
