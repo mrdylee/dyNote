@@ -30,6 +30,7 @@ import { CopilotController } from "./copilot-controller.mjs";
 import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
+import { CopilotJournal } from "./copilot-journal.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -64,6 +65,7 @@ let codex, claude;
 let aiExtensions, aiExtensionsChanging = false;
 let plugins;
 let updates;
+let copilotJournal;
 
 function validateSender(event) {
   if (
@@ -139,6 +141,8 @@ app
     aiExtensions = new AiExtensions({ file: path.join(app.getPath("userData"), "ai-extensions.json") });
     await aiExtensions.load().catch(() => {}); // The registry reports its preserved load error in the panel.
     vault = await initialVault();
+    copilotJournal = new CopilotJournal({file:path.join(app.getPath("userData"),"copilot-journal.json"),sourceRoot:path.join(app.getPath("appData"),"Code","User","workspaceStorage")});
+    await copilotJournal.load().catch(() => {});
     updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),current:app.getVersion(),
       onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
     await updates.init();
@@ -337,6 +341,27 @@ app
       "copilot-cancel-login": () => copilot.cancelLogin(),
       "copilot-send": args => sendAi(copilot, args),
       "copilot-cancel": (args) => copilot.cancel(args?.requestId),
+      "capture-status": args => { checkVault(args); return copilotJournal.status(vault); },
+      "capture-configure": args => { checkVault(args); return copilotJournal.configure(vault,args.input,registry.purposes[vault.root]==="personal"); },
+      "capture-source": async args => {
+        checkVault(args);
+        if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 설정해 주세요.");
+        const selected=await dialog.showOpenDialog(window,{title:"VS Code workspaceStorage 폴더 선택",properties:["openDirectory"]});
+        if(selected.canceled)return null;
+        checkVault(args);return copilotJournal.setSource(vault,selected.filePaths[0]);
+      },
+      "capture-sync": args => {
+        checkVault(args);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
+        return gitBackup.enqueue(()=>{checkVault(args);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true);});
+      },
+      "capture-trash": args => {
+        checkVault(args);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 삭제해 주세요.");
+        return gitBackup.enqueue(()=>{checkVault(args);return copilotJournal.trash(vault,args);});
+      },
+      "capture-restore": args => {
+        checkVault(args);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 복원해 주세요.");
+        return gitBackup.enqueue(()=>{checkVault(args);return copilotJournal.restore(vault,args.trashId);});
+      },
       snapshot: () => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
       "set-vault-purpose": async (args) => { await registry.setPurpose(args?.root, args?.purpose); return true; },
@@ -509,8 +534,8 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "trash-folder"].includes(name);
-        const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -521,6 +546,7 @@ app
           }
           const id = vault?.id;
           const value = await action(args);
+          if(name.startsWith("capture-")&&value){(value.status??value).personal=registry.purposes[vault.root]==="personal";if(value.changed)gitBackup.markDirty(id);}
           if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
           return { ok: true, value };
         } catch (error) {

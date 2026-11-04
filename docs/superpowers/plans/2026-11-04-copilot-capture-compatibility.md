@@ -10,6 +10,8 @@
 
 ---
 
+**상태:** MCP 계획 보류. 현재 진행한 구현과 검증은 2026-11-04-copilot-journal-auto.md를 따른다. 아래 MCP 도구 검증 단계는 실행 완료로 간주하지 않는다.
+
 ## 작업 파일과 경계
 
 - 참조: docs/superpowers/specs/2026-11-04-copilot-capture-mcp-design.md
