@@ -37,6 +37,7 @@ try {
   assert.equal(await page.locator('.document-pane').count(),3);
   const canceled=await page.evaluateHandle(()=>{const d=new DataTransfer();d.setData('application/x-dynote-document','D.md');return d;});
   await page.locator('.document-pane').last().dispatchEvent('dragover',{dataTransfer:canceled,clientX:0});
+  await page.locator('.pane-drop-target').waitFor({state:'visible'});
   assert.equal(await page.locator('.pane-drop-target').count(),1);
   await page.locator('body').dispatchEvent('dragend',{dataTransfer:canceled});await canceled.dispose();
   await page.locator('.pane-drop-target').waitFor({state:'hidden'});

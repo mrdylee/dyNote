@@ -1980,6 +1980,17 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .journal-entry h2 { margin:0 0 16px; }
 
 .classification-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 20px; background:#f4effb; font-size:12px; }
+.classification-controls { height:44px; min-height:44px; box-sizing:border-box; flex-wrap:nowrap; }
+.classification-controls > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.classification-action { position:relative; flex-shrink:0; }
+.classification-action > button { white-space:nowrap; }
+.classification-tooltip { display:none; position:absolute; right:0; top:calc(100% + 10px); width:320px; max-width:calc(100vw - 32px); box-sizing:border-box; padding:14px 16px; border:1px solid var(--border); border-radius:8px; background:var(--surface,#fff); color:var(--text); box-shadow:0 8px 24px #30264126; font-size:12px; line-height:1.6; z-index:150; pointer-events:none; }
+.classification-tooltip p { margin:8px 0 0; }
+.classification-tooltip ol { margin:8px 0 0; padding-left:18px; }
+.classification-action:hover .classification-tooltip, .classification-action:focus-within .classification-tooltip { display:block; }
+.file-tree-menu { position:fixed; z-index:800; width:190px; box-sizing:border-box; padding:5px; border:1px solid var(--border); border-radius:7px; background:var(--surface,#fff); box-shadow:0 5px 18px #30264126; }
+.file-tree-menu button { display:block; width:100%; padding:9px 10px; text-align:left; border:0; border-radius:4px; color:#a12d35; background:transparent; font:inherit; font-size:13px; }
+.file-tree-menu button:hover, .file-tree-menu button:focus-visible { background:#f8e9ec; outline:2px solid #b65c68; outline-offset:-2px; }
 .classification-review fieldset { border:1px solid var(--border); border-radius:8px; margin:12px 0; padding:12px; }
 .classification-review input:not([type=checkbox]) { width:100%; padding:8px; }
 .classification-review pre { white-space:pre-wrap; max-height:300px; overflow:auto; background:#f8f6fa; padding:12px; }

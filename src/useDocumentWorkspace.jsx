@@ -9,5 +9,5 @@ export default function useDocumentWorkspace() {
   },[]);
   const setActive = useCallback(path => dispatch({type:'open',path}),[dispatch]);
   const setMode = useCallback(mode => dispatch({type:'mode',mode}),[dispatch]);
-  return {...state, mode:state.modes[state.active] ?? 'read', setActive, setMode, dispatch};
+  return {...state, mode:state.modes[state.active] ?? 'live', setActive, setMode, dispatch};
 }

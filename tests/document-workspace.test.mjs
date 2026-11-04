@@ -33,3 +33,10 @@ test('journal defaults preserve explicit settings and discover legacy root dates
   assert.equal(journal.journalPreferences(null,[{path:'2026-10-29.md'}]).daily.folder,'');
   assert.equal(journal.journalPreferences({daily:{folder:'일기',format:'YYYY.MM.DD'}},[]).daily.format,'YYYY.MM.DD');
 });
+
+test('new Markdown panes default to live preview while explicit modes survive navigation',()=>{
+ let state=workspace.workspaceAction(null,{type:'open',path:'General.md'});assert.equal(state.modes['General.md'],'live');
+ state=workspace.workspaceAction(state,{type:'mode',mode:'read'});state=workspace.workspaceAction(state,{type:'add',path:'Journal/2026-11-04.md',side:'right'});assert.equal(state.modes['Journal/2026-11-04.md'],'live');
+ state=workspace.workspaceAction(state,{type:'open',path:'General.md'});assert.equal(state.modes['General.md'],'read');
+ state=workspace.workspaceAction(state,{type:'reset',path:'Other.md'});assert.equal(state.modes['Other.md'],'live');
+});

@@ -11,10 +11,11 @@ import {
   clipboard,
   powerMonitor,
 } from "electron";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Vault } from "../core/vault.mjs";
+import { Vault, validFilePath } from "../core/vault.mjs";
+import { canTrashFolder } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
 import { demoNotes } from "../core/demo.mjs";
@@ -475,6 +476,23 @@ app
         checkVault(args);
         return vault.trashFile(args.path, args.revision);
       },
+      "trash-folder": (args) => {
+        checkVault(args);
+        return gitBackup.enqueue(async () => {
+          checkVault(args);
+          if (!validFilePath(`${args.path}/folder.md`) || !canTrashFolder(args.path, args.protectedFolders))
+            throw new Error("기본 폴더이거나 허용되지 않는 폴더 경로입니다.");
+          await vault.snapshot();
+          let folder = vault.root;
+          for (const part of args.path.split("/")) {
+            folder = path.join(folder, part);
+            const stat = await lstat(folder);
+            if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("보관함 안의 일반 폴더만 휴지통으로 이동할 수 있습니다.");
+          }
+          await shell.trashItem(folder);
+          return { path: args.path, systemTrash: true };
+        });
+      },
       "restore-trash": (args) => {
         checkVault(args);
         return vault.restoreTrash(args.id);
@@ -487,7 +505,7 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "trash-folder"].includes(name);
         const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["snapshot", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
@@ -499,7 +517,7 @@ app
           }
           const id = vault?.id;
           const value = await action(args);
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) gitBackup.markDirty(id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

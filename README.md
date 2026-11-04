@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.15.0 프리릴리스는 일반 문서의 드래그 구간별 일반·저널 편집 전환과 Bullet Threading을 제공합니다. 제목 불릿 정렬과 30px 단계 간격을 개선했으며, 기존 개인·팀 노트 공간과 AI 기능도 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.15.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
+v0.15.1 프리릴리스는 입력 중 저널 안내로 본문이 움직이던 문제를 수정하고, 왼쪽 문서·폴더 우클릭 휴지통 메뉴와 분류 사용 설명을 추가합니다. 저널·일반 문서는 기본 Live Preview로 열리며, 구간별 저널 편집과 Bullet Threading도 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.15.1.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증이 없어 인터넷 다운로드 시 차단될 수 있습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -10,15 +10,15 @@ v0.15.0 프리릴리스는 일반 문서의 드래그 구간별 일반·저널 �
 
 ## 실행
 
-Apple Silicon Mac에서는 `Dynote-0.15.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
+Apple Silicon Mac에서는 `Dynote-0.15.1-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.15.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.15.1/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.15.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.15.1/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.15.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.15.1)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 

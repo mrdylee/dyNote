@@ -57,10 +57,10 @@ export default function DocumentWorkspace({workspace,notes,onOpen,onAdd,onContex
         onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}
         onKeyDown={e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const path=visible[index-1].path;setWidths(old=>({...old,[path]:Math.max(180,Math.min(900,(old[path]??300)+(e.key==='ArrowRight'?30:-30)))}));}}/>}
       <div className="pane-slot" style={{flexBasis:widths[note.path]??0,flexGrow:widths[note.path]?0:1}}>
-        <DocumentPane {...props} note={note} notes={notes} mode={workspace.modes[note.path]??'read'} active={workspace.active===note.path} limited={visible.length>=3}
+        <DocumentPane {...props} note={note} notes={notes} mode={workspace.modes[note.path]??'live'} active={workspace.active===note.path} limited={visible.length>=3}
           onFocus={()=>{if(workspace.active!==note.path)onOpen(note.path);}} onContext={onContext}
           onClose={()=>workspace.dispatch({type:'close',path:note.path})} onDrop={(path,side)=>onAdd(path,side,note.path)}
-          onEdit={()=>workspace.setMode('edit')} pending={props.edits.drafts.find(d=>d.path===note.path)}/>
+          onEdit={()=>workspace.setMode('live')} pending={props.edits.drafts.find(d=>d.path===note.path)}/>
       </div>
     </Fragment>)}
   </div>;

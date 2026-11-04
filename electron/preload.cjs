@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld(
     copyText: (args) => call("copy-text", args),
     moveFile: (args) => call("move-file", args),
     trashFile: (args) => call("trash-file", args),
+    trashFolder: (args) => call("trash-folder", args),
     restoreTrash: (args) => call("restore-trash", args),
     showRecovery: () => call("recovery"),
     openExternal: (url) => call("external", url),

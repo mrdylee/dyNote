@@ -46,6 +46,7 @@ import JournalFeed from "./JournalFeed.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
 import { DOCUMENT_DRAG } from "../core/document-workspace.mjs";
+import { protectedTreeFolders, canTrashFolder } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
@@ -116,7 +117,7 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
   );
 }
 
-function FileTree({ notes, active, onOpen }) {
+function FileTree({ notes, active, onOpen, onContext }) {
   const [closed, setClosed] = useState(new Set());
   const tree = Object.create(null);
   for (const note of notes) {
@@ -142,6 +143,7 @@ function FileTree({ notes, active, onOpen }) {
               className={`file-row ${active === path ? "selected" : ""}`}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={() => onOpen(path)}
+              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
               title={path}
               draggable={/\.md$/i.test(path)}
               onDragStart={e => { e.dataTransfer.setData(DOCUMENT_DRAG,path); e.dataTransfer.effectAllowed="copy"; }}
@@ -156,6 +158,8 @@ function FileTree({ notes, active, onOpen }) {
           <div key={path}>
             <button
               className="folder-row"
+              title={path}
+              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:true}); }}
               style={{ paddingLeft: 12 + depth * 16 }}
               onClick={() =>
                 setClosed((old) => {
@@ -331,6 +335,17 @@ export default function App() {
   const [journalPreferences, setJournalPreferences] = useState({});
   const [attachment, setAttachment] = useState(null);
   const [fileTarget, setFileTarget] = useState(null);
+  const [treeMenu, setTreeMenu] = useState(null);
+  const treeMenuRef = useRef(null);
+  useEffect(() => {
+    if (!treeMenu) return;
+    treeMenuRef.current?.querySelector('button')?.focus();
+    const outside = event => { if (!treeMenuRef.current?.contains(event.target)) setTreeMenu(null); };
+    const escape = event => { if (event.key === 'Escape') { event.preventDefault(); setTreeMenu(null); treeMenu.origin?.focus(); } };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [treeMenu]);
   const [propertiesDraft, setPropertiesDraft] = useState("");
   const [lastTrash, setLastTrash] = useState(null);
   const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 백업 미설정", enabled: false, config: null });
@@ -553,7 +568,7 @@ export default function App() {
       if (currentVault.current !== vaultId) return;
       revisions.current.set(created.path, created.revision);
       setRaw(old => [...old.filter(n => n.path !== created.path), created]);
-      openNote(created.path); setMode("edit"); setError("");
+      openNote(created.path); setError("");
       setEditorCommand({ path: created.path, type: "focus-end" });
     } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
     finally { setBusy(false); }
@@ -588,7 +603,7 @@ export default function App() {
       if (documentKind(path)) setDocuments((old) => [...old, created]);
       else setRaw((old) => [...old, created]);
       openNote(created.path);
-      setMode(modal === "newMap" ? "mindmap" : "edit");
+      setMode(modal === "newMap" ? "mindmap" : documentKind(path) ? "edit" : "live");
       setNewName("");
       setError("");
     } catch (err) {
@@ -710,15 +725,15 @@ export default function App() {
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
   const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
-  const prepareFile = async (path, action) => {
+  const prepareFile = async (path, action, folder = false) => {
     try {
       let revision = revisions.current.get(path);
-      if (!/\.(md|canvas|base)$/i.test(path))
+      if (!folder && !/\.(md|canvas|base)$/i.test(path))
         revision = (
           await invoke(api.readAttachment({ vaultId: vault.id, path }))
         ).revision;
       setError("");
-      setFileTarget({ path, revision });
+      setFileTarget({ path, revision, folder });
       setNewName(path);
       setModal(action);
     } catch (err) {
@@ -747,7 +762,9 @@ export default function App() {
         else await openAttachment(newName.trim());
       } else {
         const item = await invoke(
-          api.trashFile({ vaultId: vault.id, path: fileTarget.path, revision }),
+          fileTarget.folder
+            ? api.trashFolder({ vaultId: vault.id, path: fileTarget.path, protectedFolders: protectedTreeFolders(journalPreferences) })
+            : api.trashFile({ vaultId: vault.id, path: fileTarget.path, revision }),
         );
         setLastTrash({ ...item, vaultId: vault.id });
         updateNavigation({ type: "remove", path: fileTarget.path });
@@ -1120,7 +1137,11 @@ export default function App() {
               )}
             </div>
           ) : (
-            <FileTree notes={[...model.notes, ...documents]} active={active} onOpen={openNote} />
+            <FileTree notes={[...model.notes, ...documents]} active={active} onOpen={openNote} onContext={(event, target) => {
+              if (busy || edits.blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(journalPreferences)))) { setTreeMenu(null); return; }
+              const rect=event.currentTarget.getBoundingClientRect();
+              setTreeMenu({...target, origin:event.currentTarget, x:Math.max(4,Math.min(event.clientX||rect.left+20,window.innerWidth-194)), y:Math.max(4,Math.min(event.clientY||rect.bottom,window.innerHeight-48))});
+            }} />
           )}
           <div className="structured-create-actions">
             <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
@@ -1339,10 +1360,21 @@ export default function App() {
             </div>
           )}
           {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료 · 직접 설치할 수 있습니다.</span><button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
-          {classification.length > 0 && section !== "journal" && <div className="classification-notice"><span>이 기록을 폴더별로 정리할 수 있습니다.</span><button disabled={busy||edits.blocked()} onClick={()=>setModal("classify")}>분류 제안 검토 ({classification.length})</button></div>}
+          {journalNote && section !== "journal" && <div className="classification-notice classification-controls">
+            <span>이 기록을 폴더별로 정리할 수 있습니다.</span>
+            <div className="classification-action" tabIndex={classification.length ? undefined : 0} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
+              <button aria-describedby="classification-help" disabled={busy||edits.blocked()||!classification.length} onClick={()=>setModal("classify")}>분류 제안 검토 ({classification.length})</button>
+              <div className="classification-tooltip" id="classification-help" role="tooltip">
+                <strong>저널 내용을 관련 폴더로 정리합니다.</strong>
+                <p>제목과 본문을 기존 폴더 이름과 비교해 정리할 구간을 제안합니다.</p>
+                <ol><li>버튼을 눌러 원하는 제안을 선택합니다.</li><li>저장할 대상 문서와 원문 처리 방법을 고릅니다.</li><li>미리보기를 확인한 뒤 적용합니다.</li></ol>
+                <p>확인 전에는 원문이 바뀌지 않습니다. 입력 중에는 저장이 끝난 뒤 검토할 수 있습니다.</p>
+              </div>
+            </div>
+          </div>}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={path=>{openNote(path);setMode("edit");}} onCreate={createPeriodic} disabled={busy}/>
+            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={openNote} onCreate={createPeriodic} disabled={busy}/>
             : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
@@ -1668,15 +1700,19 @@ export default function App() {
         </>
         )}
       </div>
+      {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
+        onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
+        <button role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder);}}>휴지통으로 이동</button>
+      </div>}
       {lastTrash && (
         <div className="undo-toast">
-          휴지통으로 이동했습니다.{" "}
-          <button
+          {lastTrash.systemTrash ? "폴더를 시스템 휴지통으로 이동했습니다. 복구는 시스템 휴지통에서 할 수 있습니다." : "휴지통으로 이동했습니다."}{" "}
+          {!lastTrash.systemTrash && <button
             disabled={busy || lastTrash.vaultId !== vault.id}
             onClick={restoreLast}
           >
             되돌리기
-          </button>
+          </button>}
           <button
             aria-label="휴지통 알림 닫기"
             onClick={() => setLastTrash(null)}
@@ -1711,7 +1747,7 @@ export default function App() {
                 </p>
               </>
             ) : (
-              <p>복구 가능한 사본을 보관합니다. 연결 문서의 링크는 남습니다.</p>
+              <p>{fileTarget?.folder ? "하위 폴더와 모든 파일을 함께 시스템 휴지통으로 이동합니다. 복구는 시스템 휴지통에서 할 수 있습니다. 연결 문서의 링크는 남습니다." : "복구 가능한 사본을 보관합니다. 연결 문서의 링크는 남습니다."}</p>
             )}
             <div className="modal-actions">
               <button
