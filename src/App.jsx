@@ -335,6 +335,17 @@ export default function App() {
   const [journalPreferences, setJournalPreferences] = useState({});
   const [attachment, setAttachment] = useState(null);
   const [fileTarget, setFileTarget] = useState(null);
+  const [classificationHelpDismissed, setClassificationHelpDismissed] = useState(false);
+  const classificationHelpRef = useRef(null);
+  useEffect(() => {
+    const dismiss = event => {
+      if (event.key === 'Escape' && classificationHelpRef.current?.matches(':not(.help-dismissed):is(:hover, :focus-within)')) {
+        event.preventDefault(); event.stopPropagation(); setClassificationHelpDismissed(true);
+      }
+    };
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, []);
   const [treeMenu, setTreeMenu] = useState(null);
   const treeMenuRef = useRef(null);
   useEffect(() => {
@@ -1360,15 +1371,15 @@ export default function App() {
             </div>
           )}
           {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료 · 직접 설치할 수 있습니다.</span><button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
-          {journalNote && section !== "journal" && <div className="classification-notice classification-controls">
+          {journalNote && !["journal", "planner", "graph", "ess"].includes(section) && !attachment && <div className="classification-notice classification-controls">
             <span>이 기록을 폴더별로 정리할 수 있습니다.</span>
-            <div className="classification-action" tabIndex={classification.length ? undefined : 0} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
+            <div ref={classificationHelpRef} className={`classification-action${classificationHelpDismissed ? " help-dismissed" : ""}`} onMouseEnter={()=>setClassificationHelpDismissed(false)} onFocusCapture={()=>setClassificationHelpDismissed(false)} tabIndex={busy||edits.blocked()||!classification.length ? 0 : undefined} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
               <button aria-describedby="classification-help" disabled={busy||edits.blocked()||!classification.length} onClick={()=>setModal("classify")}>분류 제안 검토 ({classification.length})</button>
               <div className="classification-tooltip" id="classification-help" role="tooltip">
                 <strong>저널 내용을 관련 폴더로 정리합니다.</strong>
                 <p>제목과 본문을 기존 폴더 이름과 비교해 정리할 구간을 제안합니다.</p>
-                <ol><li>버튼을 눌러 원하는 제안을 선택합니다.</li><li>저장할 대상 문서와 원문 처리 방법을 고릅니다.</li><li>미리보기를 확인한 뒤 적용합니다.</li></ol>
-                <p>확인 전에는 원문이 바뀌지 않습니다. 입력 중에는 저장이 끝난 뒤 검토할 수 있습니다.</p>
+                <ol><li>버튼을 눌러 원하는 제안을 선택합니다.</li><li>저장할 문서 경로를 확인하거나 수정합니다.</li><li>미리보기를 확인한 뒤 적용합니다.</li></ol>
+                <p>원본 저널은 그대로 두고 선택한 원문을 대상 문서에 복사합니다. 입력 중에는 저장이 끝난 뒤 검토할 수 있습니다.</p>
               </div>
             </div>
           </div>}

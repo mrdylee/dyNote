@@ -11,7 +11,7 @@ import {
   clipboard,
   powerMonitor,
 } from "electron";
-import { readFile, writeFile, mkdir, lstat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault, validFilePath } from "../core/vault.mjs";
@@ -482,6 +482,7 @@ app
           checkVault(args);
           if (!validFilePath(`${args.path}/folder.md`) || !canTrashFolder(args.path, args.protectedFolders))
             throw new Error("기본 폴더이거나 허용되지 않는 폴더 경로입니다.");
+          if (await realpath(vault.root) !== vault.root) throw new Error("보관함 경로가 바뀌었습니다. 보관함을 다시 열어 주세요.");
           await vault.snapshot();
           let folder = vault.root;
           for (const part of args.path.split("/")) {
@@ -489,6 +490,9 @@ app
             const stat = await lstat(folder);
             if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("보관함 안의 일반 폴더만 휴지통으로 이동할 수 있습니다.");
           }
+          folder = await realpath(folder);
+          const relative = path.relative(vault.root, folder);
+          if (!relative || path.isAbsolute(relative) || relative.split(path.sep).includes("..")) throw new Error("보관함 밖 폴더는 휴지통으로 이동할 수 없습니다.");
           await shell.trashItem(folder);
           return { path: args.path, systemTrash: true };
         });
