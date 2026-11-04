@@ -1,4 +1,5 @@
 import { installTextColor, textWithoutColorMarkup } from "./text-color.mjs";
+import { installOutlineRegions } from "./outline-regions.mjs";
 import { headingId } from "./headings.mjs";
 
 export function installMarkdownExtensions(
@@ -6,6 +7,7 @@ export function installMarkdownExtensions(
   { resolveLink, renderMarkdown, attachmentUrl },
 ) {
   installTextColor(md);
+  installOutlineRegions(md);
   const escape = md.utils.escapeHtml;
   const fragment = (target) => target.split("#").slice(1).join("#");
   md.renderer.rules.heading_open = (tokens, index, options, _env, renderer) => {

@@ -1,0 +1,11 @@
+# Drag-selected outline regions
+
+The user requested REA-derived Logseq spacing and a choice between normal editing and journal-style editing including Bullet Threading in ordinary documents. Regions are defined by dragging text in the editor.
+
+Use the existing Markdown editor. A regular-document toolbar exposes two choices: normal editing and journal-style editing (Bullet Threading included). A drag selection expands to complete lines and selected list items with descendants, avoiding partial subtree boundaries. On explicit journal-mode application, selected plain paragraphs become bullet blocks; soft lines remain continuations in their paragraph. Existing headings, lists and code retain their content. Normal mode removes the region behavior while preserving the resulting Markdown list. Toolbar guidance stays fixed during dragging so crossing modes cannot move the selection target.
+
+Persist each region in two standalone, indented HTML comments identifying journal mode. Comments move with the text and survive saves, renames and restarts. Live Preview and rendered Markdown hide valid paired markers; source mode shows them. Removing a region removes only its markers and restores any delimiter newline inserted at EOF. Malformed, nested and fenced-code markers remain literal. Applying across existing regions is rejected rather than silently merging them. Selecting normal editing within an existing region removes its boundaries. Code and YAML cannot be split by new boundaries.
+
+Regular text outside regions retains existing behavior. Journals retain their default enabled behavior. Journal commands and threading are enabled together; ancestry is clipped at the selected region. All changes go through CodeMirror transactions and existing save/undo/revision handling. Read-only and composition guards remain.
+
+REA fresh controlled browser evidence `ev_cfa5df3a0abb69e530499576cece65a462427dc95d7259cc4ca9731d592bbd4e` completed the declared 3-level Logseq scenario with zero page errors and owned-browser cleanup. At viewport scale 1, its screenshot shows bullet centers separated by 30px. Use that visual step instead of the previous approximate font-spacing approach. This is reference behavior; selection-scoped controls are a new Dynote design.

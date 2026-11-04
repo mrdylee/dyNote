@@ -1962,8 +1962,19 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .journal-feed { max-width:850px; margin:auto; padding:30px; }
 .journal-outline-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:6px 10px; border-bottom:1px solid var(--border); font-size:12px; }
 .journal-outline-toolbar span { flex:1; color:var(--text-secondary); }
+.outline-region-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); font-size:12px; }
+.outline-region-toolbar label { display:flex; align-items:center; gap:6px; }
+.outline-region-toolbar select, .outline-region-toolbar button { font:inherit; padding:4px 7px; border:1px solid var(--border); border-radius:5px; }
+.outline-region-toolbar > span { color:var(--muted); }
 .journal-outline-toolbar button { padding:4px 7px; border:1px solid var(--border); border-radius:5px; }
 .cm-journal .cm-journal-block { background-image:repeating-linear-gradient(to right,transparent 0,transparent calc(2ch - 1px),var(--border) calc(2ch - 1px),var(--border) 2ch); background-size:var(--journal-indent) 100%; background-repeat:no-repeat; }
+.cm-live-preview .cm-outline-enabled { background-image:none; padding-left:calc(22px + var(--journal-prefix-width) + 2ch); text-indent:calc(-1 * (var(--journal-prefix-width) + 2ch)); }
+.cm-live-preview .cm-outline-enabled .cm-journal-indent { display:inline-block; width:var(--journal-prefix-width); font-size:var(--body-size,15px); font-weight:400; text-indent:0; }
+.cm-live-preview .cm-outline-enabled .cm-live-bullet { display:inline-block; position:relative; width:12px; height:1em; line-height:1; vertical-align:baseline; color:transparent; }
+.cm-live-preview .cm-outline-enabled .cm-live-bullet::after { content:""; position:absolute; top:50%; left:50%; width:6px; height:6px; transform:translate(-50%,-50%); border-radius:50%; background:var(--journal-bullet-color,#947bb1); }
+.cm-live-preview .cm-journal-active, .cm-live-preview .cm-journal-ancestor { --journal-bullet-color:#8e70bc; }
+.cm-journal-threading, .cm-outline-threading { pointer-events:none; }
+.cm-journal-thread { box-sizing:border-box; border-left:2px solid #8e70bc; border-bottom:2px solid #8e70bc; border-bottom-left-radius:8px; opacity:1; }
 .journal-entry { margin:24px 0; padding:24px; border:1px solid var(--border); border-radius:12px; }
 .journal-entry header { display:flex; align-items:center; justify-content:space-between; }
 .journal-entry h2 { margin:0 0 16px; }

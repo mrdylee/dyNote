@@ -31,6 +31,7 @@ import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor } from "./editorCommands.mjs";
 import { journalOutline, addJournalBlock } from "./journal-outline.mjs";
+import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
 
 export default function Editor({
   note,
@@ -51,6 +52,13 @@ export default function Editor({
   pendingOriginal,
 }) {
   const [textColor, setTextColor] = useState("#c62828");
+  const [regionSelection, setRegionSelection] = useState({ selected: false, active: false });
+  const [regionMode, setRegionMode] = useState("normal");
+  const [regionNotice, setRegionNotice] = useState("");
+  function trackRegionSelection(state) {
+    const selected = !state.selection.main.empty, active = !!selectedOutlineRegion(state);
+    setRegionSelection(previous => previous.selected === selected && previous.active === active ? previous : { selected, active });
+  }
   const host = useRef(null);
   const editor = useRef(null);
   const callback = useRef(onChange);
@@ -117,7 +125,7 @@ export default function Editor({
               },
             ],
           }),
-          outlining.current.of(journal ? journalOutline() : []),
+          outlining.current.of(journalOutline({ journal, live })),
           syntaxHighlighting(defaultHighlightStyle),
           EditorView.lineWrapping,
           keymap.of([
@@ -161,6 +169,7 @@ export default function Editor({
             if (update.docChanged && !syncing.current)
               callback.current(update.state.doc.sliceString(0, update.state.doc.length, lineBreak.current));
             if (update.selectionSet || update.docChanged) {
+              trackRegionSelection(update.state);
               const { from, to } = update.state.selection.main;
               if (from === to) {
                 latest.current.onSelection?.(null);
@@ -179,6 +188,7 @@ export default function Editor({
       }),
     });
     editor.current = view;
+    trackRegionSelection(view.state);
     if (editorRef) editorRef.current = view;
     latest.current.onSelection?.(null);
     async function importFiles(files, target) {
@@ -222,7 +232,9 @@ export default function Editor({
     });
   }, [readOnly]);
   useEffect(() => { editor.current?.requestMeasure(); }, [fontSettings]);
-  useEffect(() => { editor.current?.dispatch({ effects: outlining.current.reconfigure(journal ? journalOutline() : []) }); }, [journal]);
+  useEffect(() => { editor.current?.dispatch({ effects: outlining.current.reconfigure(journalOutline({ journal, live })) }); }, [journal, live]);
+  useEffect(() => { setRegionMode(regionSelection.active ? "journal" : "normal"); }, [regionSelection.active, note.path]);
+  useEffect(() => { setRegionNotice(""); }, [note.path]);
   useEffect(() => {
     const view = editor.current;
     if (!view) return;
@@ -280,6 +292,19 @@ export default function Editor({
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => addJournalBlock(editor.current)}>저널 블록 추가</button>
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runOutlineCommand(editor.current, "fold")}>하위 블록 접기</button>
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runOutlineCommand(editor.current, "unfold")}>하위 블록 펼치기</button>
+    </div>}
+    {!journal && <div className="outline-region-toolbar" role="toolbar" aria-label="구간 편집 설정">
+      <label>구간 편집 <select aria-label="선택 구간 편집 방식" value={regionMode} disabled={readOnly} onChange={event => { setRegionMode(event.target.value); setRegionNotice(""); }}>
+        <option value="normal">일반 편집</option>
+        <option value="journal">저널식 편집 (Bullet Threading)</option>
+      </select></label>
+      <button type="button" disabled={readOnly || (!regionSelection.selected && !regionSelection.active)} onMouseDown={event => event.preventDefault()} onClick={() => {
+        if (regionMode === (regionSelection.active ? "journal" : "normal")) { setRegionNotice("현재 구간에 적용된 편집 방식입니다."); return; }
+        if (applyOutlineRegion(editor.current, regionMode)) setRegionNotice("");
+        else setRegionNotice("하나의 구간을 선택해 주세요. 코드·속성의 일부나 기존 구간을 가로지르는 선택은 적용할 수 없습니다.");
+      }}>선택 구간에 적용</button>
+      <span>드래그로 구간 선택 · 저널식 편집은 문단을 불릿 블록으로 바꿉니다.</span>
+      {regionNotice && <span role="status">{regionNotice}</span>}
     </div>}
     <div className="format-toolbar" role="toolbar" aria-label="Markdown 서식">
       {[["bold", "굵게", "B"], ["italic", "기울임", "I"], ["strike", "취소선", "S"], ["code", "인라인 코드", "</>"]].map(([format, label, text]) =>
