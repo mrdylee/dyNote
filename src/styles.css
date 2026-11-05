@@ -1971,7 +1971,9 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .cm-live-preview .cm-outline-enabled { background-image:none; padding-left:calc(22px + var(--journal-prefix-width) + 2ch); text-indent:calc(-1 * (var(--journal-prefix-width) + 2ch)); }
 .cm-live-preview .cm-outline-enabled .cm-journal-indent { display:inline-block; width:var(--journal-prefix-width); font-size:var(--body-size,15px); font-weight:400; text-indent:0; }
 .cm-live-preview .cm-outline-enabled .cm-live-bullet { display:inline-block; position:relative; width:12px; height:1em; line-height:1; vertical-align:baseline; color:transparent; }
-.cm-live-preview .cm-outline-enabled .cm-live-bullet::after { content:""; position:absolute; top:50%; left:50%; width:6px; height:6px; transform:translate(-50%,-50%); border-radius:50%; background:var(--journal-bullet-color,#947bb1); }
+.cm-live-preview .cm-outline-enabled .cm-live-bullet::after { content:""; position:absolute; top:50%; left:50%; width:6px; height:6px; transform:translate(-50%,-50%); border-radius:50%; background:var(--journal-bullet-color,#947bb1); transition:transform .2s; }
+.cm-live-preview .cm-outline-enabled:has(.cm-live-image) .cm-live-bullet { height:1lh; line-height:inherit; vertical-align:top; }
+.cm-live-preview .cm-journal-active .cm-live-bullet::after, .cm-live-preview .cm-outline-enabled .cm-live-bullet:hover::after { transform:translate(-50%,-50%) scale(1.2); }
 .cm-live-preview .cm-journal-active, .cm-live-preview .cm-journal-ancestor { --journal-bullet-color:#8e70bc; }
 .cm-journal-threading, .cm-outline-threading { pointer-events:none; }
 .cm-journal-thread { box-sizing:border-box; border-left:2px solid #8e70bc; border-bottom:2px solid #8e70bc; border-bottom-left-radius:8px; opacity:1; }

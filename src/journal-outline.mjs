@@ -25,6 +25,7 @@ function block(view){
  const marker=node?.getChild('ListMark');
  if(!marker)return null;
  const first=state.doc.lineAt(node.from),line=state.doc.lineAt(pos);
+ if(!/^[\t ]*$/.test(state.doc.sliceString(first.from,marker.from)))return null;
  return {node,marker,first,line,pos};
 }
 function insert(view,from,text){
@@ -40,7 +41,38 @@ export function journalEnter(view){
   return insert(view,pos,'\n'+indent+'- ');
  }
  if(pos===line.to&&line.number>first.number&&line.text.trim())return insert(view,pos,'\n'+first.text.match(/^[\t ]*/)[0]+'- ');
+ if(line.number===first.number&&pos>current.marker.to&&node.parent.name==='BulletList'){
+  const prefix=first.text.match(/^[\t ]*/)[0],body=view.state.doc.sliceString(current.marker.to+1,first.to);
+  if(!body.trim()&&node.parent.parent?.name==='ListItem')return journalIndent(view,'outdent');
+  const task=/^\[[ xX]\] /.test(body)&&pos>=current.marker.to+5?'[ ] ':'';
+  return insert(view,pos,'\n'+prefix+view.state.doc.sliceString(current.marker.from,current.marker.to)+' '+task);
+ }
  return insertNewlineContinueMarkup(view);
+}
+export function journalBackspace(view){
+ const current=block(view);if(!current)return false;
+ const {node,marker,first,line,pos}=current,contentFrom=marker.to+1;
+ if(line.number!==first.number||pos>contentFrom)return false;
+ const previous=node.prevSibling?.name==='ListItem'?node.prevSibling:node.parent.parent?.name==='ListItem'?node.parent.parent:null;
+ const previousMarker=previous?.getChild('ListMark');
+ if(!previousMarker||previousMarker.from<outlineOptionsAt(view.state,pos).from)return true;
+ const doc=view.state.doc,previousLine=doc.lineAt(previousMarker.from),text=doc.sliceString(contentFrom,first.to);
+ const width=value=>value.replaceAll('\t','    ').length;
+ const amount=width(first.text.match(/^[\t ]*/)[0])-width(previousLine.text.match(/^[\t ]*/)[0]);
+ const changes=[{from:previousLine.to,insert:text},{from:first.from-1,to:first.to}];
+ if(amount>0)for(let number=first.number+1;number<=doc.lineAt(node.to-1).number;number++){
+  const child=doc.line(number);let count=0,chars=0;
+  while(chars<child.length&&count<amount&&/[\t ]/.test(child.text[chars])){count+=child.text[chars]==='\t'?4:1;chars++;}
+  if(chars)changes.push({from:child.from,to:child.from+chars});
+ }
+ view.dispatch({changes,selection:{anchor:previousLine.to},scrollIntoView:true,
+  annotations:[Transaction.userEvent.of('input.journal'),isolateHistory.of('full')]});
+ return true;
+}
+export function journalInsertAttachments(view,text){
+ const current=block(view);if(!current)return false;
+ const prefix=current.first.text.match(/^[\t ]*/)[0]+'- ';
+ return insert(view,current.pos,text.split('\n').join('\n'+prefix)+'\n'+prefix);
 }
 export function journalSoftBreak(view){
  const current=block(view);if(!current)return false;
@@ -147,7 +179,7 @@ const guides=ViewPlugin.fromClass(class{
 },{decorations:value=>value.decorations});
 export function journalOutline({journal=true,live=false}={}){
  return [outlineDefaults.of({journal,live}),outlineRegionState,EditorView.editorAttributes.of({class:journal?'cm-journal':'cm-outline-regions'}),guides,threading(journal),Prec.highest(keymap.of([
-  {key:'Enter',run:journalEnter},{key:'Shift-Enter',run:journalSoftBreak},
+  {key:'Enter',run:journalEnter},{key:'Shift-Enter',run:journalSoftBreak},{key:'Backspace',run:journalBackspace},
   {key:'Tab',run:view=>journalIndent(view,'indent')},{key:'Shift-Tab',run:view=>journalIndent(view,'outdent')},
  ]))];
 }

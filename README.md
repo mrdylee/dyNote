@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.16.0 프리릴리스는 VS Code Copilot 대화를 개인 저널에 자동 기록하고, **가져오기**와 제목별 **휴지통·되돌리기**를 제공합니다. 프로젝트·날짜별로 기록을 모으며 새 세션도 같은 프로젝트 설정을 따릅니다. 기존 Live Preview·Bullet Threading과 저널 편집 안정화도 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.16.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증은 없습니다.
+v0.16.1 프리릴리스는 현재 불릿 강조, Backspace 불릿 보존, 이미지 뒤 한 줄 Enter와 커서 위치·불릿 정렬을 개선합니다. 저널 기본 보기는 Live Preview이며 Copilot 저널 자동기록·가져오기·제목별 휴지통도 포함합니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.16.1.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증은 없습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -18,19 +18,19 @@ v0.16.0 프리릴리스는 VS Code Copilot 대화를 개인 저널에 자동 기
 
 ## 실행
 
-Apple Silicon Mac에서는 `Dynote-0.16.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
+Apple Silicon Mac에서는 `Dynote-0.16.1-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.16.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.16.1/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.16.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
+Windows 64비트용 실행 폴더는 `release/v0.16.1/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/WINDOWS.md)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.16.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.16.1)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 
-일간 저널에서 Enter는 새 블록, Tab·Shift+Tab은 하위·상위 단계, Shift+Enter는 같은 블록 안의 줄바꿈입니다. 구조는 일반 Markdown 들여쓰기로 저장되어 AI 수정에도 그대로 전달됩니다. 기존 저널과 사용자 템플릿을 자동으로 변환하지 않습니다. 저널의 Live Preview에서는 제목에 맞춰 정렬된 작은 불릿과 현재 블록에서 상위 블록까지 이어지는 Bullet Threading 연결선을 표시합니다.
+일간 저널에서 Enter는 새 블록, Tab·Shift+Tab은 하위·상위 단계, Shift+Enter는 같은 블록 안의 줄바꿈입니다. 첫 불릿의 시작에서 Backspace를 누르면 불릿을 유지하고, 이후 블록의 시작에서는 이전 블록과 합칩니다. 이미지 다음 Enter도 새 불릿 한 줄만 추가합니다. 구조는 일반 Markdown 들여쓰기로 저장되어 AI 수정에도 그대로 전달됩니다. 기존 저널과 사용자 템플릿을 자동으로 변환하지 않습니다. 저널의 Live Preview에서는 제목에 맞춰 정렬된 작은 불릿과 현재 블록에서 상위 블록까지 이어지는 Bullet Threading 연결선을 표시합니다.
 
 일반 문서에서는 원하는 구간을 드래그한 뒤 **구간 편집 → 저널식 편집 (Bullet Threading) → 선택 구간에 적용**을 선택하세요. 문단이 불릿 블록으로 바뀌며 Tab·Enter 편집과 연결선이 함께 적용됩니다. 구간 안에서 **일반 편집**을 적용하면 내용과 목록을 유지하면서 저널식 동작을 해제합니다. 구간 설정은 문서에 저장되어 다시 열어도 유지되고, 연결선은 Live Preview에서 표시됩니다.
 
