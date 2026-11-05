@@ -18,6 +18,7 @@ const setup = async () => {
     const popup = Menu.prototype.popup;
     Menu.prototype.popup = function(options) { globalThis.__editorMenu = this; return popup.call(this,options); };
   });
+  await page.getByRole("button",{name:"파일 목록",exact:true}).click();
   await page.locator('.file-row[title="Home.md"]').click();
 };
 const content = () => page.locator(".cm-content").evaluate(el => el.cmTile.root.view.state.doc.toString());
@@ -50,7 +51,9 @@ try {
   assert.equal(await content(),original);
   report.checks.push("actual right-click opens native menu; formatting IPC and native undo preserve Korean content");
   await page.getByRole("button",{name:"글꼴·크기",exact:true}).click();
-  await page.getByRole("textbox",{name:"본문 글꼴",exact:true}).fill("Georgia");
+  await page.getByLabel(/^본문 글꼴 · /).click();
+  const fontSearch = page.getByRole("searchbox",{name:"본문 글꼴 검색",exact:true});
+  await fontSearch.fill("Georgia"); await fontSearch.press("Enter");
   await page.getByRole("spinbutton",{name:"본문 글자 크기",exact:true}).fill("19");
   await page.getByRole("dialog").getByRole("button",{name:"닫기",exact:true}).click();
   await page.getByRole("button",{name:"Live Preview",exact:true}).click();
@@ -85,6 +88,7 @@ try {
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem("dynote.panelWidths"))),saved);
   assert.equal(await page.locator(".navigator").evaluate(el=>el.getBoundingClientRect().width),saved.left);
   assert.equal(await page.locator(".context-panel").evaluate(el=>el.getBoundingClientRect().width),saved.right);
+  await page.getByRole("button",{name:"읽기 보기",exact:true}).click();
   assert.equal(await page.locator(".markdown-preview").evaluate(el=>getComputedStyle(el).fontSize),"19px");
   await page.getByRole("button",{name:"편집 보기",exact:true}).click();
   await page.getByRole("separator",{name:"왼쪽 패널 너비"}).dblclick();

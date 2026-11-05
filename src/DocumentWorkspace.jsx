@@ -5,16 +5,19 @@ import {DOCUMENT_DRAG} from '../core/document-workspace.mjs';
 import Editor from './Editor.jsx';
 import DiagramPreview from './DiagramPreview.jsx';
 
-function Pane({note, active, mode, onFocus, onClose, onDrop, limited, disabled, children}) {
+function Pane({note, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, limited, disabled, children}) {
   const [edge,setEdge]=useState(null);
   useEffect(()=>{const clear=()=>setEdge(null);window.addEventListener('dragend',clear);window.addEventListener('drop',clear);return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);};},[]);
   const side=e=>e.clientX < e.currentTarget.getBoundingClientRect().x + e.currentTarget.clientWidth / 2 ? 'left' : 'right';
-  return <section className={`document-pane ${active?'focused':''}`} role="region" aria-label={`문서 ${note.path}`} data-document-path={note.path}
+  return <section className={`document-pane ${active?'focused':''}`} role="region" aria-label={`문서 ${note.path}`} aria-description={scopeLabel} data-document-path={note.path} data-vault-id={vault.id}
     onFocusCapture={onFocus} onPointerDownCapture={onFocus}
     onDragOverCapture={e=>{if(disabled || !e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect=limited?'none':'copy';setEdge(side(e));}}
     onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setEdge(null);}}
     onDropCapture={e=>{if(!e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();setEdge(null);if(!disabled)onDrop(e.dataTransfer.getData(DOCUMENT_DRAG),side(e));}}>
-    <div className="pane-heading"><span draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,note.path);e.dataTransfer.effectAllowed='copy';}}>{note.path}</span><button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div>
+    <div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
+      {scopeLabel && <small className="pane-space" title={scopeLabel}>{scopeLabel}</small>}
+      <span title={note.path}>{note.path}</span>
+    </span><button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div>
     <div className={`document-content ${mode}`}>{children}</div>
     {edge&&<div className={`pane-drop-target ${edge}`} aria-live="polite">{limited?'최대 3개 문서까지 비교할 수 있습니다':`${edge==='left'?'왼쪽':'오른쪽'}에 문서 열기`}</div>}
   </section>;
@@ -25,7 +28,7 @@ function DocumentPane(props) {
   const editor=useRef(null),preview=useRef(null),selection=useRef(null);
   const [compare,setCompare]=useState(false);
   const context=()=>onContext(editor.current,preview.current,selection.current);
-  const focus=()=>{onFocus();context();};
+  const focus=()=>{if(!disabled){onFocus();context();}};
   useEffect(()=>{if(active)context();});
   const html=useMemo(()=>!["read","split"].includes(mode)?"":DOMPurify.sanitize(renderMarkdown(note.content,notes,note.path,{vaultId:vault.id,attachments:vault.attachments??[]}),{
     FORBID_TAGS:['iframe','style','form','svg','math'],ADD_ATTR:['data-note','data-external','data-anchor','data-attachment','data-attachment-fragment','data-task-line','data-embed'],ADD_URI_SAFE_ATTR:['src'],
@@ -38,29 +41,32 @@ function DocumentPane(props) {
       {compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
     </section>}
     <div className="editor-preview">
-      {mode!=='read'&&<Editor note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={onImportFiles} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{focus();onLink(target,kind,note.path);}} jump={active?jump:null} readOnly={disabled||edits.working}/>}
-      {(mode==='read'||mode==='split')&&<DiagramPreview previewRef={preview} html={html} onClick={event=>{focus();onPreviewLink(event,note.path,preview.current);}}/>}
+      {mode!=='read'&&<Editor note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
+      {(mode==='read'||mode==='split')&&<DiagramPreview previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/>}
     </div>
     {mode==='read'&&<div className="document-bottom"><button onClick={()=>{focus();props.onEdit();}}>이 문서 편집</button></div>}
   </Pane>;
 }
 
-export default function DocumentWorkspace({workspace,notes,onOpen,onAdd,onContext,...props}) {
+export default function DocumentWorkspace({workspace,resolveDocument,onOpen,onAdd,onContext,...props}) {
   const [widths,setWidths]=useState({});
   const drag=useRef(null);
-  const visible=workspace.paths.map(path=>notes.find(n=>n.path===path)).filter(Boolean);
+  const visible=workspace.paths.flatMap(key=>{
+    const doc=resolveDocument(key);
+    return doc ? [{...doc,key}] : [];
+  });
   return <div className="document-workspace">
-    {visible.map((note,index)=><Fragment key={note.path}>
+    {visible.map(({key,...doc},index)=><Fragment key={key}>
       {index>0&&<div className="document-separator" role="separator" aria-label="문서 영역 너비" aria-orientation="vertical" tabIndex={0}
-        onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const previous=e.currentTarget.previousElementSibling;drag.current={x:e.clientX,width:previous.getBoundingClientRect().width,path:visible[index-1].path};}}
-        onPointerMove={e=>{if(drag.current)setWidths(old=>({...old,[drag.current.path]:Math.max(180,Math.min(900,drag.current.width+e.clientX-drag.current.x))}));}}
+        onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const previous=e.currentTarget.previousElementSibling;drag.current={x:e.clientX,width:previous.getBoundingClientRect().width,key:visible[index-1].key};}}
+        onPointerMove={e=>{const start=drag.current;if(start)setWidths(old=>({...old,[start.key]:Math.max(180,Math.min(900,start.width+e.clientX-start.x))}));}}
         onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}
-        onKeyDown={e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const path=visible[index-1].path;setWidths(old=>({...old,[path]:Math.max(180,Math.min(900,(old[path]??300)+(e.key==='ArrowRight'?30:-30)))}));}}/>}
-      <div className="pane-slot" style={{flexBasis:widths[note.path]??0,flexGrow:widths[note.path]?0:1}}>
-        <DocumentPane {...props} note={note} notes={notes} mode={workspace.modes[note.path]??'live'} active={workspace.active===note.path} limited={visible.length>=3}
-          onFocus={()=>{if(workspace.active!==note.path)onOpen(note.path);}} onContext={onContext}
-          onClose={()=>workspace.dispatch({type:'close',path:note.path})} onDrop={(path,side)=>onAdd(path,side,note.path)}
-          onEdit={()=>workspace.setMode('live')} pending={props.edits.drafts.find(d=>d.path===note.path)}/>
+        onKeyDown={e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const key=visible[index-1].key;setWidths(old=>({...old,[key]:Math.max(180,Math.min(900,(old[key]??300)+(e.key==='ArrowRight'?30:-30)))}));}}/>}
+      <div className="pane-slot" style={{flexBasis:widths[key]??0,flexGrow:widths[key]?0:1}}>
+        <DocumentPane {...props} {...doc} docKey={key} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
+          onFocus={()=>{if(workspace.active!==key)onOpen(key);}} onContext={onContext}
+          onClose={()=>workspace.dispatch({type:'close',path:key})} onDrop={(path,side)=>onAdd(path,side,key)}
+          onEdit={()=>workspace.dispatch({type:'mode',path:key,mode:'live'})} pending={doc.edits.drafts.find(d=>d.path===doc.note.path)}/>
       </div>
     </Fragment>)}
   </div>;

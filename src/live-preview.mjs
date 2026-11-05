@@ -1,6 +1,6 @@
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 import { colorInlineParser, readColorSpan } from "../core/text-color.mjs";
-import { Facet, RangeSet, RangeValue, StateEffect, StateField } from "@codemirror/state";
+import { Facet, RangeSet, RangeValue, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import MarkdownIt from "markdown-it";
@@ -25,6 +25,7 @@ export const wikiSyntax = {
 const config = Facet.define({ combine: (values) => values[0] ?? {} });
 export const composition = StateEffect.define();
 export const refreshLivePreview = StateEffect.define();
+export const imageLayoutChanged = StateEffect.define();
 const formatting = { StrongEmphasis: "strong", Emphasis: "emphasis", Strikethrough: "strike", InlineCode: "code" };
 const literal = new Set(["FencedCode", "CodeBlock", "HTMLBlock", "HTMLTag", "Table", "LinkReference"]);
 
@@ -91,7 +92,17 @@ class ImagePreview extends WidgetType {
     image.src = this.url;
     image.alt = this.label;
     image.title = "클릭하여 이미지 Markdown 편집";
-    image.addEventListener("load", () => view.requestMeasure());
+    image.addEventListener("load", () => {
+      if (!image.isConnected) return;
+      view.requestMeasure();
+      // An image can move bullets without changing the editor's overall size.
+      if (view.hasFocus) view.dispatch({
+        effects: imageLayoutChanged.of(null),
+        // Refresh the drawn caret without interrupting an active composition.
+        selection: view.compositionStarted ? undefined : view.state.selection,
+        annotations: Transaction.addToHistory.of(false),
+      });
+    });
     image.addEventListener("mousedown", (event) => {
       event.preventDefault();
       view.dispatch({ selection: { anchor: view.posAtDOM(image) }, scrollIntoView: true });

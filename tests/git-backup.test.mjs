@@ -38,6 +38,28 @@ test("legacy minute settings migrate to a daily schedule", () => {
   assert.equal(normalized.interval, undefined);
 });
 
+test("simultaneously open vaults preserve each other's Git settings and history", async t => {
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const personal = await fixture();
+  const team = await fixture();
+  const settingsFile = path.join(personal.dir, "shared-backup.json");
+  const controllers = [personal, team].map(f => new GitController({ settingsFile, run: f.run, setTimer: () => null }));
+  t.after(async () => {
+    for (const controller of controllers) controller.close();
+    await Promise.all([personal.dir, team.dir].map(dir => rm(dir, { recursive: true, force: true })));
+  });
+  await Promise.all(controllers.map((controller, i) => controller.open({ id: `space-${i}`, root: [personal, team][i].root })));
+  await writeFile(path.join(personal.root, "Home.md"), "personal bytes");
+  await writeFile(path.join(team.root, "Home.md"), "team bytes");
+  await Promise.all(controllers.map((controller, i) => controller.connect(`space-${i}`, config)));
+  await controllers[0].disconnect("space-0");
+  const records = JSON.parse(await readFile(settingsFile, "utf8"));
+  assert.equal(records["space-0"].enabled, false);
+  assert.equal(records["space-1"].enabled, true);
+  assert.equal(personal.git(personal.bare, "show", "main:Home.md"), "personal bytes");
+  assert.equal(team.git(team.bare, "show", "main:Home.md"), "team bytes");
+});
+
 test("missing app backup configuration does not claim an existing Git remote is disconnected", async (t) => {
   const f = await fixture(); t.after(() => rm(f.dir, { recursive: true, force: true }));
   f.git(f.root, "init", "--initial-branch=main"); f.git(f.root, "remote", "add", "origin", "https://existing.example.invalid/team.git");

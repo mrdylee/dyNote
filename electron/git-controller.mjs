@@ -1,9 +1,10 @@
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { GitBackup, validateGitConfig, runGit } from "../core/git-backup.mjs";
 
 const dayKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const settingsWrites = new Map();
 
 export class GitController {
   constructor({ settingsFile, run = runGit, onStatus = () => {}, setTimer = setInterval, clearTimer = clearInterval, now = () => new Date() }) {
@@ -32,15 +33,30 @@ export class GitController {
     this.timer?.unref?.();
   }
   async persist() {
-    const temporary = `${this.settingsFile}.${randomUUID()}.tmp`;
-    await mkdir(path.dirname(this.settingsFile), { recursive: true });
-    await writeFile(temporary, JSON.stringify(this.records), { mode: 0o600 });
-    await rename(temporary, this.settingsFile);
+    const file = this.settingsFile;
+    const id = this.vault.id;
+    const record = { ...this.records[id] };
+    const previous = settingsWrites.get(file) ?? Promise.resolve();
+    const result = previous.catch(() => {}).then(async () => {
+      let records;
+      try { records = JSON.parse(await readFile(file, "utf8")); }
+      catch (error) {
+        if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+      }
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(temporary, JSON.stringify({ ...records, [id]: record }), { mode: 0o600 });
+      await rename(temporary, file);
+    });
+    settingsWrites.set(file, result);
+    try { await result; }
+    finally { if (settingsWrites.get(file) === result) settingsWrites.delete(file); }
   }
   open(vault) {
     this.close();
     return this.enqueue(async () => {
       this.vault = vault;
+      this.canonicalRoot = await realpath(vault.root);
       this.service = new GitBackup(vault.root, this.run);
       this.retryAfter = 0;
       this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
@@ -105,6 +121,8 @@ export class GitController {
     const day = dayKey(this.now());
     this.publish({ phase: "saving", message: "Git에 변경사항 저장 중…" });
     try {
+      if (await realpath(this.vault.root) !== this.canonicalRoot)
+        throw new Error("보관함 위치가 변경되었습니다. Git 설정을 다시 확인해 주세요.");
       const pending = this.current.pendingCommit;
       const result = await this.service.sync(this.current.config, {
         commit: !pending, revision: pending || undefined,

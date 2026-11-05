@@ -20,8 +20,8 @@ const save=async()=>{await page.keyboard.press(`${mod}+s`);await page.getByText(
 const open=async name=>{await page.keyboard.press(`${mod}+k`);await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill(`path:${name}`);await page.locator('.switch-results button').filter({hasText:name}).first().click();await page.getByRole('button',{name:'편집 보기',exact:true}).click();await editor().waitFor();};
 try{
  await setup();await page.getByRole('region',{name:'저널 피드'}).waitFor();
- await assert.rejects(readFile(`${vault}/${path}`));
- await page.getByRole('button',{name:'오늘 기록 시작',exact:true}).click();await editor().waitFor();
+ await assert.rejects(readFile(`${vault}/${path}`),{code:'ENOENT'});
+ await editor().waitFor();
  assert.equal(await content(),`# ${localDate()}\n\n- `);
  assert.equal(await editor().evaluate(el=>document.activeElement===el),true);
  await page.keyboard.type('Project A');await page.keyboard.press('Enter');await page.keyboard.type('Decision A');await page.keyboard.press('Tab');await page.keyboard.press('Enter');await page.keyboard.type('Action A');await page.keyboard.press('Shift+Tab');
@@ -53,6 +53,7 @@ try{
  await editor().evaluate((el,from)=>{const view=el.cmTile.root.view;view.dispatch({selection:{anchor:from,head:view.state.doc.length}});view.focus();},continued.length);
  await page.keyboard.press('Backspace');await save();assert.equal(await content(),continued);
  checks.push('Enter accepts an active journal wiki-link completion without inserting a block');
+ await page.getByRole('region',{name:'달력과 일지',exact:true}).getByTitle(path,{exact:true}).click();
  await app.evaluate(({ipcMain})=>{
   ipcMain.removeHandler('notes:copilot-status');ipcMain.handle('notes:copilot-status',()=>({ok:true,value:{authenticated:true,login:'synthetic',models:[{id:'outline-fixture',name:'outline fixture'}]}}));
   ipcMain.removeHandler('notes:copilot-send');ipcMain.handle('notes:copilot-send',(event,args)=>{globalThis.outlineRequest=args;setTimeout(()=>event.sender.send('notes:copilot-event',{type:'done',requestId:args.requestId,content:args.context.content.replace('Decision A','Confirmed decision A')}),30);return {ok:true,value:{requestId:args.requestId}};});
@@ -66,7 +67,10 @@ try{
  const confirmed=continued.replace('Decision A','Confirmed decision A');assert.equal(await readFile(`${vault}/${path}`,'utf8'),confirmed);
  checks.push('existing AI Edit receives raw parent/child Markdown and saves only after reviewed application');
  await mkdir('output/playwright',{recursive:true});await page.screenshot({path:'output/playwright/journal-outline.png'});
- await open('Journal/2020-01-01.md');assert.equal(await readFile(`${vault}/Journal/2020-01-01.md`,'utf8'),old);assert.equal(await content(),old);
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+ await page.getByRole('region',{name:'저널 피드',exact:true}).getByRole('button',{name:'2020-01-01',exact:true}).click();
+ await page.getByRole('region',{name:'문서 Journal/2020-01-01.md',exact:true}).locator('.cm-live-preview').waitFor();
+ assert.equal(await readFile(`${vault}/Journal/2020-01-01.md`,'utf8'),old);assert.equal(await content(),old);
  await page.getByRole('button',{name:'저널 블록 추가',exact:true}).click();await page.keyboard.type('New entry');await save();
  assert.equal(await readFile(`${vault}/Journal/2020-01-01.md`,'utf8'),old+'- New entry');
  checks.push('old prose journal is not converted; explicit block addition preserves its original text');

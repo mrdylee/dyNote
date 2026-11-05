@@ -13,8 +13,10 @@ const checks=[],failures=[],errors=[],observations={};let page;
 const check=async(name,run)=>{try{await run();checks.push(name);}catch(error){failures.push({name,error:error.message});}};
 try{
  page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1280,1000));
- await page.getByRole('button',{name:'이 기록 편집',exact:true}).first().click();
- const editor=page.getByRole('textbox',{name:'Markdown 편집기',exact:true});await editor.waitFor();
+ const feed=page.getByRole('region',{name:'저널 피드',exact:true});await feed.waitFor();
+ assert.equal(await feed.getByRole('button',{name:'이 기록 편집',exact:true}).count(),0,'an existing journal opens without an edit button');
+ const editor=feed.getByRole('textbox',{name:'Markdown 편집기',exact:true});await editor.waitFor();
+ assert.equal(await feed.locator('.cm-live-preview').count(),1);
  const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const put=async text=>{await editor.click();await page.keyboard.press(`${mod}+a`);await page.keyboard.insertText(text);await settle();};
  const save=async()=>{await page.keyboard.press(`${mod}+s`);await page.getByText('모든 변경사항 저장됨',{exact:true}).waitFor();return readFile(path.join(vault,journal),'utf8');};

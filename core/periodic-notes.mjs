@@ -38,6 +38,13 @@ export function renderTemplate(content, note, now = new Date()) {
       return date.format(format?.trim() || (key === 'time' ? 'HH:mm' : note.format || 'YYYY-MM-DD'));
     });
 }
+export function periodicContent(note, preferences, notes) {
+  const templatePath = preferences[note.period]?.template;
+  if (!templatePath) return `# ${note.title}\n\n${note.period === 'daily' ? '- ' : ''}`;
+  const template = notes.find(entry => entry.path === templatePath);
+  if (!template) throw new Error('템플릿을 찾을 수 없습니다. 일지 설정을 확인해 주세요.');
+  return renderTemplate(template.content, note);
+}
 export function periodicEntries(notes, period, settings = {}) {
   const format = settings.format?.trim() || formats[period];
   const folder = settings.folder?.trim() || '';

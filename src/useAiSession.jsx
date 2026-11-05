@@ -12,7 +12,9 @@ export default function useAiSession(api) {
   const [models, setModels] = useState(() => Object.fromEntries(["copilot", "codex", "claude"].map(value => [value, stored(`dynote.${value}.model`)])));
   const [efforts, setEfforts] = useState({});
   const [snapshot, setSnapshot] = useState(null);
-  const [activity, setActivityState] = useState({ chat: false, planner: false });
+  const [activeChats, setActiveChats] = useState({});
+  const [plannerActive, setPlannerActive] = useState(false);
+  const activity = { chat: Object.keys(activeChats).length > 0, planner: plannerActive };
   const current = useRef(provider), pending = useRef(new Map());
   current.current = provider;
   const label = { copilot: "Copilot", codex: "Codex", claude: "Claude" }[provider];
@@ -54,7 +56,16 @@ export default function useAiSession(api) {
     setProviderState(value);
     try { localStorage.setItem("dynote.ai.provider", value); } catch { /* Keep the choice in memory. */ }
   };
-  const setActivity = useCallback((owner, active) => setActivityState(old => old[owner] === active ? old : { ...old, [owner]: active }), []);
+  const setActivity = useCallback((owner, active, vaultId) => {
+    if (owner === "planner") { setPlannerActive(active); return; }
+    setActiveChats(old => {
+      if (!!old[vaultId] === active) return old;
+      const next = { ...old };
+      if (active) next[vaultId] = true;
+      else delete next[vaultId];
+      return next;
+    });
+  }, []);
   const connection = snapshot?.provider === provider ? snapshot.connection : disconnected;
   const selectedModel = connection.models.find(model => model.id === models[provider]);
   const reasoningEfforts = selectedModel?.reasoningEfforts ?? [];
@@ -66,7 +77,7 @@ export default function useAiSession(api) {
     setEfforts(old => ({ ...old, [effortKey]: value }));
     try { localStorage.setItem(effortKey, value); } catch { /* Keep the choice in memory. */ }
   };
-  return { provider, label, ai, model: models[provider], setModel, setProvider, refresh, activity, setActivity,
+  return { provider, label, ai, model: models[provider], setModel, setProvider, refresh, activity, activeChats, setActivity,
     reasoningEfforts, reasoningEffort, setReasoningEffort, defaultReasoningEffort: selectedModel?.defaultReasoningEffort,
     connection,
     checking: snapshot?.provider !== provider || snapshot.checking };
