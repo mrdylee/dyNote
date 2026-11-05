@@ -3,6 +3,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Transaction } from "@codemirror/state";
 import { EditorView, drawSelection, keymap } from "@codemirror/view";
 import { rewriteLinks } from "../core/links.mjs";
+import { stickyTitle } from "../core/sticky-title.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { journalOutline, startJournalBullet } from "./journal-outline.mjs";
 import { livePreview, wikiSyntax } from "./live-preview.mjs";
@@ -10,25 +11,33 @@ import "./sticky.css";
 import "./journal-outline.css";
 
 const pin = document.querySelector("#pin");
+const title = document.querySelector("header span");
 const status = document.querySelector("#status");
 const updatePin = pinned => pin.setAttribute("aria-pressed", String(pinned));
+const updateTitle = content => {
+  const text = stickyTitle(content);
+  if (title.textContent !== text) title.textContent = text;
+};
 
 document.querySelector("#close").addEventListener("click", () => window.sticky.close());
 pin.addEventListener("click", () => window.sticky.pin());
 window.sticky.onPinned(updatePin);
-window.sticky.onStatus(({ message, error }) => {
+window.sticky.onStatus(message => {
   status.textContent = message;
-  status.classList.toggle("error", error);
 });
 
 const initial = await window.sticky.state();
 document.body.dataset.color = initial.color;
 updatePin(initial.pinned === true);
-status.textContent = initial.saved ? "저장됨" : "";
+updateTitle(initial.content);
 
 const lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
 let moveVersion = 0;
-const publish = state => window.sticky.edit(state.doc.sliceString(0, state.doc.length, lineBreak), moveVersion);
+const publish = state => {
+  const content = state.doc.sliceString(0, state.doc.length, lineBreak);
+  updateTitle(content);
+  window.sticky.edit(content, moveVersion);
+};
 const view = new EditorView({
   parent: document.querySelector("#memo"),
   doc: initial.content || "- ",
