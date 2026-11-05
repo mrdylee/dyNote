@@ -38,6 +38,21 @@ function insert(view,from,text){
   annotations:[Transaction.userEvent.of('input.journal'),isolateHistory.of('full')]});
  return true;
 }
+export function startJournalBullet(view) {
+ const {state,composing}=view;
+ const {doc,selection}=state;
+ const {head,empty}=selection.main;
+ if(state.readOnly||composing||selection.ranges.length!==1||!empty||head<metadataEnd(doc))return false;
+ let node=syntaxTree(state).resolveInner(head,-1);
+ while(node.parent&&node.parent.name!=='Document')node=node.parent;
+ const line=doc.lineAt(head);
+ const hasText=Boolean(line.text.trim());
+ if(node.name!=='Paragraph'&&(node.name!=='Document'||hasText))return false;
+ // An empty list item needs a blank line after prose to avoid a setext heading.
+ if(hasText)return insert(view,head,'\n\n- ');
+ const followsText=line.number>1&&doc.line(line.number-1).text.trim();
+ return insert(view,head,followsText?'\n- ':'- ');
+}
 export function journalEnter(view){
  const current=block(view);if(!current)return false;
  const {node,line,pos,first}=current,children=node.getChild('BulletList')??node.getChild('OrderedList');

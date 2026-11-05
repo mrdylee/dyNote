@@ -14,7 +14,7 @@ import {
 import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Vault, validFilePath } from "../core/vault.mjs";
+import { Vault, validFilePath, validNotePath } from "../core/vault.mjs";
 import { canTrashFolder } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
@@ -54,6 +54,7 @@ if (process.env.OPEN_NOTES_DATA)
 let window;
 let vault;
 let closePending;
+let closeRequestId = 0;
 let quitRequested = false;
 let quitReady = false;
 let stickyNotes;
@@ -629,7 +630,9 @@ app
       },
       "move-file": (args, vault) => {
         checkVault(args, vault);
-        return vault.moveFile(args.from, args.to, args.revision);
+        return stickyNotes && validNotePath(args.from)
+          ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
+          : vault.moveFile(args.from, args.to, args.revision);
       },
       "trash-file": (args, vault) => {
         checkVault(args, vault);
@@ -708,18 +711,21 @@ app
           }
         }
       });
-    ipcMain.on("notes:close-ready", (event, ready) => {
+    ipcMain.on("notes:close-ready", (event, id, ready) => {
       try { validateSender(event); } catch { return; }
-      if (!closePending) return;
-      clearTimeout(closePending);
+      if (!closePending || closePending.id !== id) return;
+      const { mode, timer } = closePending;
+      clearTimeout(timer);
       closePending = null;
       if (ready === false || restoring) {
         const showMain = quitRequested;
         quitRequested = false;
         if (showMain) showMainWindow();
-      } else if (quitRequested || !stickyNotes) {
+      } else if (mode === "quit") {
         quitRequested = true;
         void finishQuit();
+      } else if (quitRequested) {
+        window.close();
       } else {
         window.hide();
       }
@@ -734,11 +740,14 @@ app
         return;
       }
       if (closePending) return;
-      closePending = setTimeout(() => {
+      const id = ++closeRequestId;
+      const mode = quitRequested || !stickyNotes ? "quit" : "hide";
+      const timer = setTimeout(() => {
         closePending = null;
         quitRequested = false;
       }, 15000).unref();
-      window.webContents.send("notes:before-close");
+      closePending = { id, mode, timer };
+      window.webContents.send("notes:before-close", { id, mode });
     });
     await window.loadURL("notes://app/index.html");
     await plugins.activate(vault);

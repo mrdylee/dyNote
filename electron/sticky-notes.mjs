@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { rewriteLinks } from "../core/links.mjs";
+import { validNotePath } from "../core/vault.mjs";
 import { fitStickyBounds, nextStickyPlacement, STICKY_COLORS, STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 
 const url = "notes://app/sticky.html";
@@ -23,7 +25,7 @@ function notePath(id, title) {
 export class StickyNotes {
   #records = new Map();
   #windows = new Map();
-  #opening = Promise.resolve();
+  #operations = Promise.resolve();
   #lastPlacement;
   #tray;
 
@@ -41,7 +43,7 @@ export class StickyNotes {
         const record = JSON.parse(await readFile(path.join(this.directory, file), "utf8"));
         const { bounds } = record;
         if (file !== `${record.id}.json` || !STICKY_COLORS.includes(record.color)
-          || typeof record.root !== "string" || typeof record.path !== "string" || !record.path.startsWith("포스트잇/")
+          || typeof record.root !== "string" || !validNotePath(record.path)
           || typeof record.title !== "string" || !bounds
           || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isInteger)
           || bounds.width < 1 || bounds.height < 1) continue;
@@ -58,9 +60,14 @@ export class StickyNotes {
       const { color, pinned } = state.record;
       return { color, pinned, content: state.content, saved: Boolean(state.revision) };
     });
-    ipcMain.on("sticky:edit", (event, content) => {
+    ipcMain.on("sticky:edit", (event, content, moveVersion) => {
       const state = this.#sender(event);
-      if (!state || typeof content !== "string" || content === state.content) return;
+      if (!state || typeof content !== "string" || !Number.isInteger(moveVersion)
+        || moveVersion < 0 || moveVersion > state.moveVersion) return;
+      // Edits sent before the renderer receives a move still use its old links.
+      state.pendingMoves = state.pendingMoves.filter(move => move.version > moveVersion);
+      for (const { from, to, files } of state.pendingMoves) content = rewriteLinks(content, from, from, to, files);
+      if (content === state.content) return;
       state.content = content;
       this.#status(state, "저장 중…");
       this.#schedule(state);
@@ -84,10 +91,52 @@ export class StickyNotes {
     this.#refreshMenu();
   }
 
-  open(record) {
-    this.#opening = this.#opening.then(() => {
-      if (this.canOpen()) return this.#open(record);
+  #enqueue(operation) {
+    const result = this.#operations.then(operation);
+    this.#operations = result.catch(() => {});
+    return result;
+  }
+
+  open(id) {
+    void this.#enqueue(() => {
+      const record = this.#records.get(id);
+      if (this.canOpen() && (!id || record)) return this.#open(record);
     }).catch(error => dialog.showErrorBox("Dynote 포스트잇", error.message));
+  }
+
+  moveFile(vault, from, to, revision) {
+    const matches = record => record.root === vault.root && record.path === from;
+    const openSource = () => [...this.#windows.values()].find(state => matches(state.record));
+    const requested = openSource();
+    const followsOwnSave = requested && requested.revision === revision;
+    return this.#enqueue(async () => {
+      const state = openSource();
+      const record = state?.record ?? [...this.#records.values()].find(matches);
+      const expected = followsOwnSave && state === requested ? state.revision : revision;
+      const move = () => vault.moveFile(from, to, expected);
+      if (!record) return move();
+
+      const next = { ...record, path: to };
+      const snapshot = await this.#remember(next, move);
+      this.#records.set(record.id, next);
+      if (state) {
+        state.record = state.record === record ? next : { ...state.record, path: to };
+        const file = snapshot.notes.find(note => note.path === to);
+        if (file && state.revision === expected) {
+          const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.attachments]
+            .map(file => ({ path: file.path === to ? from : file.path }));
+          const change = { from, to, files, version: ++state.moveVersion };
+          state.pendingMoves.push(change);
+          state.content = rewriteLinks(state.content, from, from, to, files);
+          state.saved = file.content;
+          state.revision = file.revision;
+          state.window.webContents.send("sticky:moved", change);
+        }
+        if (state.content !== state.saved || state.record !== next) this.#schedule(state);
+      }
+      this.#refreshMenu();
+      return snapshot;
+    });
   }
 
   async #open(record) {
@@ -120,7 +169,10 @@ export class StickyNotes {
       alwaysOnTop: record.pinned === true,
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
-    const state = { window, record, content: file?.content ?? "", saved: file?.content ?? "", revision: file?.revision };
+    const state = {
+      window, record, content: file?.content ?? "", saved: file?.content ?? "", revision: file?.revision,
+      moveVersion: 0, pendingMoves: [],
+    };
     this.#windows.set(record.id, state);
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", event => event.preventDefault());
@@ -184,7 +236,7 @@ export class StickyNotes {
 
   #flush(state) {
     clearTimeout(state.timer);
-    state.flushing ??= this.#persist(state).finally(() => { state.flushing = null; });
+    state.flushing ??= this.#enqueue(() => this.#persist(state)).finally(() => { state.flushing = null; });
     return state.flushing;
   }
 
@@ -214,25 +266,27 @@ export class StickyNotes {
     }
   }
 
-  async #remember(record) {
+  async #remember(record, operation) {
     const target = path.join(this.directory, `${record.id}.json`);
     const temporary = `${target}.${randomUUID()}.tmp`;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     try {
       await writeFile(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+      const result = await operation?.();
       await rename(temporary, target);
+      return result;
     } finally {
       await unlink(temporary).catch(() => {});
     }
   }
 
   #refreshMenu() {
-    const recent = [...this.#records.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+    const cards = [...this.#records.values()].sort((a, b) => b.updatedAt - a.updatedAt);
     const menu = Menu.buildFromTemplate([
       { id: "sticky-new", label: "새 포스트잇", click: () => this.open() },
       ...(!this.shortcutRegistered ? [{ label: `${STICKY_SHORTCUT} 등록 불가`, enabled: false }] : []),
-      { id: "sticky-recent", label: "최근 포스트잇", enabled: recent.length > 0, submenu: recent.map(record => ({
-        id: `sticky-recent-${record.id}`, label: record.title, click: () => this.open(record),
+      { id: "sticky-recent", label: "포스트잇 열기", enabled: cards.length > 0, submenu: cards.map(record => ({
+        id: `sticky-recent-${record.id}`, label: record.title, click: () => this.open(record.id),
       })) },
       { type: "separator" },
       { id: "sticky-show-main", label: "Dynote 열기", click: this.showMain },
@@ -242,7 +296,7 @@ export class StickyNotes {
   }
 
   async flushForQuit() {
-    await this.#opening;
+    await this.#operations;
     const windows = [...this.#windows.values()];
     const saved = await Promise.all(windows.map(state => this.#flush(state)));
     const failed = windows.find((_, index) => !saved[index]);

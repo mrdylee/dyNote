@@ -552,18 +552,18 @@ export default function App() {
     invoke(api.snapshot())
       .then(snapshot => install(snapshot, true))
       .catch((err) => setError(err.message));
-    return api.onBeforeClose(async () => {
+    return api.onBeforeClose(async ({ id, mode }) => {
       try {
         if (audioActive.current) {
           setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요.");
-          api.confirmClose(false);
+          api.confirmClose(id, false);
           return;
         }
-        await editsRef.current.close();
+        if (mode === "quit") await editsRef.current.close();
         await flush(true);
-        api.confirmClose(true);
+        api.confirmClose(id, true);
       } catch {
-        api.confirmClose(false);
+        api.confirmClose(id, false);
       }
     });
   }, [install, flush]);

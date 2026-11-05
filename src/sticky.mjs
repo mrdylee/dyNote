@@ -1,7 +1,10 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { Transaction } from "@codemirror/state";
 import { EditorView, drawSelection, keymap } from "@codemirror/view";
-import { journalOutline } from "./journal-outline.mjs";
+import { rewriteLinks } from "../core/links.mjs";
+import { changedRange } from "./copilotEdits.mjs";
+import { journalOutline, startJournalBullet } from "./journal-outline.mjs";
 import { livePreview, wikiSyntax } from "./live-preview.mjs";
 import "./sticky.css";
 import "./journal-outline.css";
@@ -24,6 +27,8 @@ updatePin(initial.pinned === true);
 status.textContent = initial.saved ? "저장됨" : "";
 
 const lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
+let moveVersion = 0;
+const publish = state => window.sticky.edit(state.doc.sliceString(0, state.doc.length, lineBreak), moveVersion);
 const view = new EditorView({
   parent: document.querySelector("#memo"),
   doc: initial.content || "- ",
@@ -34,12 +39,25 @@ const view = new EditorView({
     livePreview(),
     journalOutline({ live: true }),
     EditorView.lineWrapping,
-    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+    keymap.of([{ key: "Enter", run: startJournalBullet }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
     EditorView.contentAttributes.of({ "aria-label": "포스트잇 메모", spellcheck: "false" }),
     EditorView.updateListener.of(({ docChanged, state }) => {
-      if (docChanged) window.sticky.edit(state.doc.sliceString(0, state.doc.length, lineBreak));
+      if (docChanged) publish(state);
     }),
   ],
+});
+window.sticky.onMoved(({ from, to, files, version }) => {
+  moveVersion = version;
+  const before = view.state.doc.toString();
+  const after = rewriteLinks(before, from, from, to, files);
+  const change = changedRange(before, after);
+  if (change) {
+    const tail = after.length - change.to;
+    view.dispatch({
+      changes: { from: change.from, to: before.length - tail, insert: after.slice(change.from, change.to) },
+      annotations: Transaction.addToHistory.of(false),
+    });
+  } else publish(view.state);
 });
 view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
 view.focus();

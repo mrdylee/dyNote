@@ -125,9 +125,9 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:sticky-saved", listener);
       return () => ipcRenderer.removeListener("notes:sticky-saved", listener);
     },
-    confirmClose: (ready) => ipcRenderer.send("notes:close-ready", ready),
+    confirmClose: (id, ready) => ipcRenderer.send("notes:close-ready", id, ready),
     onBeforeClose: (callback) => {
-      const listener = () => callback();
+      const listener = (_event, request) => callback(request);
       ipcRenderer.on("notes:before-close", listener);
       return () => ipcRenderer.removeListener("notes:before-close", listener);
     },
