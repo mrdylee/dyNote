@@ -26,7 +26,11 @@ const select = async (from,to) => page.locator(".cm-content").evaluate((el,[anch
 const openMenu = async () => {
   const point=await page.locator(".cm-content").evaluate(el=>{const v=el.cmTile.root.view,r=v.coordsAtPos(v.state.selection.main.empty?v.state.selection.main.head:v.state.selection.main.from+1);return {x:r.left+1,y:r.top+3};});
   await page.mouse.click(point.x,point.y,{button:"right"});
-  await app.evaluate(() => { if(!globalThis.__editorMenu)throw new Error("No context menu after actual right click"); });
+  await app.evaluate(async () => {
+    const deadline = Date.now() + 3000;
+    while (!globalThis.__editorMenu && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    if (!globalThis.__editorMenu) throw new Error("No context menu after actual right click");
+  });
 };
 const menuClick = async id => app.evaluate((_,id)=>{const menu=globalThis.__editorMenu,item=menu.getMenuItemById(id);if(!item)throw new Error(`Missing menu ${id}`);menu.closePopup();item.click();globalThis.__editorMenu=null;},id);
 try {
@@ -99,4 +103,8 @@ try {
   report.checks.push("panel widths persist across real app restart; double-click resets both boundaries");
   assert.deepEqual(report.errors,[]);
   await writeFile("output/playwright/editor-usability.json",JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-} finally {await app.close();await rm(fixture,{recursive:true,force:true});}
+} finally {
+  await app.evaluate(() => globalThis.__editorMenu?.closePopup()).catch(() => {});
+  await app.close();
+  await rm(fixture,{recursive:true,force:true});
+}

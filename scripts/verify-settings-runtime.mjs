@@ -34,7 +34,7 @@ const setup = async () => {
   await page.getByRole("button", { name: "읽기 보기", exact: true }).click();
 };
 const picker = label => page.getByLabel(new RegExp(`^${label} 글꼴 · `));
-const choices = label => page.getByRole("listbox", { name: `${label} 글꼴 선택`, exact: true });
+const choices = label => page.locator(".font-picker[open] select").and(page.getByLabel(`${label} 글꼴 선택`, { exact: true }));
 const fontSearch = label => page.getByRole("searchbox", { name: `${label} 글꼴 검색`, exact: true });
 const selectFont = async (label, family) => {
   await picker(label).click();
@@ -79,14 +79,16 @@ try {
   await fontList.hover();
   await page.mouse.wheel(0, 10000);
   await page.waitForFunction(() => { const list = document.querySelector('[aria-label="본문 글꼴 선택"]'); return list.scrollTop + list.clientHeight >= list.scrollHeight - 2; });
-  const lastOption = fontList.getByRole("option", { name: names.at(-1), exact: true });
+  const lastOption = fontList.locator("option").last();
+  assert.equal(await lastOption.getAttribute("value"), names.at(-1));
   const listBox = await fontList.boundingBox(), optionBox = await lastOption.boundingBox();
   assert.ok(optionBox.y >= listBox.y && optionBox.y + optionBox.height <= listBox.y + listBox.height, "wheel exposes the last font inside the list");
   await lastOption.click();
   assert.equal(await picker("본문").innerText(), names.at(-1));
   const search = fontSearch("본문");
   await search.fill(names.at(-1).toLocaleLowerCase());
-  assert.ok(await fontList.getByRole("option", { name: names.at(-1), exact: true }).isVisible());
+  const matches = await fontList.evaluate(list => Array.from(list.options, option => option.value).filter(Boolean));
+  assert.ok(matches.includes(names.at(-1)) && matches.length < names.length);
   await search.fill("no-such-font-123456");
   assert.equal(await fontList.locator("option").count(), 2, "a search with no matches still exposes the default and current choice");
   await fontList.selectOption("");
@@ -214,7 +216,9 @@ try {
 } catch (error) {
   const fontPicker = await page?.evaluate(() => {
     const list = document.querySelector('[aria-label="본문 글꼴 선택"]');
-    return list && { open: list.closest("details").open, optionCount: list.options.length, focused: document.hasFocus(), active: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName };
+    if (!list) return null;
+    const { width, height } = list.getBoundingClientRect();
+    return { open: list.closest("details").open, optionCount: list.options.length, size: list.size, width, height, focused: document.hasFocus() };
   }).catch(() => null);
   if (fontPicker) console.error("Body font picker:", fontPicker);
   await page?.screenshot({ path: "output/playwright/settings-failure.png" }).catch(() => {});
