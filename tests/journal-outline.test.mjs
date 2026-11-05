@@ -82,3 +82,36 @@ test('AI context and edit application retain raw parent/child Markdown and CRLF'
  const replacement=content.replace('Pending task','Confirmed task').replace(/\r\n/g,'\n');
  assert.equal(applyProposal(captured.target,{vaultId:'test',...note},replacement),content.replace('Pending task','Confirmed task'));
 });
+
+test('journal Backspace protects the first bullet and merges sibling text without removing the remaining bullet',()=>{
+ for(const [before,anchor,after]of [['- ',2,'- '],['- First',2,'- First'],['- First\n- ',10,'- First'],['- First\n- Second',10,'- FirstSecond']]){
+  const view=editor(before,anchor);assert.equal(run('journalBackspace',view),true);assert.equal(view.state.doc.toString(),after);
+  if(before!==after){assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);}
+ }
+});
+test('journal Backspace merges the first child into its parent while keeping descendants and peers',()=>{
+ const before='- Parent\n  - Child\n    - Grandchild\n  - Peer',view=editor(before,before.indexOf('Child'));
+ assert.equal(run('journalBackspace',view),true);assert.equal(view.state.doc.toString(),'- ParentChild\n  - Grandchild\n  - Peer');
+ assert.equal(view.state.selection.main.head,'- Parent'.length);assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);
+});
+test('journal Backspace leaves ordinary character deletion and non-list contexts to the editor',()=>{
+ for(const [before,anchor]of [['- Text',6],['plain',5],['```\n- Code\n```',6]]){const view=editor(before,anchor);assert.equal(run('journalBackspace',view),false);assert.equal(view.state.doc.toString(),before);}
+});
+test('journal Enter keeps empty roots and avoids loose-list double spacing after images',()=>{
+ for(const [before,after]of [['- ','- \n- '],['- Before\n\n- ![[image.png]]\n\n- After','- Before\n\n- ![[image.png]]\n\n- After\n- ']]){
+  const view=editor(before);assert.equal(run('journalEnter',view),true);assert.equal(view.state.doc.toString(),after);assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);
+ }
+});
+test('journal attachment insertion creates image blocks and places the cursor on exactly one next bullet',()=>{
+ for(const [before,after]of [['- ','- ![[a.png]]\n- ![[b.png]]\n- '],['- Parent\n  - Child','- Parent\n  - Child![[a.png]]\n  - ![[b.png]]\n  - ']]){
+  const view=editor(before);assert.equal(run('journalInsertAttachments',view,'![[a.png]]\n![[b.png]]'),true);assert.equal(view.state.doc.toString(),after);assert.equal(view.state.selection.main.head,after.length);assert.equal(undo(view),true);assert.equal(view.state.doc.toString(),before);
+ }
+});
+
+test('quoted lists retain Markdown editing rather than journal block commands',()=>{
+ const before='> - Quoted',anchor=before.indexOf('Quoted');
+ for(const name of ['journalEnter','journalBackspace','journalInsertAttachments']){
+  const view=editor(before,name==='journalBackspace'?anchor:before.length);
+  assert.equal(run(name,view,'![[a.png]]'),false,name);assert.equal(view.state.doc.toString(),before);
+ }
+});

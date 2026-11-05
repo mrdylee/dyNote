@@ -30,7 +30,7 @@ import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor } from "./editorCommands.mjs";
-import { journalOutline, addJournalBlock } from "./journal-outline.mjs";
+import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
 
 export default function Editor({
@@ -203,12 +203,9 @@ export default function Editor({
               `${/\.pdf$/i.test(asset.path) ? "" : "!"}[[${asset.path}]]`,
           )
           .join("\n");
-        target.dispatch({
-          changes: {
-            from: target.state.selection.main.head,
-            insert: "\n" + text + "\n",
-          },
-        });
+        if (journalInsertAttachments(target, text)) return;
+        const from = target.state.selection.main.head, inserted = "\n" + text + "\n";
+        target.dispatch({ changes: { from, insert: inserted }, selection: { anchor: from + inserted.length } });
       } catch {
         /* The parent reports import errors. */
       }
