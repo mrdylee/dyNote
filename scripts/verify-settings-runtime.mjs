@@ -24,7 +24,11 @@ const setup = async () => {
   page.on("pageerror", (e) => report.errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") report.errors.push(m.text()); });
   page.on("request", (r) => { if (/^https?:/.test(r.url())) report.remoteRequests.push(r.url()); });
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1280, 940); w.setIgnoreMouseEvents(true); });
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(1280, 940);
+    if (process.platform === "darwin") window.setIgnoreMouseEvents(true);
+  });
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   await page.locator('.file-row[title="Home.md"]').click();
   await page.getByRole("button", { name: "읽기 보기", exact: true }).click();
@@ -56,8 +60,12 @@ try {
   for (const label of ["화면", "본문", "코드"]) assert.equal(await picker(label).innerText(), "시스템 기본");
   await picker("본문").click();
   const fontList = choices("본문");
-  await page.waitForFunction(() => document.querySelector('[aria-label="본문 글꼴 선택"]')?.options.length > 10);
-  const names = await fontList.locator("option").evaluateAll((els) => els.map((el) => el.value).filter(Boolean));
+  await fontList.waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const list = document.querySelector('[aria-label="본문 글꼴 선택"]');
+    return list?.closest("details").open && Array.from(list.options).filter(option => option.value).length > 10;
+  });
+  const names = await fontList.evaluate(list => Array.from(list.options, option => option.value).filter(Boolean));
   report.installedFontFamilies = names.length;
   assert.ok(names.length > 10);
   await fontList.focus();
@@ -204,6 +212,11 @@ try {
   await writeFile("output/playwright/settings-runtime.json", JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {
+  const fontPicker = await page?.evaluate(() => {
+    const list = document.querySelector('[aria-label="본문 글꼴 선택"]');
+    return list && { open: list.closest("details").open, optionCount: list.options.length, focused: document.hasFocus(), active: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName };
+  }).catch(() => null);
+  if (fontPicker) console.error("Body font picker:", fontPicker);
   await page?.screenshot({ path: "output/playwright/settings-failure.png" }).catch(() => {});
   console.error(await page?.locator("body").innerText().catch(() => "unavailable"));
   throw error;
