@@ -17,7 +17,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run package:win
       - shell: pwsh
         run: |
           npm install --prefix "$env:RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1

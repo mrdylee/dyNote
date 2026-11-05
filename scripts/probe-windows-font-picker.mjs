@@ -10,8 +10,8 @@ await mkdir(vault);
 await writeFile(path.join(vault,"Home.md"),"# 글꼴 확인\n");
 await writeFile(path.join(profile,"settings.json"),JSON.stringify({vaultRoot:vault}));
 const app = await electron.launch({
-  executablePath:path.resolve("node_modules/electron/dist/electron.exe"),
-  args:["."],
+  executablePath:path.resolve("release/v0.17.0/Dynote-win32-x64/Dynote.exe"),
+  args:[],
   env:{...process.env,OPEN_NOTES_DATA:profile},
 });
 try {
