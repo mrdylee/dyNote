@@ -55,7 +55,7 @@ try {
   await internal.dispose();
   for(const name of ['A','B','C']){
     const editor=page.getByRole('region',{name:`문서 ${name}.md`,exact:true}).getByRole('textbox',{name:'Markdown 편집기'});
-    await editor.click();await page.keyboard.press('Meta+End');await page.keyboard.type(`\nsaved ${name}`);
+    await editor.click();await page.keyboard.press('Meta+End');await page.keyboard.insertText(`\nsaved ${name}`);
     assert.equal(await page.locator('.copilot-context-label').getAttribute('title'),`${name}.md`);
   }
   await page.keyboard.press('Meta+s');
@@ -75,9 +75,14 @@ try {
   await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
   await page.getByRole('region',{name:'달력과 일지',exact:true}).getByTitle(dailyPath,{exact:true}).click();
   const journalEditor=page.getByRole('region',{name:`문서 Journal/${localDate()}.md`,exact:true}).getByRole('textbox',{name:'Markdown 편집기'});
-  await journalEditor.click();await page.keyboard.press('Meta+a');await page.keyboard.type('# Today\n\n## Projects\nShip safely\n\n## Private\nKeep here\n');
-  await page.keyboard.press('Meta+s');await page.waitForFunction(()=>document.querySelector('.save-status')?.classList.contains('saved'));
-  const original=await readFile(`${vault}/Journal/${localDate()}.md`,'utf8');
+  const original='# Today\n\n## Projects\nShip safely\n\n## Private\nKeep here\n';
+  await journalEditor.click();
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.insertText(original);
+  assert.equal(await journalEditor.evaluate(el=>el.cmTile.root.view.state.doc.toString()),original);
+  await page.keyboard.press('Meta+s');
+  await page.locator('.save-status.saved').waitFor();
+  assert.equal(await readFile(`${vault}/${dailyPath}`,'utf8'),original);
   await page.getByRole('button',{name:/분류 제안 검토/}).click();
   await page.getByRole('checkbox',{name:'Private 분류'}).uncheck();
   await page.getByRole('button',{name:'분류 미리보기',exact:true}).click();
@@ -118,6 +123,6 @@ try {
   await writeFile('output/playwright/journal-workspace.json',JSON.stringify(report,null,2));console.log(report);
 } catch(error) {
   const page=app.windows()[0];
-  if(page)console.error('Diagnostic state',await page.evaluate(async()=>({updates:await window.notes.updateState?.(),alerts:[...document.querySelectorAll('[role=alert]')].map(n=>n.textContent),panes:[...document.querySelectorAll('.document-pane')].map(n=>n.textContent.slice(0,120))})));
+  if(page)console.error('Diagnostic state',await page.evaluate(async()=>({updates:await window.notes.updateState?.(),saveStatus:document.querySelector('.save-status')?.textContent,alerts:[...document.querySelectorAll('[role=alert]')].map(n=>n.textContent),panes:[...document.querySelectorAll('.document-pane')].map(n=>n.textContent.slice(0,120))})));
   throw error;
 } finally {await app.close();await rm(root,{recursive:true,force:true});}
