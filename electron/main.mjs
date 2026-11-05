@@ -798,5 +798,6 @@ app.once("will-quit", async event => {
   stickyNotes?.dispose();
   for (const entry of openedVaults.values()) entry.git.close();
   await Promise.race([Promise.allSettled([copilot?.close(), codex?.close(), claude?.close()]), new Promise(resolve => setTimeout(resolve, 3000))]);
-  app.quit();
+  // Finish the canceled will-quit event before requesting another native quit.
+  setImmediate(() => app.quit());
 });
