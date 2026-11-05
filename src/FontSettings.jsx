@@ -19,6 +19,7 @@ function FontSize({ label, value, min, max, onChange }) {
 
 function FontFamily({ label, value, families, message, onChange }) {
   const picker = useRef(null);
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const name = query.trim(), key = name.toLocaleLowerCase();
   const matches = families.filter(family => family.toLocaleLowerCase().includes(key));
@@ -32,7 +33,9 @@ function FontFamily({ label, value, families, message, onChange }) {
   const applyName = () => { onChange(exact ?? name); close(); };
   return <details ref={picker} className="font-picker" name="font-family"
     onToggle={event => {
-      if (event.currentTarget.open) event.currentTarget.querySelector("input").focus();
+      const expanded = event.currentTarget.open;
+      setOpen(expanded);
+      if (expanded) event.currentTarget.querySelector("input").focus();
       else setQuery("");
     }}
     onBlur={event => {
@@ -52,13 +55,13 @@ function FontFamily({ label, value, families, message, onChange }) {
         event.preventDefault();
         applyName();
       }} />
-    <select size={Math.max(2, Math.min(6, options.length + 1))} aria-label={`${label} 글꼴 선택`} value={value}
+    {open && <select size={Math.max(2, Math.min(6, options.length + 1))} aria-label={`${label} 글꼴 선택`} value={value}
       onChange={event => onChange(event.target.value)} onKeyDown={event => {
         if (event.key === "Enter") { event.preventDefault(); close(); }
       }}>
       <option value="">시스템 기본</option>
       {options.map(family => <option key={family} value={family}>{family}</option>)}
-    </select>
+    </select>}
     {name && !exact && <button type="button" className="secondary-button" onClick={applyName}>입력한 글꼴 사용</button>}
     {message && <p role="status" className="muted">{message}</p>}
   </details>;

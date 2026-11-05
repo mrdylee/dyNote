@@ -60,11 +60,11 @@ try {
   for (const label of ["화면", "본문", "코드"]) assert.equal(await picker(label).innerText(), "시스템 기본");
   await picker("본문").click();
   const fontList = choices("본문");
-  await fontList.waitFor({ state: "visible" });
   await page.waitForFunction(() => {
     const list = document.querySelector('[aria-label="본문 글꼴 선택"]');
     return list?.closest("details").open && Array.from(list.options).filter(option => option.value).length > 10;
-  });
+  }, null, { polling: 50, timeout: 30000 });
+  await fontList.waitFor({ state: "visible" });
   const names = await fontList.evaluate(list => Array.from(list.options, option => option.value).filter(Boolean));
   report.installedFontFamilies = names.length;
   assert.ok(names.length > 10);
@@ -202,7 +202,9 @@ try {
   await page.evaluate(() => { window.queryLocalFonts = window.savedQueryLocalFonts; delete window.savedQueryLocalFonts; });
   await page.waitForFunction(() => !navigator.userActivation.isActive);
   await page.locator(".settings-tabs").getByRole("button", { name: "글꼴", exact: true }).evaluate((button) => button.click());
-  await page.waitForFunction(() => document.querySelector('[aria-label="본문 글꼴 선택"]')?.options.length > 10);
+  await picker("본문").evaluate(summary => summary.click());
+  await page.waitForFunction(() => document.querySelector('[aria-label="본문 글꼴 선택"]')?.options.length > 10,
+    null, { polling: 50, timeout: 30000 });
   assert.equal(await picker("본문").innerText(), bodyFont);
   report.checks.push("font access failure keeps manual input; re-entering settings enumerates fonts automatically without transient user activation");
   await page.getByRole("button", { name: "백업·복원", exact: true }).click();
