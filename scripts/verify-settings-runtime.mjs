@@ -202,6 +202,7 @@ try {
   await page.evaluate(() => { window.queryLocalFonts = window.savedQueryLocalFonts; delete window.savedQueryLocalFonts; });
   await page.waitForFunction(() => !navigator.userActivation.isActive);
   await page.locator(".settings-tabs").getByRole("button", { name: "글꼴", exact: true }).evaluate((button) => button.click());
+  await picker("본문").evaluate(summary => summary.click());
   await page.waitForFunction(() => document.querySelector('[aria-label="본문 글꼴 선택"]')?.options.length > 10);
   assert.equal(await picker("본문").innerText(), bodyFont);
   report.checks.push("font access failure keeps manual input; re-entering settings enumerates fonts automatically without transient user activation");

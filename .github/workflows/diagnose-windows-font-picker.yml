@@ -1,4 +1,4 @@
-name: Diagnose Windows font picker v0.17.0
+name: Verify Windows font picker v0.17.0
 on:
   push:
     branches: [release/verify-windows-font-v0.17.0]
@@ -22,4 +22,6 @@ jobs:
         run: |
           npm install --prefix "$env:RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node scripts/probe-windows-font-picker.mjs
+          $env:DYNOTE_EXECUTABLE = Join-Path $PWD 'release/v0.17.0/Dynote-win32-x64/Dynote.exe'
+          $env:DYNOTE_PLAYWRIGHT_MODULE = node -p "require('node:url').pathToFileURL(require('node:path').join(process.env.RUNNER_TEMP,'dynote-ui-tools/node_modules/playwright/index.mjs')).href"
+          node scripts/verify-settings-runtime.mjs
