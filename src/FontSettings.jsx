@@ -1,5 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { defaultFonts, fontVariables } from "../core/font-preferences.mjs";
+
+const fontFields = [
+  ["ui", "화면", 11, 20, "메뉴 · 검색 · 설정"],
+  ["body", "본문", 12, 32, "한글과 English를 함께 씁니다.\n줄 간격은 이렇게 보입니다."],
+  ["code", "코드", 10, 24, "const message = '한글 코드 123';"],
+];
 
 function FontSize({ label, value, min, max, onChange }) {
   const [draft, setDraft] = useState(String(value));
@@ -11,21 +17,51 @@ function FontSize({ label, value, min, max, onChange }) {
     }} onBlur={() => setDraft(String(value))} />;
 }
 
-function FontFamily({ label, value, families, onChange }) {
+function FontFamily({ label, value, families, message, onChange }) {
+  const picker = useRef(null);
   const [query, setQuery] = useState("");
-  const matches = families.filter((family) => family.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  return <div className="font-family-picker">
-    <label>{label} 글꼴<input aria-label={`${label} 글꼴`} placeholder="시스템 기본 글꼴" value={value} onChange={(e) => onChange(e.target.value)} /></label>
-    {families.length > 0 && <details className="font-picker">
-      <summary aria-label={`${label} 글꼴 목록`}>설치 글꼴 목록</summary>
-      <input type="search" aria-label={`${label} 글꼴 검색`} placeholder="글꼴 이름 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
-      <select size={6} aria-label={`${label} 설치 글꼴`} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">시스템 기본 글꼴</option>
-        {matches.map((family) => <option key={family} value={family}>{family}</option>)}
-      </select>
-      <p className="muted">{matches.length}개 글꼴 · 휠 또는 ↑↓ / Page Up·Down / Home·End로 이동</p>
-    </details>}
-  </div>;
+  const name = query.trim(), key = name.toLocaleLowerCase();
+  const matches = families.filter(family => family.toLocaleLowerCase().includes(key));
+  const exact = matches.find(family => family.toLocaleLowerCase() === key);
+  const options = value && !matches.includes(value) ? [value, ...matches] : matches;
+  const current = value || "시스템 기본";
+  const close = () => {
+    picker.current.open = false;
+    picker.current.querySelector("summary").focus();
+  };
+  const applyName = () => { onChange(exact ?? name); close(); };
+  return <details ref={picker} className="font-picker" name="font-family"
+    onToggle={event => {
+      if (event.currentTarget.open) event.currentTarget.querySelector("input").focus();
+      else setQuery("");
+    }}
+    onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+    }}
+    onKeyDown={event => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.stopPropagation();
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      close();
+    }}>
+    <summary aria-label={`${label} 글꼴 · ${current}`}><span>{current}</span></summary>
+    <input type="search" aria-label={`${label} 글꼴 검색`} placeholder="글꼴 검색 또는 이름 입력" value={query} maxLength={200}
+      onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+        if (event.key !== "Enter" || !name || event.nativeEvent.isComposing || event.keyCode === 229) return;
+        event.preventDefault();
+        applyName();
+      }} />
+    <select size={Math.max(2, Math.min(6, options.length + 1))} aria-label={`${label} 글꼴 선택`} value={value}
+      onChange={event => onChange(event.target.value)} onKeyDown={event => {
+        if (event.key === "Enter") { event.preventDefault(); close(); }
+      }}>
+      <option value="">시스템 기본</option>
+      {options.map(family => <option key={family} value={family}>{family}</option>)}
+    </select>
+    {name && !exact && <button type="button" className="secondary-button" onClick={applyName}>입력한 글꼴 사용</button>}
+    {message && <p role="status" className="muted">{message}</p>}
+  </details>;
 }
 
 export default function FontSettings({ value, onChange }) {
@@ -38,23 +74,28 @@ export default function FontSettings({ value, onChange }) {
         if (!window.queryLocalFonts) throw new Error("unavailable");
         const fonts = await window.queryLocalFonts();
         const names = [...new Set(fonts.map((font) => font.family))].sort((a, b) => a.localeCompare(b, "ko"));
-        if (mounted) { setFamilies(names); setMessage(`${names.length}개 설치 글꼴을 불러왔습니다.`); }
-      } catch { if (mounted) setMessage("설치 글꼴 목록을 불러오지 못했습니다. 글꼴 이름을 직접 입력할 수 있습니다."); }
+        if (mounted) { setFamilies(names); setMessage(""); }
+      } catch { if (mounted) setMessage("설치 글꼴을 불러오지 못했습니다. 글꼴 이름을 직접 입력할 수 있습니다."); }
     };
     load();
     return () => { mounted = false; };
   }, []);
   const styles = fontVariables(value);
   return <div className="font-settings">
-    <p>이 기기에 설치된 글꼴을 사용합니다. 다른 기기에 없는 글꼴은 기본 글꼴로 표시됩니다.</p>
-    <p role="status" className="muted">{message}</p>
-    {[["ui", "화면", 11, 20], ["body", "본문", 12, 32], ["code", "코드", 10, 24]].map(([key, label, min, max]) => <div className="font-setting-row" key={key}>
-      <FontFamily label={label} value={value[`${key}Family`]} families={families} onChange={(next) => update(`${key}Family`, next)} />
-      <label>크기<FontSize label={label} min={min} max={max} value={value[`${key}Size`]} onChange={(next) => update(`${key}Size`, next)} /></label>
-      <div className="font-sample" data-font-sample={key} style={{ fontFamily: styles[`--${key}-font`], fontSize: styles[`--${key}-size`], lineHeight: value.lineHeight }}>{key === "code" ? "const message = '한글 코드 123';" : "생각을 기록하는 공간 · Dynote Aa 123"}</div>
+    {fontFields.map(([key, label, min, max]) => <div className="font-setting-row" key={key}>
+      <span className="font-role">{label}</span>
+      <FontFamily label={label} value={value[`${key}Family`]} families={families} message={message} onChange={next => update(`${key}Family`, next)} />
+      <label className="font-size-control">
+        <FontSize label={label} min={min} max={max} value={value[`${key}Size`]} onChange={next => update(`${key}Size`, next)} />
+        <span aria-hidden="true">px</span>
+      </label>
     </div>)}
     <label>본문 줄 간격<input aria-label="본문 줄 간격" type="range" min="1.2" max="2.5" step="0.05" value={value.lineHeight} onChange={(e) => update("lineHeight", Number(e.target.value))} /><output>{value.lineHeight}</output></label>
-    <p className="muted">변경 즉시 적용·저장됩니다. 문서 내용은 바뀌지 않습니다.</p>
+    <section className="font-preview" aria-label="글꼴 미리보기">
+      <h3>미리보기</h3>
+      {fontFields.map(([key, , , , sample]) => <div key={key} className="font-sample" data-font-sample={key}
+        style={{ fontFamily: styles[`--${key}-font`], fontSize: styles[`--${key}-size`], lineHeight: key === "body" ? value.lineHeight : undefined }}>{sample}</div>)}
+    </section>
     <button className="secondary-button" onClick={() => onChange({ ...defaultFonts })}>글꼴 기본값 복원</button>
   </div>;
 }
