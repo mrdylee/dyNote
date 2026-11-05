@@ -2,6 +2,7 @@ const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODUL
 import { mkdtemp, mkdir, writeFile, readFile, rename } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
 const profile = await mkdtemp(`${tmpdir()}/dynote-settings-profile-`), vaultRoot = await mkdtemp(`${tmpdir()}/dynote-settings-vault-`);
@@ -9,7 +10,7 @@ const bare = `${profile}/remote.git`, gitConfig = `${profile}/gitconfig`, remote
 const git = (...args) => execFileSync("git", args, { env: { ...process.env, GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 await writeFile(gitConfig, "");
 git("init", "--bare", "--initial-branch=main", bare);
-git("config", "--file", gitConfig, `url.file://${bare}.insteadOf`, remote);
+git("config", "--file", gitConfig, `url.${pathToFileURL(bare).href}.insteadOf`, remote);
 const original = "# 글꼴 확인\n\n한글과 English 본문\n\n`const code = 123;`\n\n```js\nconst block = 123;\n```\n";
 await writeFile(`${vaultRoot}/Home.md`, original);
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
