@@ -10,6 +10,7 @@ const personal = path.join(root, 'Personal');
 const team = path.join(root, 'Team');
 const same = '회의록.md';
 const original = '# 회의록\n\n공통 시작\n';
+const pdf = await readFile('tests/fixtures/link-target.pdf');
 const checks = [];
 const errors = [];
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -20,7 +21,10 @@ await writeFile(path.join(profile, 'settings.json'), JSON.stringify({
   vaults: [personal, team],
   vaultPurposes: { [personal]: 'personal', [team]: 'team' },
 }));
-for (const directory of [personal, team]) await writeFile(path.join(directory, same), original);
+for (const directory of [personal, team]) {
+  await writeFile(path.join(directory, same), original);
+  await writeFile(path.join(directory, 'manual.pdf'), pdf);
+}
 await writeFile(path.join(team, '계획.md'), '# 계획\n');
 await writeFile(path.join(team, '넷째.md'), '# 넷째\n');
 await writeFile(path.join(personal, '참고.md'), '# 참고\n개인 참고 본문\n');
@@ -240,14 +244,22 @@ try {
   await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).waitFor();
   assert.equal(await readFile(path.join(personal, same), 'utf8'), personalText);
   assert.equal(await readFile(path.join(team, same), 'utf8'), teamText);
-  const revoked = await restarted.evaluate(async ({ root, vaultId }) => {
-    const forgotten = await window.notes.forgetVault({ root });
-    if (!forgotten.ok) throw new Error(forgotten.error);
-    return window.notes.snapshot({ vaultId, workspace: true });
-  }, { root: team, vaultId: teamId });
+  await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).getByRole('button', { name: '회의록', exact: true }).click();
+  await restarted.locator('.attachments-list').getByRole('button', { name: 'manual.pdf', exact: true }).click();
+  await restarted.locator('.attachment-view').waitFor();
+  await restarted.getByRole('button', { name: '공간 전환·관리', exact: true }).click();
+  const settings = restarted.getByRole('dialog', { name: '설정', exact: true });
+  const registeredTeam = settings.getByRole('listitem').filter({ hasText: team });
+  await registeredTeam.getByRole('button', { name: '목록에서 제거', exact: true }).click();
+  await registeredTeam.waitFor({ state: 'hidden' });
+  await settings.getByRole('button', { name: '닫기', exact: true }).click();
+  assert.equal(await restarted.locator('.attachment-view').count(), 0, 'disconnect closes the team preview even with an identical personal PDF');
+  const revoked = await restarted.evaluate(vaultId => window.notes.snapshot({ vaultId, workspace: true }), teamId);
   assert.equal(revoked.ok, false);
+  assert.deepEqual(await readFile(path.join(personal, 'manual.pdf')), pdf);
+  assert.deepEqual(await readFile(path.join(team, 'manual.pdf')), pdf);
   assert.deepEqual(errors, []);
-  checks.push('both roots and their saved bytes survive restart and disconnection revokes scoped access');
+  checks.push('both roots survive restart; disconnect closes the team PDF and revokes access without changing either copy');
   await writeFile('output/playwright/vault-together.json', JSON.stringify({ checks, errors }, null, 2) + '\n');
   console.log({ checks, errors });
 } finally {

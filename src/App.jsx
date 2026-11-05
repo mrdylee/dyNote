@@ -76,7 +76,7 @@ import JournalPanel from "./JournalPanel.jsx";
 import NavigationPanel from "./NavigationPanel.jsx";
 import PluginSettings from "./PluginSettings.jsx";
 import { normalizeNavigation, navigationAction, reconcileNavigation } from "../core/navigation.mjs";
-import { periods, periodicNote, periodicEntries, adjacentEntry, renderTemplate, localDate } from "../core/periodic-notes.mjs";
+import { periods, periodicNote, periodicContent, periodicEntries, adjacentEntry, renderTemplate, localDate } from "../core/periodic-notes.mjs";
 import { timestampInsertion, rateJournal, onThisDay, wordStatistics } from "../core/journal-details.mjs";
 import { runOutlineCommand } from "./editorCommands.mjs";
 import { diagramInsertion } from "../core/diagram-tools.mjs";
@@ -235,7 +235,8 @@ export default function App() {
   const selectedVault = useRef(null);
   const workspace = useDocumentWorkspace();
   const { vaultId: focusedVaultId, path: focusedPath } = documentRef(workspace.active, selectedVaultId);
-  const [attachment, setAttachment] = useState(null);
+  const [openedAttachment, setAttachment] = useState(null);
+  const attachment = vaults[openedAttachment?.vaultId] ? openedAttachment : null;
   const attachmentRequest = useRef(0);
   const vault = vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
   const active = attachment && attachment.vaultId !== focusedVaultId ? null : focusedPath;
@@ -353,6 +354,8 @@ export default function App() {
   const navigation = vault?.navigation ?? emptyNavigation;
   const journalPreferences = vault?.journalPreferences ?? {};
   const [captureStates, setCaptureStates] = useState({});
+  const [automaticCaptureId, setAutomaticCaptureId] = useState(null);
+  const captureLocked = !!vault?.id && automaticCaptureId === vault.id;
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
   const [fileTarget, setFileTarget] = useState(null);
@@ -508,6 +511,7 @@ export default function App() {
       if (scope.id === selectedId || roots.has(scope.root)) continue;
       reconcileScope(scope.id, []);
       removeVault(scope.id);
+      setAttachment(old => old?.vaultId === scope.id ? null : old);
     }
     for (const { root, purpose, snapshot } of entries) {
       if (!snapshot) continue;
@@ -568,10 +572,13 @@ export default function App() {
     const scope = vaultsRef.current[id];
     const state = context.states[id];
     if (!scope?.id || captureWorking.current || context.busy) return;
-    if (action === "sync" && !manual && (context.modal || scope.purpose !== "personal" || !state?.enabled || !state.personal || queue.dirty || editsRef.current.blocked())) return;
-    captureWorking.current = true; setBusy(true);
+    const automatic = action === "sync" && !manual;
+    if (automatic && (context.modal || scope.purpose !== "personal" || !state?.enabled || !state.personal || queue.dirtyIn(id) || editsRef.current.blocked(id))) return;
+    captureWorking.current = true;
+    if (automatic) setAutomaticCaptureId(id);
+    else setBusy(true);
     try {
-      await flush();
+      if (!automatic) await flush();
       const request = { vaultId: id, ...args };
       const dailyOptions = { ...scope.journalPreferences.daily, locale: scope.journalPreferences.locale };
       const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
@@ -582,7 +589,11 @@ export default function App() {
     } catch (error) {
       updateCaptureState(id, old => ({ ...old, error: error.message }));
       if (manual) throw error;
-    } finally { captureWorking.current = false; setBusy(false); }
+    } finally {
+      captureWorking.current = false;
+      if (automatic) setAutomaticCaptureId(null);
+      else setBusy(false);
+    }
   }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef]);
   const captureIds = Object.values(vaults).filter(scope => scope.id).map(scope => `${scope.id}:${scope.purpose ?? ""}`).sort().join(",");
   useEffect(() => {
@@ -706,10 +717,7 @@ export default function App() {
     setBusy(true);
     try {
       await flush();
-      const templatePath = journalPreferences[target.period]?.template;
-      const template = templatePath ? model.notes.find(n => n.path === templatePath) : null;
-      if (templatePath && !template) throw new Error("템플릿을 찾을 수 없습니다. 일지 설정을 확인해 주세요.");
-      const content = template ? renderTemplate(template.content, target) : `# ${target.title}\n\n${target.period === "daily" ? "- " : ""}`;
+      const content = periodicContent(target, journalPreferences, model.notes);
       const created = await invoke(api.openOrCreateNote({ vaultId, path: target.path, content }));
       if (currentVault.current !== vaultId) return;
       revisions.current.set(created.path, created.revision);
@@ -724,14 +732,18 @@ export default function App() {
     if (!note || content === note.content) return;
     changeFile(note.path, content);
   };
-  const changeFile = (path, content, id = vault?.id) => {
+  const changeFile = (path, content, id = vault?.id, allowCreate = false) => {
     if (editState.forVault(id).edit(path, content)) return;
     const scope = vaultsRef.current[id];
     const field = documentKind(path) ? "documents" : "notes";
     const source = scope?.[field].find(file => file.path === path);
-    if (!source || source.content === content || busy) return;
-    queue.set(id, { path, content, revision: revisionMap(id).get(path) ?? source.revision });
-    updateVault(id, old => ({ ...old, [field]: old[field].map(file => file.path === path ? { ...file, content } : file) }));
+    if (!scope || (!source && !allowCreate) || source?.content === content || busy || automaticCaptureId === id) return;
+    const revision = !source || source.revision === null ? null : revisionMap(id).get(path) ?? source.revision;
+    queue.set(id, { path, content, revision });
+    updateVault(id, old => ({ ...old, [field]: source
+      ? old[field].map(file => file.path === path ? { ...file, content } : file)
+      : [...old[field], { path, content, revision }] }));
+    if (allowCreate && scope.navigation.recent[0] !== path) updateNavigation({ type: "visit", path }, id);
     setStatus("dirty");
     clearTimeout(timer.current);
     timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
@@ -1142,6 +1154,7 @@ export default function App() {
     return document && {
       note: document, notes, vault: scope, journalPaths: journalPaths.get(vaultId),
       scopeLabel: together ? spaceLabel(scope) : undefined,
+      captureLocked: automaticCaptureId === vaultId,
       edits: editState.forVault(vaultId),
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
@@ -1576,12 +1589,17 @@ export default function App() {
           </div>}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery({ vaultId: vault.id })).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
           {section!=="journal"&&journalNote&&!attachment&&!["planner","graph","ess"].includes(section)&&<>
-            <CopilotJournalToolbar {...captureControls} disabled={busy||edits.blocked()}/>
-            <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
+            <CopilotJournalToolbar {...captureControls} disabled={busy||captureLocked||edits.blocked()}/>
+            <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
           </>}
-          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&captureState?.records?.some(record=>record.path===note.path)&&<CopilotJournalEntries records={captureState.records.filter(record=>record.path===note.path)} disabled={busy||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
+          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&captureState?.records?.some(record=>record.path===note.path)&&<CopilotJournalEntries records={captureState.records.filter(record=>record.path===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault} onOpen={openNote} onCreate={createPeriodic} disabled={busy||edits.blocked()} capture={captureControls}/>
+            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
+              onOpen={openNote} onChange={(path, content) => changeFile(path, content, vault.id, true)}
+              onImportFiles={files => importFiles(files, vault.id)} onLink={followEditorLink}
+              jump={editorJump?.vaultId === vault.id ? editorJump : null}
+              fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
+              disabled={!vault.id || busy || captureLocked || edits.blocked()} capture={captureControls}/>
             : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
@@ -1610,23 +1628,40 @@ export default function App() {
             ) : structured && !attachment ? (
               structured.kind === "canvas" ? <CanvasEditor key={`${vault.id}:${structured.path}`} document={structured}
                 files={[...model.notes, ...documents, ...(vault.attachments ?? [])]} attachments={vault.attachments ?? []} vaultId={vault.id}
-                onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy} />
+                onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy || captureLocked} />
                 : <BasesView key={`${vault.id}:${structured.path}`} document={structured} notes={model.notes}
-                  onChange={(content) => changeFile(structured.path, content)} onNoteChange={changeFile} onOpen={openFile} onError={setError} readOnly={busy} />
+                  onChange={(content) => changeFile(structured.path, content)} onNoteChange={changeFile} onOpen={openFile} onError={setError} readOnly={busy || captureLocked} />
             ) : attachment ? (
               <div className="attachment-view">
                 <div className="attachment-heading">
                   <strong>{attachment.path}</strong>
-                  <button onClick={() => setAttachment(null)}>
+                  <button onClick={() => { attachmentRequest.current++; setAttachment(null); }}>
                     문서로 돌아가기
                   </button>
                 </div>
                 {attachment.mime === "application/pdf" ? (
-                  <PdfViewer key={attachment.path} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
-                    onCopy={(text) => invoke(api.copyText({ vaultId: vault.id, text }))} onOpenNote={openNote}
-                    onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}
-                    onPreviewEdit={async input => { const vaultId=vault.id; const result=await invoke(api.previewPdf({vaultId,input:{...input,sourceRevision:attachment.revision}})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); return result; }}
-                    onApplyEdit={async preview => { const vaultId=vault.id; const result=await invoke(api.applyPdf({vaultId,input:preview.input,revision:preview.revision})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); setAttachment(old=>old?.path===preview.input.path?{...result.attachment,vaultId,fragment:`page=${preview.input.page}`+(result.annotationId?`&annotation=${encodeURIComponent(result.annotationId)}`:'')}:old); return result; }}/>
+                  <PdfViewer key={documentKey(attachment.vaultId, attachment.path)} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
+                    onCopy={text => invoke(api.copyText({ vaultId: attachment.vaultId, text }))}
+                    onOpenNote={path => openNote(path, attachment.vaultId)}
+                    onFollow={fragment => setAttachment(old => old?.vaultId === attachment.vaultId && old.path === attachment.path ? { ...old, fragment } : old)}
+                    onPreviewEdit={async input => {
+                      const { vaultId, revision } = attachment;
+                      const request = attachmentRequest.current;
+                      const result = await invoke(api.previewPdf({ vaultId, input: { ...input, sourceRevision: revision } }));
+                      if (request !== attachmentRequest.current || !vaultsRef.current[vaultId]) throw new Error("열려 있는 PDF가 변경되었습니다.");
+                      return result;
+                    }}
+                    onApplyEdit={async preview => {
+                      const { vaultId } = attachment;
+                      const request = attachmentRequest.current;
+                      const result = await invoke(api.applyPdf({ vaultId, input: preview.input, revision: preview.revision }));
+                      if (request === attachmentRequest.current) {
+                        const fragment = `page=${preview.input.page}` + (result.annotationId ? `&annotation=${encodeURIComponent(result.annotationId)}` : "");
+                        setAttachment(old => old?.vaultId === vaultId && old.path === attachment.path && old.revision === attachment.revision
+                          ? { ...result.attachment, vaultId, fragment } : old);
+                      }
+                      return result;
+                    }}/>
                 ) : attachment.mime.startsWith("audio/") ? <AudioViewer bytes={attachment.bytes} mime={attachment.mime}/> : (
                   <img
                     alt={attachment.path}
@@ -1639,7 +1674,7 @@ export default function App() {
                   />
                 )}
               </div>
-            ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || edits.blocked()} onError={setError}/>
+            ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || edits.blocked()} onError={setError}/>
             : note ? (
               <DocumentWorkspace workspace={workspace} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}

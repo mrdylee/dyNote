@@ -29,10 +29,11 @@ export default function useVaultDocuments(api, invoke) {
     const byVault = new Map();
     return {
       get dirty() { return [...byVault.values()].some(queue => queue.dirty); },
+      dirtyIn(id) { return !!byVault.get(id)?.dirty; },
       get(id, path) { return byVault.get(id)?.get(path); },
       set(id, draft) {
         if (!byVault.has(id)) byVault.set(id, new SaveQueue((path, content, revision) => {
-          const save = documentKind(path) ? api.saveDocument : api.saveNote;
+          const save = revision === null ? api.createNote : documentKind(path) ? api.saveDocument : api.saveNote;
           return invoke(save({ vaultId: id, path, content, revision }));
         }, saved => {
           revisionMap(id).set(saved.path, saved.revision);

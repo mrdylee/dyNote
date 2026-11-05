@@ -58,6 +58,7 @@ let recovery;
 let registry;
 let vaultError = "";
 let restoring = false;
+let automaticCaptureVaultId = null;
 let activeMutations = 0;
 let gitBackup;
 const openedVaults = new Map();
@@ -616,14 +617,18 @@ app
         let locked = false;
         try {
           validateSender(event);
-          if (!readOnly) {
-            if (restoring || (exclusive && activeMutations)) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
-            if (exclusive) restoring = true;
-            activeMutations++; locked = true;
-          }
           const scoped = args?.workspace === true && scopedActions.has(name);
           const target = scoped ? workspaceVault(args.vaultId) : vault;
           if (scoped) checkVault(args, target);
+          if (!readOnly) {
+            const independentMutation = automaticCaptureVaultId && target && target.id !== automaticCaptureVaultId && !exclusive;
+            if ((restoring && !independentMutation) || (exclusive && activeMutations)) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+            if (exclusive) {
+              restoring = true;
+              if (name === "capture-sync" && args?.manual !== true) automaticCaptureVaultId = target?.id ?? null;
+            }
+            activeMutations++; locked = true;
+          }
           const entry = openedVaults.get(target?.id);
           if (entry && scoped) {
             await entry.ready;
@@ -640,7 +645,10 @@ app
         } catch (error) {
           return { ok: false, error: error.message };
         } finally {
-          if (locked) { activeMutations--; if (exclusive) restoring = false; }
+          if (locked) {
+            activeMutations--;
+            if (exclusive) { restoring = false; automaticCaptureVaultId = null; }
+          }
         }
       });
     ipcMain.on("notes:close-ready", async (event) => {

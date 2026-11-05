@@ -19,9 +19,16 @@ try {
   const page=await app.firstWindow();page.setDefaultTimeout(10000);
   console.log('Journal verification viewport',await page.evaluate(()=>({width:innerWidth,height:innerHeight})));
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.getByRole('region',{name:'저널 피드'}).waitFor();
+  const feed=page.getByRole('region',{name:'저널 피드'});
+  const dailyPath=`Journal/${localDate()}.md`;
+  await feed.waitFor();
   assert.equal(await page.getByRole('button',{name:'편집 보기',exact:true}).count(),0,'journal feed must not expose actions for a hidden document');
-  await assert.rejects(readFile(`${vault}/Journal/${localDate()}.md`));
+  await assert.rejects(readFile(`${vault}/${dailyPath}`),{code:'ENOENT'});
+  await feed.locator('.cm-live-preview.cm-focused').waitFor();
+  await page.keyboard.type('First keystrokes');
+  await page.keyboard.press('Meta+s');
+  await page.locator('.save-status.saved').waitFor();
+  assert.equal(await readFile(`${vault}/${dailyPath}`,'utf8'),`# ${localDate()}\n\n- First keystrokes`);
   const open=async name=>{await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill(`path:${name}.md`);await page.keyboard.press('Enter');};
   await open('A');
   await page.getByRole('button',{name:'편집 보기',exact:true}).click();
@@ -66,7 +73,7 @@ try {
   await page.getByRole('button',{name:'문서 새로고침',exact:true}).click();
   assert.equal(await page.locator('.document-pane').count(),3);
   await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
-  await page.getByRole('button',{name:'오늘 기록 시작',exact:true}).click();
+  await page.getByRole('region',{name:'달력과 일지',exact:true}).getByTitle(dailyPath,{exact:true}).click();
   const journalEditor=page.getByRole('region',{name:`문서 Journal/${localDate()}.md`,exact:true}).getByRole('textbox',{name:'Markdown 편집기'});
   await journalEditor.click();await page.keyboard.press('Meta+a');await page.keyboard.type('# Today\n\n## Projects\nShip safely\n\n## Private\nKeep here\n');
   await page.keyboard.press('Meta+s');await page.waitForFunction(()=>document.querySelector('.save-status')?.classList.contains('saved'));
@@ -100,11 +107,14 @@ try {
   const restored=await reopened.evaluate(()=>window.notes.updateState());assert.equal(restored.value.preferences.enabled,false);assert.equal(restored.value.preferences.includePrerelease,true);
   await reopened.getByRole('button',{name:'명령 팔레트',exact:true}).click();await reopened.getByRole('textbox',{name:'명령 검색'}).fill('Dynote 업데이트 확인');await reopened.keyboard.press('Enter');
   await reopened.getByRole('button',{name:'시작 화면',exact:true}).click();await reopened.getByRole('combobox',{name:'시작 화면'}).selectOption('journal');
-  await app.close();app=await launch();const feed=await app.firstWindow();await feed.getByRole('region',{name:'저널 피드'}).waitFor();
+  await app.close();app=await launch();const journalWindow=await app.firstWindow();
+  const restoredFeed=journalWindow.getByRole('region',{name:'저널 피드'});
+  await restoredFeed.locator('.cm-live-preview').waitFor();
+  assert.match(await restoredFeed.getByRole('textbox',{name:'Markdown 편집기'}).textContent(),/Ship safely/);
   assert.equal(await readFile(`${vault}/Journal/${localDate()}.md`,'utf8'),original);
-  await feed.screenshot({path:'output/playwright/journal-startup.png'});
+  await journalWindow.screenshot({path:'output/playwright/journal-startup.png'});
   assert.deepEqual(errors,[]);
-  const report={checks:['journal startup without writes','three panes and fourth rejected','internal drop never inserts text','pane-specific saved edits','same-vault refresh retains panes','classification preview/exclusion/confirmation preserves original','weekly update options persist','startup choices survive restart'],errors};
+  const report={checks:['journal startup opens Live Preview and writes only on first edit','three panes and fourth rejected','internal drop never inserts text','pane-specific saved edits','same-vault refresh retains panes','classification preview/exclusion/confirmation preserves original','weekly update options persist','startup choices survive restart'],errors};
   await writeFile('output/playwright/journal-workspace.json',JSON.stringify(report,null,2));console.log(report);
 } catch(error) {
   const page=app.windows()[0];

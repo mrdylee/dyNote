@@ -1995,6 +1995,10 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .journal-entry { margin:24px 0; padding:24px; border:1px solid var(--border); border-radius:12px; }
 .journal-entry header { display:flex; align-items:center; justify-content:space-between; }
 .journal-entry h2 { margin:0 0 16px; }
+.journal-entry .code-editor { min-height:180px; }
+.journal-entry .cm-live-preview .cm-content { padding-bottom:24px; }
+.journal-date { padding:0; border:0; background:none; color:inherit; font:inherit; }
+.journal-date:hover { text-decoration:underline; }
 
 .classification-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 20px; background:#f4effb; font-size:12px; }
 .classification-controls { height:44px; min-height:44px; box-sizing:border-box; flex-wrap:nowrap; }

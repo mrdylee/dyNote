@@ -43,7 +43,38 @@ try{
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  const teamPane=page.getByRole('region',{name:'문서 Shared.md',exact:true});
  await teamPane.waitFor();
+ await app.evaluate((_electron, directory) => {
+  const fs = process.getBuiltinModule('node:fs/promises');
+  const { syncBuiltinESMExports } = process.getBuiltinModule('node:module');
+  const readdir = fs.readdir;
+  fs.readdir = async (target, options) => {
+   if (target === directory) {
+    fs.readdir = readdir;
+    syncBuiltinESMExports();
+    await new Promise(resolve => { globalThis.resumeCaptureScan = resolve; });
+   }
+   return readdir(target, options);
+  };
+  syncBuiltinESMExports();
+ }, path.join(source,'project/chatSessions'));
  await put('second','보존할 두 번째 대화','두 번째 질문');
+ try {
+  await app.evaluate(async () => {
+   for (let attempt=0; attempt<150 && !globalThis.resumeCaptureScan; attempt++)
+    await new Promise(resolve => setTimeout(resolve,50));
+   if (!globalThis.resumeCaptureScan) throw new Error('Automatic capture did not reach the test transcript folder');
+  });
+  const teamEditor=teamPane.getByRole('textbox',{name:'Markdown 편집기',exact:true});
+  assert.equal(await teamEditor.evaluate(el=>el.cmTile.root.view.state.readOnly),false,'the personal scan must not lock the team editor');
+  await teamEditor.click();await page.keyboard.press(`${mod}+End`);
+  await page.keyboard.insertText('Team can save');
+  await page.keyboard.press(`${mod}+s`);
+  await page.locator('.save-status.saved').waitFor();
+  assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\nTeam can save');
+  checks.push('team editing and saving complete while the personal capture scan is in progress');
+ } finally {
+  await app.evaluate(() => globalThis.resumeCaptureScan?.());
+ }
  await check('a new session is added to the personal journal while the team document remains focused',async()=>{
   await page.waitForFunction(async()=>{
    const {value}=await window.notes.snapshot();
@@ -52,7 +83,7 @@ try{
   },undefined,{polling:300});
   assert.ok((await teamPane.getAttribute('class')).includes('focused'));
   assert.deepEqual(await readdir(team),['Shared.md']);
-  assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\n');
+  assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\nTeam can save');
   await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
   await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));
@@ -69,9 +100,9 @@ try{
   state=await captureState();assert.equal(state.records[0].sessions.length,1);const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/두 번째 질문/);assert.doesNotMatch(content,/첫 질문 원문/);
   assert.doesNotMatch(await readFile(path.join(profile,'copilot-journal.json'),'utf8'),/첫 질문 원문/);
  });
- await page.getByRole('button',{name:'이 기록 편집',exact:true}).first().click();
- const editor=page.getByRole('textbox',{name:'Markdown 편집기',exact:true});await check('Live Preview hides capture control markers',async()=>assert.doesNotMatch(await editor.textContent(),/dynote:copilot/));await editor.click();await page.keyboard.press(`${mod}+End`);await put('third','세 번째 대화','자동 수집 중 질문');await page.keyboard.type('입력 중인 내용도 보존합니다'.repeat(20),{delay:15});await page.keyboard.press(`${mod}+s`);
- await check('automatic refresh keeps the user journal text and the editor mode',async()=>{await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));assert.match(await readFile(path.join(vault,journal),'utf8'),/입력 중인 내용도 보존합니다/);assert.equal(await page.locator('.document-content.live').count(),1);});
+ const editor=page.getByRole('region',{name:'저널 피드',exact:true}).getByRole('textbox',{name:'Markdown 편집기',exact:true});
+ await check('Live Preview hides capture control markers',async()=>assert.doesNotMatch(await editor.textContent(),/dynote:copilot/));await editor.click();await page.keyboard.press(`${mod}+End`);await put('third','세 번째 대화','자동 수집 중 질문');await page.keyboard.type('입력 중인 내용도 보존합니다'.repeat(20),{delay:15});await page.keyboard.press(`${mod}+s`);
+ await check('automatic refresh keeps the user journal text and the editor mode',async()=>{await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));assert.match(await readFile(path.join(vault,journal),'utf8'),/입력 중인 내용도 보존합니다/);assert.equal(await page.locator('.journal-feed .cm-live-preview').count(),1);});
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:`Work ${localDate()} 기록 삭제`,exact:true}).click();
  await check('group title delete removes the record and managed link together',async()=>{await page.locator('.capture-record').waitFor({state:'detached'});await assert.rejects(readFile(path.join(vault,record.path)),{code:'ENOENT'});const content=await readFile(path.join(vault,journal),'utf8');assert.match(content,/입력 중인 내용도 보존합니다/);assert.doesNotMatch(content,/dynote:copilot /);});

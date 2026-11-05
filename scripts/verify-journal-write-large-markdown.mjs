@@ -16,10 +16,10 @@ const open=async(page,path)=>{await page.keyboard.press('Meta+k');await page.get
 const atEnd=page=>page.waitForFunction(()=>{const el=document.activeElement,selection=window.getSelection();if(!el?.classList.contains('cm-content')||!selection?.isCollapsed||!el.contains(selection.focusNode))return false;const tail=document.createRange();tail.selectNodeContents(el);tail.setStart(selection.focusNode,selection.focusOffset);return tail.toString()==='';},{},{timeout:5000});
 try {
  let page=await attach();
- await page.getByRole('region',{name:'저널 피드'}).waitFor();
- await assert.rejects(readFile(`${vault}/${journalPath}`));
- await page.getByRole('button',{name:'오늘 기록 시작',exact:true}).click();
- await editorFor(page,journalPath).waitFor();
+ const feed=page.getByRole('region',{name:'저널 피드'});await feed.waitFor();
+ await assert.rejects(readFile(`${vault}/${journalPath}`),{code:'ENOENT'});
+ assert.equal(await feed.getByRole('button',{name:'오늘 기록 시작',exact:true}).count(),0);
+ await feed.locator('.cm-live-preview').waitFor();
  await atEnd(page);
  await page.keyboard.type('First journal entry');await page.keyboard.press('Meta+s');await saved(page);
  const initial=`# ${localDate()}\n\n- First journal entry`;

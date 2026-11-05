@@ -31,8 +31,9 @@ try{
  await check('ordinary Markdown opens in Live Preview by default',async()=>assert.ok(await page.locator('.document-content.live').count()));
  await page.getByRole('button',{name:'편집 보기',exact:true}).click();await open(journal);await open('General.md');
  await check('an explicit source mode survives switching documents',async()=>assert.equal(await page.locator('.document-content.edit').count(),1));
- await page.getByRole('button',{name:'달력과 일지',exact:true}).click();await page.getByRole('button',{name:'이 기록 편집',exact:true}).first().click();await settle();
- await check('opening a journal from the feed defaults to Live Preview',async()=>assert.equal(await page.locator('.document-content.live').count(),1));
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();await settle();
+ await check('the journal feed opens the editable Live Preview directly',async()=>assert.equal(await page.locator('.journal-feed .cm-live-preview').count(),1));
+ await page.getByRole('region',{name:'달력과 일지',exact:true}).getByTitle(journal,{exact:true}).click();
  await live();await editor().click();await page.keyboard.press(`${mod}+End`);await save();await sample();
  for(let index=0;index<3;index++){
   await page.keyboard.type(` cycle${index}`);await sample();await page.waitForTimeout(250);await sample();await page.waitForTimeout(900);await sample();
