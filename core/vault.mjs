@@ -357,6 +357,12 @@ export class Vault {
     return { id: this.id, name: this.name, notes, documents, attachments, warnings };
   }
 
+  async readNote(relative) {
+    if (!validNotePath(relative)) throw new Error("허용되지 않는 Markdown 경로입니다.");
+    await this.#tail;
+    return this.#read(relative);
+  }
+
   create(relative, initialContent) {
     return this.#enqueue(() => this.#create(relative, initialContent));
   }

@@ -1,0 +1,87 @@
+* { box-sizing: border-box; }
+
+html { height: 100%; }
+
+body {
+  --paper: #fff5d5;
+  --edge: #e0c986;
+  --quiet: #705e35;
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 13px;
+  background: var(--paper);
+  color: #2f2b36;
+  font: 13px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+}
+
+body[data-color="mint"] { --paper: #e5f5e9; --edge: #a5cead; --quiet: #3c644c; }
+body[data-color="lavender"] { --paper: #f0e8fc; --edge: #c9b3e3; --quiet: #625175; }
+body[data-color="sky"] { --paper: #e3f2fc; --edge: #a8cbdf; --quiet: #3b6076; }
+body[data-color="peach"] { --paper: #feece4; --edge: #e8bca7; --quiet: #795243; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-height: 40px;
+  padding: 0 10px 0 15px;
+  -webkit-app-region: drag;
+}
+
+header span {
+  flex: 1;
+  color: var(--quiet);
+  font-weight: 600;
+  user-select: none;
+}
+
+button {
+  -webkit-app-region: no-drag;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--quiet);
+  cursor: pointer;
+}
+
+button:hover { background: rgb(35 27 48 / 8%); }
+button[aria-pressed="true"] { color: #573894; background: rgb(121 99 203 / 17%); }
+button:focus-visible { outline: 2px solid #7963cb; outline-offset: 1px; }
+button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+textarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 2px 15px 5px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+textarea::placeholder { color: var(--quiet); }
+
+footer {
+  flex: none;
+  min-height: 24px;
+  padding: 3px 15px 7px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+footer.error { color: #912e22; overflow-wrap: anywhere; }

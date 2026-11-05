@@ -56,6 +56,7 @@ import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
+import { STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 import PanelResize from "./PanelResize.jsx";
 import { normalizePanelWidths, fitPanelWidths } from "../core/panel-widths.mjs";
 import FontSettings from "./FontSettings.jsx";
@@ -553,12 +554,16 @@ export default function App() {
       .catch((err) => setError(err.message));
     return api.onBeforeClose(async () => {
       try {
-        if (audioActive.current) { setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요."); return; }
+        if (audioActive.current) {
+          setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요.");
+          api.confirmClose(false);
+          return;
+        }
         await editsRef.current.close();
         await flush(true);
-        api.confirmClose();
+        api.confirmClose(true);
       } catch {
-        /* The draft stays in the open window. */
+        api.confirmClose(false);
       }
     });
   }, [install, flush]);
@@ -702,6 +707,14 @@ export default function App() {
       } catch (error) { setError(error.message); }
     });
   }, [flush, openNote, revisionMap, updateVault]);
+  useEffect(() => api?.onStickySaved(({ vaultId, note }) => {
+    if (queue.get(vaultId, note.path)) return;
+    updateVault(vaultId, old => {
+      if (!old) return old;
+      revisionMap(vaultId).set(note.path, note.revision);
+      return { ...old, notes: [...old.notes.filter(item => item.path !== note.path), note] };
+    });
+  }), [queue, revisionMap, updateVault]);
   const hasOriginalPlugins = pluginData.entries.some(entry => entry.phase === "loaded");
   useEffect(() => {
     if (!api?.pluginContext || !vault?.id || !hasOriginalPlugins) return;
@@ -2238,7 +2251,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
@@ -2246,6 +2259,11 @@ export default function App() {
               <button key={key} aria-pressed={settingsTab === key} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
+          {settingsTab === "shortcuts" && <section className="settings-section">
+            <h3>포스트잇</h3>
+            <p><strong>새 포스트잇 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
+            <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 포스트잇을 열 수 있습니다. 메뉴 막대에서도 포스트잇을 열 수 있습니다.</p>
+          </section>}
           {settingsTab === "vault" && <VaultSettings key={selectedVaultId ?? "missing"}
             onList={loadSpaces}
             onPurpose={async (root, purpose) => { await flush(); await invoke(api.setVaultPurpose({ root, purpose })); }}

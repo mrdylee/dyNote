@@ -31,6 +31,7 @@ import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
+import { StickyNotes } from "./sticky-notes.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -52,8 +53,10 @@ if (process.env.OPEN_NOTES_DATA)
   app.setPath("userData", path.resolve(process.env.OPEN_NOTES_DATA));
 let window;
 let vault;
-let closeReady = false;
-let closePending = false;
+let closePending;
+let quitRequested = false;
+let quitReady = false;
+let stickyNotes;
 let recovery;
 let registry;
 let vaultError = "";
@@ -106,6 +109,60 @@ function openVaultController(target, refresh = false) {
   const entry = { vault: target, git, ready: git.open(target) };
   openedVaults.set(target.id, entry);
   return entry;
+}
+
+function stickyRoot() {
+  const entries = registry.list();
+  return (entries.find(entry => entry.active && entry.purpose === "personal")
+    ?? entries.find(entry => entry.purpose === "personal")
+    ?? entries.find(entry => entry.active && !entry.purpose))?.root;
+}
+
+async function stickyVault(root) {
+  const allowed = () => registry.list().some(entry => entry.root === root && entry.purpose !== "team");
+  if (!allowed() || await realpath(root) !== root)
+    throw new Error("포스트잇을 저장한 개인 보관함을 다시 연결해 주세요.");
+  const existing = [...openedVaults.values()].find(entry => entry.vault.root === root);
+  const entry = existing ?? openVaultController(await Vault.open(root, recovery));
+  await entry.ready;
+  if (!allowed() || entry.vault.root !== root)
+    throw new Error("포스트잇 보관함 위치가 변경되었습니다.");
+  return entry;
+}
+
+async function saveStickyNote(root, relative, content, revision) {
+  if (restoring) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+  activeMutations++;
+  try {
+    const { vault: target, git } = await stickyVault(root);
+    const saved = revision ? await target.save(relative, content, revision) : await target.create(relative, content);
+    git.markDirty(target.id);
+    if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:sticky-saved", { vaultId: target.id, note: saved });
+    return saved;
+  } finally {
+    activeMutations--;
+  }
+}
+
+function showMainWindow() {
+  if (!window || window.isDestroyed() || quitRequested) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+async function finishQuit() {
+  try {
+    if (stickyNotes && !await stickyNotes.flushForQuit()) return;
+    await plugins?.close();
+    if (stickyNotes && !await stickyNotes.flushForQuit()) return;
+    quitReady = true;
+    app.quit();
+  } catch (error) {
+    dialog.showErrorBox("Dynote", error.message);
+  } finally {
+    if (!quitReady) quitRequested = false;
+  }
 }
 
 function pruneVaultControllers() {
@@ -317,7 +374,7 @@ app
         {
           label: app.name,
           submenu: [{ role: "about" }, { type: "separator" },
-            { id: "dynote-settings", label: "설정…", accelerator: "CmdOrCtrl+,", click: () => window.webContents.send("notes:open-settings") },
+            { id: "dynote-settings", label: "설정…", accelerator: "CmdOrCtrl+,", click: () => { showMainWindow(); window.webContents.send("notes:open-settings"); } },
             { type: "separator" }, { role: "quit" }],
         },
         {
@@ -651,52 +708,86 @@ app
           }
         }
       });
-    ipcMain.on("notes:close-ready", async (event) => {
-      try {
-        validateSender(event);
-        if (restoring) return;
-        await plugins.close();
-        closeReady = true;
-        window.close();
-      } catch {
-        /* Ignore untrusted senders. */
+    ipcMain.on("notes:close-ready", (event, ready) => {
+      try { validateSender(event); } catch { return; }
+      if (!closePending) return;
+      clearTimeout(closePending);
+      closePending = null;
+      if (ready === false || restoring) {
+        const showMain = quitRequested;
+        quitRequested = false;
+        if (showMain) showMainWindow();
+      } else if (quitRequested || !stickyNotes) {
+        quitRequested = true;
+        void finishQuit();
+      } else {
+        window.hide();
       }
     });
-    window.on("close", (event) => {
-      if (closeReady || window.webContents.isDestroyed()) return;
+    window.on("close", event => {
+      if (quitReady || window.webContents.isDestroyed()) return;
       event.preventDefault();
-      if (restoring) return;
-      if (!closePending) {
-        closePending = true;
-        window.webContents.send("notes:before-close");
+      if (restoring) { quitRequested = false; return; }
+      if (window.webContents.isCrashed()) {
+        quitRequested = true;
+        void finishQuit();
+        return;
       }
-      // A failed flush may be retried with the next close request.
-      setTimeout(() => {
-        closePending = false;
-      }, 1500);
+      if (closePending) return;
+      closePending = setTimeout(() => {
+        closePending = null;
+        quitRequested = false;
+      }, 15000).unref();
+      window.webContents.send("notes:before-close");
     });
     await window.loadURL("notes://app/index.html");
     await plugins.activate(vault);
+    const stickyController = new StickyNotes({
+      directory: path.join(app.getPath("userData"), "sticky-notes"),
+      selectRoot: stickyRoot,
+      readNote: async (root, relative) => (await stickyVault(root)).vault.readNote(relative),
+      saveNote: saveStickyNote,
+      showMain: showMainWindow,
+      canOpen: () => !quitRequested,
+      quitReady: () => quitReady,
+    });
+    try {
+      await stickyController.start();
+      stickyNotes = stickyController;
+    } catch (error) {
+      stickyController.dispose();
+      console.error("포스트잇 초기화:", error.message);
+    }
     const checkUpdates = () => updates.check().catch(error=>console.error("Update check:",error.message));
     const updateTimer = setInterval(checkUpdates,60*60*1000);updateTimer.unref();
     const initialUpdate = setTimeout(checkUpdates,10000);initialUpdate.unref();
     powerMonitor.on("resume",checkUpdates);
-    app.once("before-quit",()=>{clearInterval(updateTimer);clearTimeout(initialUpdate);powerMonitor.removeListener("resume",checkUpdates);});
+    app.once("will-quit",()=>{clearInterval(updateTimer);clearTimeout(initialUpdate);powerMonitor.removeListener("resume",checkUpdates);});
   })
   .catch((error) => {
     console.error(error);
     app.exit(1);
   });
 
-app.on("window-all-closed", async () => {
-  for (const entry of openedVaults.values()) entry.git.close();
-  await Promise.race([Promise.allSettled([copilot?.close(), codex?.close(), claude?.close()]), new Promise((resolve) => setTimeout(resolve, 3000))]);
-  app.quit();
+app.on("activate", (_event, hasVisibleWindows) => {
+  if (!hasVisibleWindows) showMainWindow();
 });
 
-app.on("before-quit", async event => {
-  if (!plugins?.instances.size) return;
+app.on("window-all-closed", () => app.quit());
+
+app.on("before-quit", event => {
+  if (quitReady) return;
   event.preventDefault();
-  await plugins.close();
+  if (quitRequested) return;
+  quitRequested = true;
+  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.close();
+  else void finishQuit();
+});
+
+app.once("will-quit", async event => {
+  event.preventDefault();
+  stickyNotes?.dispose();
+  for (const entry of openedVaults.values()) entry.git.close();
+  await Promise.race([Promise.allSettled([copilot?.close(), codex?.close(), claude?.close()]), new Promise(resolve => setTimeout(resolve, 3000))]);
   app.quit();
 });

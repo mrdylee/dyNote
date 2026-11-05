@@ -120,7 +120,12 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:git-status", listener);
       return () => ipcRenderer.removeListener("notes:git-status", listener);
     },
-    confirmClose: () => ipcRenderer.send("notes:close-ready"),
+    onStickySaved: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:sticky-saved", listener);
+      return () => ipcRenderer.removeListener("notes:sticky-saved", listener);
+    },
+    confirmClose: (ready) => ipcRenderer.send("notes:close-ready", ready),
     onBeforeClose: (callback) => {
       const listener = () => callback();
       ipcRenderer.on("notes:before-close", listener);
