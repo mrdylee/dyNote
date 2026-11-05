@@ -23,19 +23,35 @@ const captureState=()=>page.evaluate(async()=>{const {value}=await window.notes.
 try{
  await setup();
  await check('journal offers an import button before any project is configured',async()=>assert.equal(await page.getByRole('button',{name:'가져오기',exact:true}).count(),1));
+ await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
+ await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
+ await page.getByRole('region',{name:'문서 Shared.md',exact:true}).waitFor();
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();await settings().waitFor();
  await app.evaluate(({dialog},source)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[source]});},source);
- await settings().getByRole('button',{name:'기록 폴더 선택',exact:true}).click();await page.waitForFunction(source=>document.querySelector('.capture-source-path')?.textContent===source,source);await settings().locator('.capture-project input').check();
+ const sourceButton=settings().getByRole('button',{name:'기록 폴더 선택',exact:true});
+ await settings().getByRole('button',{name:'프로젝트 새로고침',exact:true,disabled:false}).waitFor();
+ assert.equal(await sourceButton.isEnabled(),true,'Copilot settings should be usable from the team journal');
+ await sourceButton.click();await page.waitForFunction(source=>document.querySelector('.capture-source-path')?.textContent===source,source);await settings().locator('.capture-project input').check();
  await settings().getByRole('button',{name:'오늘 대화 가져오기',exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('Work'));
+ await page.waitForFunction(async()=>{
+  const {value}=await window.notes.snapshot();
+  return (await window.notes.captureStatus({vaultId:value.id})).value?.records.length===1;
+ });
  await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});
  let state=await captureState(),record=state.records[0];
- await check('manual import creates one project/day record and retains original source bytes',async()=>{
+ await check('manual import from the team journal writes only to the personal vault',async()=>{
   assert.equal(state.enabled,false);assert.equal(state.records.length,1);assert.equal(record.sessions.length,1);
+  assert.deepEqual(await readdir(team),['Shared.md']);
+  assert.match(await page.getByRole('button',{name:'공간 전환·관리',exact:true}).innerText(),/팀 공유 노트/);
+  assert.equal(await page.locator('.capture-record-title').count(),0);
   const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/첫 질문 원문/);assert.doesNotMatch(content,/DO NOT IMPORT/);
   assert.match(await readFile(path.join(vault,journal),'utf8'),/사용자가 직접 작성한 기록/);
   assert.match(await readFile(path.join(source,'project/chatSessions/first.json'),'utf8'),/첫 질문 원문/);
  });
+ await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
+ await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
  await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});

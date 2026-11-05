@@ -446,6 +446,11 @@ export default function App() {
   const filter = spaceFilter === "personal" || vaults[spaceFilter] ? spaceFilter : "all";
   const connectedSpaces = Object.values(vaults).filter(scope => scope.id).sort((a, b) =>
     Number(b.purpose === "personal") - Number(a.purpose === "personal") || a.name.localeCompare(b.name, "ko"));
+  const captureVault = vault?.purpose === "personal" ? vault :
+    connectedSpaces.find(scope => scope.id === selectedVaultId && scope.purpose === "personal") ??
+    connectedSpaces.find(scope => scope.purpose === "personal");
+  const captureVaultId = captureVault?.id;
+  const captureTargetState = captureStates[captureVaultId] ?? null;
   const visibleSpaces = connectedSpaces.filter(scope => together
     ? (filter === "all" || scope.id === filter || (filter === "personal" && scope.purpose === "personal"))
     : scope.id === vault?.id);
@@ -573,7 +578,7 @@ export default function App() {
   const updateCaptureState = useCallback((id, transform) => {
     setCaptureStates(old => ({ ...old, [id]: transform(old[id]) }));
   }, []);
-  const captureAction = useCallback(async (action, manual = false, args = {}, id = currentVault.current) => {
+  const captureAction = useCallback(async (action, manual, args, id) => {
     const context = captureContext.current;
     const scope = vaultsRef.current[id];
     const state = context.states[id];
@@ -623,8 +628,8 @@ export default function App() {
   }, [captureIds, captureAction, updateCaptureState]);
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
   const importCapture = async () => {
-    if (!captureState?.personal || !captureState.projects?.some(project => project.selected)) { captureSettings(); return; }
-    await captureAction("sync", true, {}, vault.id);
+    if (!captureTargetState?.personal || !captureTargetState.projects.some(project => project.selected)) { captureSettings(); return; }
+    await captureAction("sync", true, {}, captureVaultId);
   };
   const captureControls = { state: captureState, onImport: () => importCapture().catch(error => setError(error.message)), onSettings: captureSettings,
     onRestore: () => captureAction("restore", true, { trashId: captureState.trashId }, vault.id).catch(error => setError(error.message)),
@@ -2284,11 +2289,12 @@ export default function App() {
               finally { setBusy(false); }
             }}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
-          {settingsTab === "capture"&&vault.id&&<CopilotJournalSettings key={vault.id} state={captureState} disabled={busy}
-            onRefresh={async () => { const id = vault.id, state = await invoke(api.captureStatus({ vaultId: id })); updateCaptureState(id, () => state); return state; }}
-            onSource={async () => { const id = vault.id, state = await invoke(api.pickCaptureSource({ vaultId: id })); if (state) updateCaptureState(id, () => state); return state; }}
-            onSave={async input => { const id = vault.id, state = await invoke(api.configureCapture({ vaultId: id, input })); updateCaptureState(id, () => state); return state; }}
-            onImport={()=>captureAction("sync",true)} onManageSpaces={()=>setSettingsTab("vault")}/>}
+          {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
+            destination={captureVault?.name} disabled={busy || automaticCaptureId === captureVaultId}
+            onRefresh={async () => { const state = await invoke(api.captureStatus({ vaultId: captureVaultId })); updateCaptureState(captureVaultId, () => state); return state; }}
+            onSource={async () => { const state = await invoke(api.pickCaptureSource({ vaultId: captureVaultId })); if (state) updateCaptureState(captureVaultId, () => state); return state; }}
+            onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}
+            onImport={()=>captureAction("sync",true,{},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
           {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
