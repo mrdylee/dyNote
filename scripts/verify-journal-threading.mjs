@@ -64,8 +64,94 @@ try{
  check('four-space and tab-indented Markdown retains a 30px step per hierarchy level',()=>{assert.equal(importedSpacing.length,3);for(let index=1;index<importedSpacing.length;index++)assert.ok(Math.abs(importedSpacing[index]-importedSpacing[index-1]-30)<1,JSON.stringify(importedSpacing));});
  assert.equal(await readFile(`${vault}/${importedPath}`,'utf8'),importedContent);
  await page.screenshot({path:`${output}/imported-indentation.png`});
+ const timingPath='Journal/2026-11-01.md';
+ const timingContent='- Root block\n  - Image parent ![[_attachments/timing.png]]\n    - Leaf after image\n    - Peer after image\n  - Following sibling\n';
+ const imePath='Journal/2026-10-31.md';
+ const imeContent='- IME root\n  - IME parent\n    - IME leaf\n    - IME sibling\n';
+ const png=await page.evaluate(()=>{
+  const canvas=document.createElement('canvas');
+  canvas.width=230;canvas.height=205;
+  const context=canvas.getContext('2d');
+  context.fillStyle='#d8c7eb';context.fillRect(0,0,230,205);
+  return canvas.toDataURL('image/png').split(',')[1];
+ });
+ await mkdir(`${vault}/_attachments`,{recursive:true});
+ await writeFile(`${vault}/_attachments/timing.png`,Buffer.from(png,'base64'));
+ await writeFile(`${vault}/${timingPath}`,timingContent);
+ await writeFile(`${vault}/${imePath}`,imeContent);
+ await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1440,1000));
+ await page.getByRole('button',{name:'문서 새로고침',exact:true}).click();
+ await page.getByTitle(timingPath,{exact:true}).waitFor();
+ await open(timingPath);await click('Leaf after image');
+ const image=page.locator('img.cm-live-image');
+ await image.click();await image.waitFor({state:'hidden'});
+ await page.evaluate(()=>{
+  const descriptor=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'src');
+  Object.defineProperty(HTMLImageElement.prototype,'src',{...descriptor,set(value){
+   if(!value.endsWith('/timing.png'))return descriptor.set.call(this,value);
+   Object.defineProperty(HTMLImageElement.prototype,'src',descriptor);
+   window.resumeThreadImage=()=>descriptor.set.call(this,value+'?delayed-preview');
+  }});
+ });
+ await click('Leaf after image');
+ await page.waitForFunction(()=>typeof window.resumeThreadImage==='function');
+ const imageLayout=()=>page.locator('.cm-journal').evaluate(editor=>{
+  const rect=element=>element.getBoundingClientRect();
+  const picture=rect(editor.querySelector('img.cm-live-image'));
+  const bullet=rect(editor.querySelector('.cm-journal-active .cm-live-bullet'));
+  const caret=rect(editor.querySelector('.cm-cursor-primary'));
+  return {imageTop:picture.top,imageBottom:picture.bottom,editorHeight:rect(editor.querySelector('.cm-content')).height,
+   bulletY:(bullet.top+bullet.bottom)/2,caretY:(caret.top+caret.bottom)/2,
+   ends:[...editor.querySelectorAll('.cm-journal-thread')].map(line=>rect(line).bottom)};
+ });
+ const beforeImage=await imageLayout();
+ await page.evaluate(()=>window.resumeThreadImage());
+ await page.waitForFunction(()=>document.querySelector('img.cm-live-image')?.naturalHeight===205);
+ await settle();
+ const afterImage=await imageLayout();
+ check('an image that loads after returning from Markdown keeps the branch on the bullet below it',()=>{
+  assert.equal(beforeImage.ends.length,2);
+  assert.ok(afterImage.bulletY-beforeImage.bulletY>100,JSON.stringify({beforeImage,afterImage}));
+  assert.equal(afterImage.ends.length,2);
+  assert.ok(afterImage.ends.at(-1)>afterImage.imageBottom,JSON.stringify({beforeImage,afterImage}));
+  assert.ok(Math.abs(afterImage.ends.at(-1)-afterImage.bulletY)<1.5,JSON.stringify({beforeImage,afterImage}));
+ });
+ check('the editing caret follows the child below the loaded image',()=>{
+  assert.ok(afterImage.caretY>afterImage.imageBottom,JSON.stringify({beforeImage,afterImage}));
+  assert.ok(Math.abs(afterImage.caretY-afterImage.bulletY)<8,JSON.stringify({beforeImage,afterImage}));
+ });
+ assert.equal(await readFile(`${vault}/${timingPath}`,'utf8'),timingContent);
+ await page.screenshot({path:`${output}/image-thread.png`});
+
+ await open(imePath);
+ await page.getByRole('textbox',{name:'Markdown 편집기',exact:true}).focus();
+ await page.keyboard.press(process.platform==='darwin'?'Meta+ArrowUp':'Control+Home');
+ await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');
+ await page.keyboard.press(process.platform==='darwin'?'Meta+ArrowRight':'End');
+ await settle();
+ assert.match((await active())[0]??'',/IME leaf/);
+ const cdp=await page.context().newCDPSession(page),ime=[];
+ try {
+  for(const text of ['ㅎ','하','한']){
+   await cdp.send('Input.imeSetComposition',{text,selectionStart:text.length,selectionEnd:text.length});
+   await settle();
+   ime.push({text,threads:await threads(),active:await active(),ancestors:await ancestors()});
+  }
+  await cdp.send('Input.insertText',{text:'한'});
+ }finally{await cdp.detach();}
+ await save();
+ check('Korean IME keeps the active path visible throughout composition',()=>{
+  for(const state of ime){
+   assert.equal(state.threads,2,JSON.stringify(state));
+   assert.equal(state.ancestors.length,2);
+   assert.equal(state.active.length,1);
+   assert.ok(state.active[0].includes('IME leaf'+state.text),JSON.stringify(state));
+  }
+ });
+ const committed=await readFile(`${vault}/${imePath}`,'utf8');
+ check('the composed text is saved once in the focused child',()=>assert.equal(committed,imeContent.replace('IME leaf','IME leaf한')));
  await app.close();app=await launch();await setup();await open(path);await click('Active leaf');const restarted=await threads();
  check('restart preserves Markdown bytes and restores threading',()=>assert.equal(restarted,2));assert.equal(await readFile(`${vault}/${path}`,'utf8'),original);
  check('renderer has no errors',()=>assert.deepEqual(errors,[]));
- const report={checks,failures,errors,circles,importedSpacing,threadStyle};await writeFile(`${output}/report.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));assert.deepEqual(failures,[]);
+ const report={checks,failures,errors,circles,importedSpacing,threadStyle,imageLayout:{before:beforeImage,after:afterImage},ime};await writeFile(`${output}/report.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));assert.deepEqual(failures,[]);
 }finally{await app.close();await rm(root,{recursive:true,force:true});}

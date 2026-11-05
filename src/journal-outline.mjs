@@ -6,15 +6,15 @@ import {isolateHistory} from '@codemirror/commands';
 import {runOutlineCommand} from './editorCommands.mjs';
 import {outlineEdit} from '../core/outliner.mjs';
 import {outlineDefaults,outlineRegionState,outlineOptionsAt} from './outline-regions.mjs';
+import {imageLayoutChanged} from './live-preview.mjs';
 
 function metadataEnd(doc){
  if(doc.line(1).text.replace(/^\uFEFF/,'')!=='---')return 0;
  for(let number=2;number<=doc.lines;number++)if(/^(?:---|\.\.\.)\s*$/.test(doc.line(number).text))return doc.line(number).to;
  return doc.length;
 }
-function block(view){
- if(view.state.readOnly||view.composing||view.state.selection.ranges.length!==1||!view.state.selection.main.empty)return null;
- const {state}=view,pos=state.selection.main.head;
+function blockAtSelection(state){
+ const pos=state.selection.main.head;
  if(outlineOptionsAt(state,pos).mode!=='journal')return null;
  if(pos<metadataEnd(state.doc))return null;
  let node=syntaxTree(state).resolveInner(pos,-1);
@@ -27,6 +27,11 @@ function block(view){
  const first=state.doc.lineAt(node.from),line=state.doc.lineAt(pos);
  if(!/^[\t ]*$/.test(state.doc.sliceString(first.from,marker.from)))return null;
  return {node,marker,first,line,pos};
+}
+function block(view){
+ const {state,composing}=view;
+ if(state.readOnly||composing||state.selection.ranges.length!==1||!state.selection.main.empty)return null;
+ return blockAtSelection(state);
 }
 function insert(view,from,text){
  view.dispatch({changes:{from,insert:text},selection:{anchor:from+text.length},scrollIntoView:true,
@@ -104,8 +109,11 @@ export function addJournalBlock(view){
  insert(view,end,(last.text?'\n':'')+'- ');view.focus();return true;
 }
 function threadPath(view){
- if(!view.hasFocus||!view.dom.classList.contains('cm-live-preview'))return [];
- const current=block(view),path=[],scope=outlineOptionsAt(view.state,view.state.selection.main.head);
+ const {state}=view;
+ const {selection}=state;
+ if(!view.hasFocus||!view.dom.classList.contains('cm-live-preview')||state.readOnly||selection.ranges.length!==1)return [];
+ if(!selection.main.empty&&!view.compositionStarted)return [];
+ const current=blockAtSelection(state),path=[],scope=outlineOptionsAt(state,selection.main.head);
  for(let node=current?.node;node;node=node.parent)if(node.name==='ListItem'){const marker=node.getChild('ListMark');if(marker&&marker.from>=scope.from&&marker.to<=scope.to)path.push(marker);}
  return path.reverse().filter(Boolean);
 }
@@ -141,7 +149,8 @@ function threadMarkers(view){
 }
 const threading=journal=>layer({
  above:true,class:journal?'cm-journal-threading':'cm-outline-threading',markers:threadMarkers,
- update:update=>update.docChanged||update.selectionSet||update.viewportChanged||update.focusChanged,
+ update:update=>update.docChanged||update.selectionSet||update.viewportChanged||update.focusChanged||
+  update.transactions.some(tr=>tr.effects.some(effect=>effect.is(imageLayoutChanged))),
 });
 function decorations(view){
  const ranges=[],seen=new Set(),header=metadataEnd(view.state.doc),tree=syntaxTree(view.state),path=threadPath(view);
