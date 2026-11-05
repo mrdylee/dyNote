@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
+import { Data, NtExecutable, NtExecutableResource, Resource } from "resedit";
 import assert from "node:assert/strict";
 
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
@@ -30,10 +31,28 @@ if (selected && !packages.some(([platform]) => platform === selected)) throw new
 for (const [platform, relative] of packages.filter(([platform]) => !selected || selected === platform)) {
   const archive = `${packageRoot}/${relative}`;
   if (platform === "darwin-arm64") {
-    execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", `${packageRoot}/Dynote-darwin-arm64/Dynote.app`], { stdio: "pipe" });
+    const app = path.join(packageRoot, "Dynote-darwin-arm64", "Dynote.app");
+    execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], { stdio: "pipe" });
+    const iconFile = execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleIconFile", path.join(app, "Contents", "Info.plist")], { encoding: "utf8" }).trim();
+    assert.deepEqual(await readFile(path.join(app, "Contents", "Resources", iconFile)), await readFile("branding/dynote.icns"), "Dynote.app must embed the approved icon");
+  } else {
+    const exe = NtExecutable.from(await readFile(path.join(packageRoot, "Dynote-win32-x64", "Dynote.exe")));
+    const { entries } = NtExecutableResource.from(exe);
+    const groups = Resource.IconGroupEntry.fromEntries(entries);
+    assert.equal(groups.length, 1, "Dynote.exe must contain one application icon group");
+    const fingerprint = icon => ({
+      width: icon.width || 256,
+      height: icon.height || 256,
+      sha256: hash(Buffer.from(icon.bin)),
+    });
+    const embedded = groups[0].getIconItemsFromEntries(entries).map(fingerprint);
+    const expected = Data.IconFile.from(await readFile("branding/dynote.ico")).icons.map(({ data }) => fingerprint(data));
+    assert.deepEqual(embedded, expected, "Dynote.exe must embed the approved icon at every size");
   }
   const contents = listPackage(archive).map(name => name.replaceAll("\\", "/"));
   assert.ok(!contents.some((name) => name.includes("graph-simulation.wasm")));
+  const runtimes = contents.filter(name => /^\/node_modules\/@github\/copilot-sdk-[^/]+$/.test(name));
+  assert.deepEqual(runtimes, [`/node_modules/@github/copilot-sdk-${platform}`], "Package only the target Copilot runtime");
   const runtime = `node_modules/@github/copilot-sdk-${platform}/prebuilds/${platform}`;
   await access(path.join(`${archive}.unpacked`, runtime, platform.startsWith("win32") ? "copilot-runtime.exe" : "copilot-runtime"));
   await access(path.join(`${archive}.unpacked`, runtime, "runtime.node"));

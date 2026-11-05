@@ -106,7 +106,8 @@ const invoke = async (result) => {
   if (!response.ok) throw new Error(response.error);
   return response.value;
 };
-const shortcut = navigator.platform.includes("Mac") ? "⌘" : "Ctrl";
+const isMac = navigator.platform.includes("Mac");
+const shortcut = isMac ? "⌘" : "Ctrl";
 const stored = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 };
@@ -1204,8 +1205,12 @@ export default function App() {
     .filter(Boolean);
   return (
     <div className="app-shell">
-      <header className="titlebar">
-        <button className="app-version" aria-label="앱 버전 정보" title="Dynote 버전 정보" onClick={() => setModal("about")}>Dynote <small>v{version}</small></button>
+      <header className={isMac ? "titlebar titlebar-mac" : "titlebar"}>
+        <button className="app-version" aria-label="앱 버전 정보" title="DyNote 버전 정보" onClick={() => setModal("about")}>
+          <img src="./brand/dynote.svg" width="30" height="30" alt="" />
+          <span className="app-wordmark">Dy<span>Note</span></span>
+          <small>v{version}</small>
+        </button>
         <div>
           <span className="local-dot" />내 기기에 저장되는 지식 공간
         </div>
