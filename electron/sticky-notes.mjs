@@ -12,7 +12,7 @@ const saveDelay = 550;
 
 function titleFor(content) {
   const first = content.split(/\r?\n/).find(line => line.trim());
-  return first?.trim().replace(/^#{1,6}\s+/, "").slice(0, 54) || "포스트잇";
+  return first?.trim().replace(/^(?:#{1,6}|[-+*])\s+/, "").slice(0, 54) || "포스트잇";
 }
 
 function notePath(id, title) {
@@ -115,7 +115,7 @@ export class StickyNotes {
 
     const window = new BrowserWindow({
       ...bounds, title: "Dynote 포스트잇", show: false,
-      frame: false, transparent: true, resizable: false, minimizable: false,
+      frame: false, resizable: true, minWidth: 240, minHeight: 160, minimizable: false,
       maximizable: false, fullscreenable: false, skipTaskbar: true,
       alwaysOnTop: record.pinned === true,
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false },
@@ -124,12 +124,14 @@ export class StickyNotes {
     this.#windows.set(record.id, state);
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", event => event.preventDefault());
-    window.on("move", () => {
+    const rememberBounds = () => {
       const bounds = window.getBounds();
-      if (bounds.x === state.record.bounds.x && bounds.y === state.record.bounds.y) return;
+      if (Object.keys(bounds).every(key => bounds[key] === state.record.bounds[key])) return;
       state.record = { ...state.record, bounds };
       this.#schedule(state);
-    });
+    };
+    window.on("move", rememberBounds);
+    window.on("resize", rememberBounds);
     window.on("close", event => {
       if (this.quitReady()) return;
       event.preventDefault();

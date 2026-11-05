@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'" />
   <title>Dynote 포스트잇</title>
 </head>
 <body data-color="cream">
@@ -16,7 +16,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
     </button>
   </header>
-  <textarea id="memo" aria-label="포스트잇 메모" placeholder="메모를 입력하세요…" spellcheck="false" disabled></textarea>
+  <div id="memo"></div>
   <footer id="status" role="status"></footer>
   <script type="module" src="/src/sticky.mjs"></script>
 </body>

@@ -12,7 +12,6 @@ body {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--edge);
-  border-radius: 13px;
   background: var(--paper);
   color: #2f2b36;
   font: 13px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
@@ -59,22 +58,18 @@ button[aria-pressed="true"] { color: #573894; background: rgb(121 99 203 / 17%);
 button:focus-visible { outline: 2px solid #7963cb; outline-offset: 1px; }
 button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
-textarea {
+#memo {
+  --body-size: 14px;
+  --journal-line-padding: 15px;
   flex: 1;
   min-height: 0;
-  width: 100%;
-  padding: 2px 15px 5px;
-  border: 0;
-  outline: 0;
-  resize: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.55;
 }
 
-textarea::placeholder { color: var(--quiet); }
+#memo .cm-editor { height: 100%; outline: none; }
+#memo .cm-scroller { font-family: inherit; font-size: var(--body-size); line-height: 1.55; overflow: auto; }
+#memo .cm-content { padding: 2px 0 6px; }
+.cm-live-preview .cm-line { padding-inline: var(--journal-line-padding); }
+#memo .cm-cursor { border-left-color: #8e70bc; }
 
 footer {
   flex: none;

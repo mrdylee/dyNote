@@ -76,6 +76,34 @@ for key, pressed, flags in ((59, True, control), (56, True, control | shift),
     time.sleep(0.035)
 `]);
 
+// Resize with the native window edges. Chromium mouse events stop at the renderer.
+async function growSticky(app, page, bounds) {
+  const { x, y, width, height } = bounds;
+  const drag = (x, y, dx, dy) => execFileSync("python3", ["-c", `
+import ctypes as c
+import sys
+import time
+class Point(c.Structure):
+    _fields_ = [('x', c.c_double), ('y', c.c_double)]
+cg = c.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+cf = c.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+cg.CGEventCreateMouseEvent.argtypes = (c.c_void_p, c.c_uint32, Point, c.c_uint32)
+cg.CGEventCreateMouseEvent.restype = c.c_void_p
+cg.CGEventPost.argtypes = (c.c_int, c.c_void_p)
+cf.CFRelease.argtypes = (c.c_void_p,)
+x, y, dx, dy = map(int, sys.argv[1:])
+for kind, step in [(5, 0), (1, 0)] + [(6, i) for i in range(1, 9)] + [(2, 8)]:
+    event = cg.CGEventCreateMouseEvent(None, kind, Point(x + dx * step / 8, y + dy * step / 8), 0)
+    cg.CGEventPost(0, event)
+    cf.CFRelease(event)
+    time.sleep(0.04)
+`, String(x), String(y), String(dx), String(dy)]);
+  drag(x + width - 2, y + Math.floor(height / 2), 96, 0);
+  const wider = await until(() => stickyBounds(app, page), value => value.width > width);
+  drag(wider.x + Math.floor(wider.width / 2), wider.y + wider.height - 2, 0, 72);
+  return until(() => stickyBounds(app, page), value => value.height > height);
+}
+
 const openWithKey = async app => {
   const opened = app.waitForEvent("window", { timeout: 7000 });
   postShortcut();
@@ -91,6 +119,7 @@ const openWithKey = async app => {
 };
 const stickyBounds = async (app, page) => (await app.browserWindow(page)).evaluate(win => win.getBounds());
 const memo = page => page.getByRole("textbox", { name: "포스트잇 메모" });
+const markdown = page => memo(page).evaluate(field => field.cmTile?.root.view.state.doc.toString() ?? field.value);
 const color = page => page.locator("body").getAttribute("data-color");
 const diskFiles = async () => (await readdir(folder).catch(error => {
   if (error.code === "ENOENT") return [];
@@ -125,23 +154,51 @@ try {
   assert.equal(new Set(placements.map(({ x, y }) => `${x},${y}`)).size, 3);
   await until(() => memo(cards[2]).evaluate(field => field === document.activeElement), Boolean);
 
-  for (let i = 0; i < cards.length; i++) await memo(cards[i]).fill(`회의 메모 ${i + 1}\n- 확인할 항목`);
+  assert.equal((await diskFiles()).length, 0, "opening empty cards should not create Markdown");
+  const threaded = cards[0];
+  assert.equal(await markdown(threaded), "- ", "a new sticky starts with the first journal bullet");
+  await (await app.browserWindow(threaded)).evaluate(win => win.focus());
+  await memo(threaded).focus();
+  await threaded.keyboard.insertText("회의 메모 1");
+  await threaded.keyboard.press("Enter");
+  await threaded.keyboard.insertText("확인할 항목");
+  assert.equal(await markdown(threaded), "- 회의 메모 1\n- 확인할 항목");
+  await threaded.keyboard.press("Tab");
+  assert.equal(await markdown(threaded), "- 회의 메모 1\n  - 확인할 항목");
+  const thread = threaded.locator(".cm-journal-threading .cm-journal-thread");
+  await thread.waitFor({ timeout: 5000 });
+  assert.equal(await thread.evaluate(marker => getComputedStyle(marker).borderLeftWidth), "2px");
+  await threaded.keyboard.press("Shift+Tab");
+  assert.equal(await markdown(threaded), "- 회의 메모 1\n- 확인할 항목");
+  await thread.waitFor({ state: "detached", timeout: 5000 });
+  await threaded.keyboard.press("Tab");
+  await thread.waitFor({ timeout: 5000 });
+  await memo(cards[1]).fill("회의 메모 2\n- 예전 형식으로 적은 내용");
+  await memo(cards[2]).fill("회의 메모 3\n- 확인할 항목");
   const files = await until(diskFiles, value => value.length === 3);
   const contents = await Promise.all(files.map(file => readFile(path.join(folder, file), "utf8")));
-  assert.equal(contents.filter(body => body.startsWith("회의 메모")).length, 3);
+  assert.ok(contents.includes("- 회의 메모 1\n  - 확인할 항목"));
+  assert.ok(contents.includes("회의 메모 2\n- 예전 형식으로 적은 내용"));
+  assert.ok(contents.includes("회의 메모 3\n- 확인할 항목"));
   assert.deepEqual(await readdir(team), ["팀 자료.md"]);
-  const file = files[contents.findIndex(body => body.startsWith("회의 메모 1\n"))];
+  const file = files[contents.findIndex(body => body.startsWith("- 회의 메모 1\n"))];
   const notePath = path.join(folder, file);
   const noteColor = await color(cards[0]);
   const card = await app.browserWindow(cards[0]);
   await card.evaluate(win => {
     const [x, y] = win.getPosition();
-    win.setPosition(x - 44, y + 46);
+    win.setPosition(x - 160, y + 46);
+    win.focus();
   });
-  const moved = await stickyBounds(app, cards[0]);
+  assert.equal(await card.evaluate(win => win.isResizable()), true);
+  const beforeResize = await stickyBounds(app, threaded);
+  const resized = await growSticky(app, threaded, beforeResize);
+  assert.equal(resized.x, beforeResize.x);
+  assert.equal(resized.y, beforeResize.y);
+  assert.ok(resized.width >= beforeResize.width + 60 && resized.height >= beforeResize.height + 45);
   await cards[0].getByRole("button", { name: "항상 위에 고정" }).click();
   assert.equal(await card.evaluate(win => win.isAlwaysOnTop()), true);
-  const finalBody = "회의 메모 1\n- 닫기 직전 편집";
+  const finalBody = "- 회의 메모 1\n  - 닫기 직전 편집";
   await memo(cards[0]).fill(finalBody);
   const closed = cards[0].waitForEvent("close");
   await cards[0].getByRole("button", { name: "포스트잇 닫기" }).click();
@@ -168,9 +225,10 @@ try {
   await clickTray(app, recent);
   const restored = await reopened;
   await memo(restored).waitFor();
-  assert.equal(await memo(restored).inputValue(), finalBody);
+  assert.equal(await markdown(restored), finalBody);
   assert.equal(await color(restored), noteColor);
-  assert.deepEqual(await stickyBounds(app, restored), moved);
+  assert.deepEqual(await stickyBounds(app, restored), resized);
+  await restored.locator(".cm-journal-threading .cm-journal-thread").waitFor({ timeout: 5000 });
   assert.equal(await (await app.browserWindow(restored)).evaluate(win => win.isAlwaysOnTop()), true);
   await blank.getByRole("button", { name: "포스트잇 닫기" }).click();
   assert.equal((await diskFiles()).length, 3);
@@ -181,7 +239,7 @@ try {
   await writeFile(notePath, external);
   await memo(restored).fill("보존할 초안");
   await restored.getByRole("status").getByText(/외부에서 문서가 변경/).waitFor();
-  assert.equal(await memo(restored).inputValue(), "보존할 초안");
+  assert.equal(await markdown(restored), "보존할 초안");
   await app.evaluate(({ dialog }) => {
     const original = dialog.showMessageBox;
     dialog.showMessageBox = async (window, options) => {
@@ -195,7 +253,7 @@ try {
   await restored.getByRole("button", { name: "포스트잇 닫기" }).click();
   await conflictClosed;
   assert.equal(await readFile(notePath, "utf8"), external);
-  console.log("Verified native shortcut, hidden main window, settings, three Markdown files, close/quit saves, tray reopen, card restoration and external-edit conflict handling.");
+  console.log("Verified native shortcut, hidden main window, settings, three Markdown files, close/quit saves, tray reopen, bullet threading, resize restoration and external-edit conflict handling.");
 } finally {
   if (app) {
     await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
