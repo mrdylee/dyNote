@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,realpath,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -10,6 +10,7 @@ const output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/copilot-journal',m
 for(const directory of [profile,path.join(vault,'Journal'),team,path.join(source,'project/chatSessions'),output])await mkdir(directory,{recursive:true});
 await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vault,vaults:[vault,team],vaultPurposes:{[vault]:'personal',[team]:'team'}}));
 await writeFile(path.join(vault,journal),'# Today\n\n사용자가 직접 작성한 기록\n');
+await writeFile(path.join(team,'Shared.md'),'# 팀 기록\n');
 await writeFile(path.join(source,'project/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(root,'Work')).href}));
 const put=async(id,title,question)=>writeFile(path.join(source,`project/chatSessions/${id}.json`),JSON.stringify({version:3,sessionId:id,customTitle:title,requests:[{requestId:'q',timestamp:Date.now(),message:{text:question},modelState:{value:1},response:[{kind:'thinking',value:'DO NOT IMPORT THINKING'},{value:'검증용 답변'}]}]}));
 await put('first','검토 대화','첫 질문 원문');
@@ -38,8 +39,27 @@ try{
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
  await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
+ await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
+ const teamPane=page.getByRole('region',{name:'문서 Shared.md',exact:true});
+ await teamPane.waitFor();
  await put('second','보존할 두 번째 대화','두 번째 질문');
- await check('a new session is automatically added to the same journal record',async()=>{await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));state=await captureState();assert.equal(state.records.length,1);assert.equal(state.records[0].sessions.length,2);assert.equal((await readFile(path.join(vault,journal),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);});
+ await check('a new session is added to the personal journal while the team document remains focused',async()=>{
+  await page.waitForFunction(async()=>{
+   const {value}=await window.notes.snapshot();
+   const response=await window.notes.captureStatus({vaultId:value.id});
+   return response.value?.records[0]?.sessions.length===2;
+  },undefined,{polling:300});
+  assert.ok((await teamPane.getAttribute('class')).includes('focused'));
+  assert.deepEqual(await readdir(team),['Shared.md']);
+  assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\n');
+  await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
+  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));
+  state=await captureState();
+  assert.equal(state.records.length,1);assert.equal(state.records[0].sessions.length,2);
+  assert.equal((await readFile(path.join(vault,journal),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);
+ });
  await page.locator('.capture-record details summary').click();await page.screenshot({path:path.join(output,'journal-titles.png')});
  await page.getByRole('button',{name:'검토 대화 대화 삭제',exact:true}).click();
  await check('a title delete button removes only that conversation and reimport cannot revive it',async()=>{

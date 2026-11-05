@@ -39,7 +39,7 @@ import {
   toggleTask,
   attachmentUrl,
 } from "../core/knowledge.mjs";
-import { SaveQueue } from "./saveQueue.mjs";
+import useVaultDocuments from "./useVaultDocuments.jsx";
 import DocumentWorkspace from "./DocumentWorkspace.jsx";
 import useDocumentWorkspace from "./useDocumentWorkspace.jsx";
 import JournalFeed from "./JournalFeed.jsx";
@@ -47,7 +47,7 @@ import CopilotJournalEntries,{CopilotJournalToolbar} from "./CopilotJournalEntri
 import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
-import { DOCUMENT_DRAG } from "../core/document-workspace.mjs";
+import { DOCUMENT_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
 import { protectedTreeFolders, canTrashFolder } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
@@ -93,7 +93,13 @@ import { BOARD_PATH } from "../core/planner.mjs";
 import EssViewer from "./EssViewer.jsx";
 import { noteEssLinks, setEssLink, validEssTarget } from "../core/ess-links.mjs";
 
-const api = window.notes;
+const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(([name, method]) => [
+  name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
+]));
+const emptyFiles = [];
+const emptyNavigation = normalizeNavigation(null);
+const emptyModel = buildKnowledge(emptyFiles);
+const checkingGit = { phase: "off", message: "Git 설정 확인 중…", enabled: false, config: null };
 const invoke = async (result) => {
   const response = await result;
   if (!response.ok) throw new Error(response.error);
@@ -119,7 +125,7 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
   );
 }
 
-function FileTree({ notes, active, onOpen, onContext }) {
+function FileTree({ notes, vaultId, active, onOpen, onContext, disabled }) {
   const [closed, setClosed] = useState(new Set());
   const tree = Object.create(null);
   for (const note of notes) {
@@ -147,8 +153,9 @@ function FileTree({ notes, active, onOpen, onContext }) {
               onClick={() => onOpen(path)}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
               title={path}
-              draggable={/\.md$/i.test(path)}
-              onDragStart={e => { e.dataTransfer.setData(DOCUMENT_DRAG,path); e.dataTransfer.effectAllowed="copy"; }}
+              disabled={disabled}
+              draggable={!disabled && /\.md$/i.test(path)}
+              onDragStart={e => { e.dataTransfer.setData(DOCUMENT_DRAG, documentKey(vaultId, path)); e.dataTransfer.effectAllowed="copy"; }}
             >
               <FileText size={14} />
               <span>{name.replace(/\.md$/i, "")}</span>
@@ -223,24 +230,29 @@ export default function App() {
     for (const [key, value] of Object.entries(fontVariables(fonts))) document.documentElement.style.setProperty(key, value);
     try { localStorage.setItem("dynote.fonts", JSON.stringify(fonts)); } catch { /* Preferences still apply for this session. */ }
   }, [fonts]);
-  const [vault, setVault] = useState(null);
+  const { vaults, current: vaultsRef, revisionMap, update: updateVault, remove: removeVault, queue, install: installVault } = useVaultDocuments(api, invoke);
+  const [selectedVaultId, setSelectedVaultId] = useState(null);
+  const selectedVault = useRef(null);
+  const workspace = useDocumentWorkspace();
+  const { vaultId: focusedVaultId, path: focusedPath } = documentRef(workspace.active, selectedVaultId);
+  const [attachment, setAttachment] = useState(null);
+  const attachmentRequest = useRef(0);
+  const vault = vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
+  const active = attachment && attachment.vaultId !== focusedVaultId ? null : focusedPath;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
+  const { mode, setMode } = workspace;
   const [spaces, setSpaces] = useState({ entries: [] });
-  const loadSpaces = useCallback(async () => {
-    const vaultId = currentVault.current;
-    const data = await invoke(api.vaults());
-    if (currentVault.current === vaultId) setSpaces({ ...data, vaultId });
-    return data;
-  }, []);
-  useEffect(() => {
-    if (api?.vaults && vault) loadSpaces().catch(error => setError(error.message));
-  }, [vault?.id, loadSpaces]);
-  const space = spaces.vaultId === vault?.id ? spaces.entries.find(entry => entry.root === spaces.current) : null;
-  const [raw, setRaw] = useState([]);
-  const [documents, setDocuments] = useState([]);
-  const workspace = useDocumentWorkspace();
-  const {active, setActive, mode, setMode} = workspace;
+  const [spaceFilter, setSpaceFilter] = useState("all");
+  const [spaceWarnings, setSpaceWarnings] = useState([]);
+  const spaceLoad = useRef(0);
+  const space = vault?.root ? vault : null;
+  const raw = vault?.notes ?? emptyFiles;
+  const documents = vault?.documents ?? emptyFiles;
+  const setVault = transform => updateVault(vault.id, old => old && transform(old));
+  const setRaw = transform => updateVault(vault.id, old => old && ({ ...old, notes: transform(old.notes) }));
+  const setDocuments = transform => updateVault(vault.id, old => old && ({ ...old, documents: transform(old.documents) }));
+  const revisions = { current: revisionMap(vault?.id) };
   const [updateState,setUpdateState]=useState(null);
   const [dismissedUpdate,setDismissedUpdate]=useState(null);
   useEffect(()=>{
@@ -264,7 +276,8 @@ export default function App() {
   const [section, setSection] = useState("files");
   const [essOpened, setEssOpened] = useState(false);
   const [essTarget, setEssTarget] = useState(null);
-  const [editorJump, setEditorJump] = useState(null);
+  const [editorJump, updateEditorJump] = useState(null);
+  const setEditorJump = (jump, id = vault?.id) => updateEditorJump(jump && { ...jump, vaultId: id });
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [panelWidths, setPanelWidths] = useState(() => normalizePanelWidths(stored("dynote.panelWidths", null)));
@@ -297,26 +310,31 @@ export default function App() {
     return () => { clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); };
   }, [active, vault?.id, modal]);
   const [settingsTab, setSettingsTab] = useState("vault");
-  const [pluginData, setPluginData] = useState({ entries: [] });
+  const [gitSettingsId, setGitSettingsId] = useState(null);
+  const gitVault = vaults[gitSettingsId] ?? vault;
+  useEffect(() => { if (modal !== "settings") setGitSettingsId(null); }, [modal]);
+  const [selectedPluginData, setPluginData] = useState({ entries: [] });
+  const pluginData = vault?.id === selectedVaultId ? selectedPluginData : { entries: [] };
   useEffect(() => {
     setPluginData({ entries: [] });
-    if (!vault?.id || !api?.plugins) return;
+    if (!selectedVaultId || !api?.plugins) return;
     let mounted = true;
-    const update = value => { if (mounted && value.vaultId === currentVault.current) setPluginData(value); };
+    const update = value => { if (mounted && value.vaultId === selectedVault.current) setPluginData(value); };
     const unsubscribe = api.onPluginStatus(update);
-    invoke(api.plugins({ vaultId: vault.id })).then(update).catch(error => { if (mounted) setPluginData({ entries: [], error: error.message }); });
+    invoke(api.plugins({ vaultId: selectedVaultId })).then(update).catch(error => { if (mounted) setPluginData({ entries: [], error: error.message }); });
     return () => { mounted = false; unsubscribe(); };
-  }, [vault?.id]);
+  }, [selectedVaultId]);
   useEffect(() => api?.onOpenSettings(tab => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) { if (tab === "fonts") setSettingsTab("fonts"); setModal("settings"); } }), [busy]);
   const [newName, setNewName] = useState("");
   const [switchQuery, setSwitchQuery] = useState("");
   const [commandQuery, setCommandQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
-  const [editorCommand, setEditorCommand] = useState(null);
+  const [editorCommand, updateEditorCommand] = useState(null);
+  const setEditorCommand = command => updateEditorCommand(command && { ...command, vaultId: vault?.id });
   const [historyDate, setHistoryDate] = useState(localDate);
   useEffect(() => {
     if (!editorCommand) return;
-    if (editorCommand.path !== active) { setEditorCommand(null); return; }
+    if (editorCommand.path !== active || editorCommand.vaultId !== vault?.id) { updateEditorCommand(null); return; }
     const view = editorView.current;
     if (!view) return;
     if (editorCommand.type === "focus-end") {
@@ -330,14 +348,13 @@ export default function App() {
       view.dispatch({ changes: { from: cursor, insert: edit.insert }, selection: { anchor: edit.anchor }, annotations: isolateHistory.of("full"), scrollIntoView: true });
       view.focus();
     } else if (editorCommand.type !== "timestamp") runOutlineCommand(view, editorCommand.action);
-    setEditorCommand(null);
-  }, [editorCommand, mode, active, busy]);
-  const [navigation, setNavigation] = useState(normalizeNavigation(null));
-  const navigationRef = useRef(navigation);
-  const [journalPreferences, setJournalPreferences] = useState({});
-  const [captureState,setCaptureState]=useState(null);
+    updateEditorCommand(null);
+  }, [editorCommand, mode, active, busy, vault?.id]);
+  const navigation = vault?.navigation ?? emptyNavigation;
+  const journalPreferences = vault?.journalPreferences ?? {};
+  const [captureStates, setCaptureStates] = useState({});
+  const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
-  const [attachment, setAttachment] = useState(null);
   const [fileTarget, setFileTarget] = useState(null);
   const [classificationHelpDismissed, setClassificationHelpDismissed] = useState(false);
   const classificationHelpRef = useRef(null);
@@ -363,118 +380,162 @@ export default function App() {
   }, [treeMenu]);
   const [propertiesDraft, setPropertiesDraft] = useState("");
   const [lastTrash, setLastTrash] = useState(null);
-  const [gitStatus, setGitStatus] = useState({ phase: "off", message: "Git 백업 미설정", enabled: false, config: null });
-  const acceptGitStatus = (value) => { if (value.vaultId === currentVault.current) setGitStatus(value); };
+  const [gitStates, setGitStates] = useState({});
+  const gitStatus = gitStates[vault?.id] ?? checkingGit;
+  const gitSettingsStatus = gitStates[gitVault?.id] ?? checkingGit;
+  const acceptGitStatus = useCallback(value => {
+    if (value?.vaultId) setGitStates(old => ({ ...old, [value.vaultId]: value }));
+  }, []);
+  useEffect(() => api?.onGitStatus(acceptGitStatus), [acceptGitStatus]);
   useEffect(() => {
     if (!vault?.id) return;
+    const id = vault.id;
     let mounted = true;
-    const update = (value) => { if (mounted && value.vaultId === vault.id) setGitStatus(value); };
-    setGitStatus({ phase: "off", message: "Git 설정 확인 중…", enabled: false, config: null });
-    const unsubscribe = api.onGitStatus(update);
-    invoke(api.gitStatus({ vaultId: vault.id })).then(update).catch((error) => { if (mounted) setGitStatus({ phase: "error", message: error.message, enabled: false, config: null }); });
-    return () => { mounted = false; unsubscribe(); };
-  }, [vault?.id]);
-  const revisions = useRef(new Map());
-  const queue = useRef(null);
+    invoke(api.gitStatus({ vaultId: id })).then(value => {
+      if (mounted) acceptGitStatus(value);
+    }).catch(error => {
+      if (mounted) acceptGitStatus({ vaultId: id, phase: "error", message: error.message, enabled: false, config: null });
+    });
+    return () => { mounted = false; };
+  }, [vault?.id, acceptGitStatus]);
   const timer = useRef(null);
   const preview = useRef(null);
-  const edits = useCopilotEdits({ api, vaultId: vault?.id, notes: raw, onError: setError,
-    onOpen: (path) => { openNote(path); setMode("edit"); },
-    onSaved: (saved, removedPath) => {
-      for (const item of saved) revisions.current.set(item.path, item.revision);
-      setRaw((old) => [...old.filter((n) => n.path !== removedPath && !saved.some((item) => item.path === n.path)), ...saved]);
+  const editState = useCopilotEdits({ api, vaults, onError: setError,
+    onOpen: (id, path) => {
+      const key = documentKey(id, path);
+      if (currentVault.current === id) {
+        openNote(path, id);
+        workspace.dispatch({ type: "mode", path: key, mode: "edit" });
+      } else setTabs(old => old.includes(key) ? old : [...old, key]);
+    },
+    onSaved: (id, saved, removedPath) => {
+      for (const item of saved) revisionMap(id).set(item.path, item.revision);
+      updateVault(id, old => old && ({ ...old, notes: [...old.notes.filter(n => n.path !== removedPath && !saved.some(item => item.path === n.path)), ...saved] }));
     },
   });
-  const editsRef = useRef(edits); editsRef.current = edits;
-  const effectiveNotes = useMemo(() => overlayNotes(raw, edits.drafts), [raw, edits.drafts]);
-  const model = useMemo(() => buildKnowledge(effectiveNotes), [effectiveNotes]);
-  const pendingEdit = edits.drafts.find((draft) => draft.path === active);
-  const note = section === "journal" ? null : model.notes.find((n) => n.path === active);
+  const edits = editState.forVault(vault?.id);
+  const editsRef = useRef(editState); editsRef.current = editState;
+  const knowledge = useRef(new Map());
+  const models = useMemo(() => new Map(Object.values(vaults).map(scope => {
+    const drafts = editState.drafts[scope.id] ?? emptyFiles;
+    const cached = knowledge.current.get(scope.id);
+    const model = cached?.notes === scope.notes && cached.drafts === drafts ? cached.model
+      : buildKnowledge(overlayNotes(scope.notes, drafts));
+    knowledge.current.set(scope.id, { notes: scope.notes, drafts, model });
+    return [scope.id, model];
+  })), [vaults, editState.drafts]);
+  const model = models.get(vault?.id) ?? emptyModel;
+  const pendingEdit = edits.drafts.find(draft => draft.path === active);
+  const chatPaths = useRef(new Map());
+  const note = section === "journal" || attachment ? null : model.notes.find(n => n.path === active);
+  if (note) chatPaths.current.set(vault.id, note.path);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
-  const structured = section === "journal" ? null : documents.find((d) => d.path === active);
-  const journalPaths = useMemo(() => new Set(periodicEntries(model.notes, "daily", {...journalPreferences.daily,locale:journalPreferences.locale}).map(n => n.path)), [model.notes, journalPreferences]);
-  const journalNote = note && journalPaths.has(note.path);
+  const structured = section === "journal" || attachment ? null : documents.find(d => d.path === active);
+  const journalPaths = useMemo(() => new Map(Object.values(vaults).map(scope => [
+    scope.id, new Set(periodicEntries(models.get(scope.id).notes, "daily", { ...scope.journalPreferences?.daily, locale: scope.journalPreferences?.locale }).map(n => n.path)),
+  ])), [models, vaults]);
+  const journalNote = note && journalPaths.get(vault.id)?.has(note.path);
   const classification = useMemo(()=>journalNote && status === "saved" ? classificationSuggestions(note,model.notes) : [],[journalNote,note,model.notes,status]);
   const statistics = useMemo(() => wordStatistics(note?.content ?? ""), [note?.content]);
-  const results = useMemo(
-    () => searchNotes(model.notes, query),
-    [model, query],
-  );
-  const switchResults = useMemo(
-    () => searchNotes(model.notes, switchQuery).slice(0, 9),
-    [model, switchQuery],
-  );
-  const install = useCallback((snapshot) => {
-    const changedVault = currentVault.current !== snapshot.id;
+  const together = spaces.entries.some(entry => entry.purpose === "personal") && spaces.entries.some(entry => entry.purpose === "team");
+  const filter = spaceFilter === "personal" || vaults[spaceFilter] ? spaceFilter : "all";
+  const connectedSpaces = Object.values(vaults).filter(scope => scope.id).sort((a, b) =>
+    Number(b.purpose === "personal") - Number(a.purpose === "personal") || a.name.localeCompare(b.name, "ko"));
+  const visibleSpaces = connectedSpaces.filter(scope => together
+    ? (filter === "all" || scope.id === filter || (filter === "personal" && scope.purpose === "personal"))
+    : scope.id === vault?.id);
+  const searchAcross = query => searchNotes(visibleSpaces.flatMap(scope => models.get(scope.id).notes.map(note => ({
+    ...note, vaultId: scope.id, key: documentKey(scope.id, note.path), scopeLabel: spaceLabel(scope),
+  }))), query);
+  const results = section === "search" ? searchAcross(query) : emptyFiles;
+  const switchResults = modal === "switch" ? searchAcross(switchQuery).slice(0, 9) : emptyFiles;
+
+  const reconcileScope = useCallback((id, paths) => {
+    const keys = paths.map(path => documentKey(id, path));
+    const available = new Set(keys);
+    workspace.dispatch({ type: "reconcile-vault", vaultId: id, paths: keys });
+    setTabs(old => old.filter(key => documentRef(key).vaultId !== id || available.has(key)));
+  }, [workspace.dispatch]);
+  const acceptSnapshot = useCallback((snapshot, metadata = {}) => {
+    const paths = [...snapshot.notes, ...(snapshot.documents ?? [])].map(n => n.path);
+    const navigation = reconcileNavigation(stored(`dynote.navigation.${snapshot.id}`, null), paths);
+    persist(`dynote.navigation.${snapshot.id}`, navigation);
+    installVault({
+      ...snapshot, ...metadata, navigation,
+      journalPreferences: defaultJournalPreferences(stored(`dynote.journal.${snapshot.id}`, null), snapshot.notes),
+    });
+    reconcileScope(snapshot.id, paths);
+    return navigation;
+  }, [installVault, reconcileScope]);
+  const install = useCallback((snapshot, select = false) => {
+    const changedVault = select && selectedVault.current !== snapshot.id;
+    const navigation = acceptSnapshot(snapshot);
+    if (!snapshot.id) { setSettingsTab("vault"); setModal("settings"); }
+    if (select) {
+      selectedVault.current = snapshot.id;
+      setSelectedVaultId(snapshot.id);
+    }
     if (changedVault) {
       setEssOpened(false);
       setEssTarget(null);
-      setSection(old => old === "ess" ? "files" : old);
-    }
-    setEditorSelection(null);
-    clearTimeout(timer.current);
-    setVault(snapshot);
-    if (!snapshot.id) { setSettingsTab("vault"); setModal("settings"); }
-    setRaw(snapshot.notes);
-    setDocuments(snapshot.documents ?? []);
-    revisions.current = new Map(
-      [...snapshot.notes, ...(snapshot.documents ?? [])].map((n) => [n.path, n.revision]),
-    );
-    setAttachment(null);
-    const initial =
-      snapshot.notes.find((n) => n.path === "시작하기.md")?.path ??
-      snapshot.notes[0]?.path ??
-      snapshot.documents?.[0]?.path ??
-      null;
-    const priorNavigation = reconcileNavigation(stored(`dynote.navigation.${snapshot.id}`, null), [...snapshot.notes, ...(snapshot.documents ?? [])].map(n => n.path));
-    const startPath = priorNavigation.recent[0] ?? initial;
-    if (changedVault) {
-      workspace.dispatch({type:"reset",path:startPath});
-      setTabs(startPath ? [startPath] : []);
+      const startPath = navigation.recent[0] ?? snapshot.notes.find(n => n.path === "시작하기.md")?.path
+        ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
+      const key = documentKey(snapshot.id, startPath);
+      workspace.dispatch({ type: "reset", path: key });
+      setTabs(key ? [key] : []);
       setSection(stored("dynote.startup", "journal") === "journal" ? "journal" : "files");
-    } else {
-      const paths = [...snapshot.notes,...(snapshot.documents ?? [])].map(n=>n.path);
-      workspace.dispatch({type:"reconcile",paths});
-      setTabs(old=>old.filter(path=>paths.includes(path)));
     }
-    const navigation = reconcileNavigation(stored(`dynote.navigation.${snapshot.id}`, null), [...snapshot.notes, ...(snapshot.documents ?? [])].map(n => n.path));
-    const visited = navigation;
-    navigationRef.current = visited;
-    setNavigation(visited);
-    persist(`dynote.navigation.${snapshot.id}`, visited);
-    setJournalPreferences(defaultJournalPreferences(stored(`dynote.journal.${snapshot.id}`, null),snapshot.notes));
-    setError(snapshot.warnings.join(" · "));
-    setStatus("saved");
-    queue.current = new SaveQueue(
-      (path, content, revision) =>
-        invoke((documentKind(path) ? api.saveDocument : api.saveNote)({ vaultId: snapshot.id, path, content, revision })),
-      (saved) => {
-        revisions.current.set(saved.path, saved.revision);
-        setRaw((current) =>
-          current.map((n) =>
-            n.path === saved.path ? { ...n, revision: saved.revision, metadata: saved.metadata } : n,
-          ),
-        );
-        setDocuments((current) => current.map((d) => d.path === saved.path ? { ...d, revision: saved.revision } : d));
-      },
-    );
-  }, []);
+    if (select || currentVault.current === snapshot.id) {
+      setEditorSelection(null);
+      attachmentRequest.current++;
+      setAttachment(null);
+      setError(snapshot.warnings.join(" · "));
+    }
+    if (!queue.dirty) setStatus("saved");
+  }, [acceptSnapshot, queue, workspace.dispatch]);
+  const loadSpaces = useCallback(async ({ refresh = false } = {}) => {
+    const selectedId = selectedVault.current;
+    const load = ++spaceLoad.current;
+    const data = await invoke(api.vaults());
+    if (selectedId !== selectedVault.current || load !== spaceLoad.current) return data;
+    const primary = data.entries.find(entry => entry.root === data.current);
+    if (primary) updateVault(selectedId, old => old && ({ ...old, root: primary.root, purpose: primary.purpose }));
+    setSpaces(data);
+    const entries = await invoke(api.workspaceSnapshots());
+    if (selectedId !== selectedVault.current || load !== spaceLoad.current) return data;
+    const roots = new Set(entries.map(entry => entry.root));
+    for (const scope of Object.values(vaultsRef.current)) {
+      if (scope.id === selectedId || roots.has(scope.root)) continue;
+      reconcileScope(scope.id, []);
+      removeVault(scope.id);
+    }
+    for (const { root, purpose, snapshot } of entries) {
+      if (!snapshot) continue;
+      if (!refresh && vaultsRef.current[snapshot.id]) updateVault(snapshot.id, old => ({ ...old, root, purpose }));
+      else acceptSnapshot(snapshot, { root, purpose });
+    }
+    setSpaceWarnings(entries.filter(entry => entry.error).map(entry => `${spaceLabel(entry)} · ${entry.error}`));
+    return data;
+  }, [acceptSnapshot, reconcileScope, removeVault, updateVault, vaultsRef]);
+  useEffect(() => {
+    if (api?.vaults && selectedVaultId) loadSpaces().catch(error => setError(error.message));
+  }, [selectedVaultId, loadSpaces]);
 
   const flush = useCallback(async (allowDrafts = false) => {
     if (!allowDrafts && editsRef.current.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
     clearTimeout(timer.current);
-    if (!queue.current?.dirty) return;
+    if (!queue.dirty) return;
     setStatus("saving");
     try {
-      await queue.current.flush();
-      setStatus("saved");
+      await queue.flush();
+      setStatus(queue.dirty ? "dirty" : "saved");
       setError("");
     } catch (err) {
       setStatus("error");
       setError(err.message);
       throw err;
     }
-  }, []);
+  }, [queue]);
 
   useEffect(() => {
     if (!api) {
@@ -484,7 +545,7 @@ export default function App() {
       return;
     }
     invoke(api.snapshot())
-      .then(install)
+      .then(snapshot => install(snapshot, true))
       .catch((err) => setError(err.message));
     return api.onBeforeClose(async () => {
       try {
@@ -498,68 +559,94 @@ export default function App() {
     });
   }, [install, flush]);
 
-  captureContext.current={vaultId:vault?.id,dailyOptions:{...journalPreferences.daily,locale:journalPreferences.locale},busy,modal,state:captureState};
-  const acceptCapture=useCallback(result=>{
-    setCaptureState(result.status);
-    if(!result.snapshot)return;
-    setRaw(()=>result.snapshot.notes.map(file=>{
-      const draft=queue.current?.get(file.path);
-      return draft?{...file,content:draft.content}:file;
-    }));
-    for(const file of result.snapshot.notes)if(!queue.current?.get(file.path))revisions.current.set(file.path,file.revision);
-    const paths=[...result.snapshot.notes,...(result.snapshot.documents??[])].map(file=>file.path);
-    workspace.dispatch({type:"reconcile",paths});
-    setTabs(old=>old.filter(path=>paths.includes(path)));
-  },[workspace.dispatch]);
-  const captureAction=useCallback(async(action,manual=false,args={})=>{
-    const context=captureContext.current;
-    if(!context?.vaultId||captureWorking.current||context.busy)return;
-    if(action==="sync"&&!manual&&(context.modal||!context.state?.enabled||!context.state.personal||queue.current?.dirty||editsRef.current.blocked()))return;
-    captureWorking.current=true;setBusy(true);
-    try{
-      await flush();
-      const request={vaultId:context.vaultId,...args};
-      const result=await invoke(action==="trash"?api.trashCapture(request):action==="restore"?api.restoreCapture(request):api.syncCapture({...request,dailyOptions:context.dailyOptions,manual}));
-      if(currentVault.current===context.vaultId)acceptCapture(result);
-    }catch(error){
-      if(currentVault.current===context.vaultId)setCaptureState(old=>({...old,error:error.message}));
-      if(manual)throw error;
-    }finally{captureWorking.current=false;setBusy(false);}
-  },[flush,acceptCapture]);
-  useEffect(()=>{
-    if(!api?.captureStatus||!vault?.id)return;
-    let alive=true;setCaptureState(null);
-    invoke(api.captureStatus({vaultId:vault.id})).then(state=>{if(alive)setCaptureState(state);}).catch(error=>{if(alive)setCaptureState({enabled:false,projects:[],records:[],error:error.message});});
-    const interval=setInterval(()=>captureAction("sync"),5000);
-    return()=>{alive=false;clearInterval(interval);};
-  },[vault?.id,captureAction]);
-  const captureSettings=()=>{setSettingsTab("capture");setModal("settings");};
-  const importCapture=async()=>{
-    if(!captureState?.personal||!captureState.projects?.some(project=>project.selected)){captureSettings();return;}
-    await captureAction("sync",true);
-  };
-  const captureControls={state:captureState,onImport:()=>importCapture().catch(error=>setError(error.message)),onSettings:captureSettings,
-    onRestore:()=>captureAction("restore",true,{trashId:captureState.trashId}).catch(error=>setError(error.message)),
-    onTrash:(id,sessionId)=>captureAction("trash",true,{id,sessionId}).catch(error=>setError(error.message))};
-
-  const openNote = useCallback((path) => {
-    const next = navigationAction(navigationRef.current, { type: "visit", path });
-    navigationRef.current = next;
-    setNavigation(next);
-    persist(`dynote.navigation.${currentVault.current}`, next);
-    setActive(path);
-    setEditorJump(null);
-    setAttachment(null);
-    setTabs((old) => (old.includes(path) ? old : [...old, path]));
-    setSection((old) => (["graph", "planner", "ess", "journal"].includes(old) ? "files" : old));
-    setModal(null);
+  captureContext.current = { busy, modal, states: captureStates };
+  const updateCaptureState = useCallback((id, transform) => {
+    setCaptureStates(old => ({ ...old, [id]: transform(old[id]) }));
   }, []);
+  const captureAction = useCallback(async (action, manual = false, args = {}, id = currentVault.current) => {
+    const context = captureContext.current;
+    const scope = vaultsRef.current[id];
+    const state = context.states[id];
+    if (!scope?.id || captureWorking.current || context.busy) return;
+    if (action === "sync" && !manual && (context.modal || scope.purpose !== "personal" || !state?.enabled || !state.personal || queue.dirty || editsRef.current.blocked())) return;
+    captureWorking.current = true; setBusy(true);
+    try {
+      await flush();
+      const request = { vaultId: id, ...args };
+      const dailyOptions = { ...scope.journalPreferences.daily, locale: scope.journalPreferences.locale };
+      const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
+        ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
+      if (!vaultsRef.current[id]) return;
+      updateCaptureState(id, () => result.status);
+      if (result.snapshot) acceptSnapshot(result.snapshot);
+    } catch (error) {
+      updateCaptureState(id, old => ({ ...old, error: error.message }));
+      if (manual) throw error;
+    } finally { captureWorking.current = false; setBusy(false); }
+  }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef]);
+  const captureIds = Object.values(vaults).filter(scope => scope.id).map(scope => `${scope.id}:${scope.purpose ?? ""}`).sort().join(",");
+  useEffect(() => {
+    if (!api?.captureStatus || !captureIds) return;
+    let alive = true;
+    const ids = captureIds.split(",").map(key => key.split(":")[0]);
+    for (const id of ids) invoke(api.captureStatus({ vaultId: id })).then(state => {
+      if (alive) updateCaptureState(id, () => state);
+    }).catch(error => {
+      if (alive) updateCaptureState(id, () => ({ enabled: false, projects: [], records: [], error: error.message }));
+    });
+    let next = 0;
+    const timer = setInterval(() => {
+      const enabled = ids.filter(id => {
+        const state = captureContext.current.states[id];
+        return state?.personal && state.enabled;
+      });
+      if (enabled.length) captureAction("sync", false, {}, enabled[next++ % enabled.length]);
+    }, 5000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [captureIds, captureAction, updateCaptureState]);
+  const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
+  const importCapture = async () => {
+    if (!captureState?.personal || !captureState.projects?.some(project => project.selected)) { captureSettings(); return; }
+    await captureAction("sync", true, {}, vault.id);
+  };
+  const captureControls = { state: captureState, onImport: () => importCapture().catch(error => setError(error.message)), onSettings: captureSettings,
+    onRestore: () => captureAction("restore", true, { trashId: captureState.trashId }, vault.id).catch(error => setError(error.message)),
+    onTrash: (id, sessionId) => captureAction("trash", true, { id, sessionId }, vault.id).catch(error => setError(error.message)) };
 
-  const addPane = (path, side = "right", anchor) => {
-    if (busy || !model.notes.some(n=>n.path===path)) return;
-    if (workspace.paths.length >= 3 && !workspace.paths.includes(path)) { setError("최대 3개 문서까지 비교할 수 있습니다."); return; }
-    workspace.dispatch({type:"add",path,side,anchor});
-    setTabs(old=>old.includes(path)?old:[...old,path]);
+  const updateNavigation = useCallback((action, id) => {
+    const scope = vaultsRef.current[id];
+    if (!scope) return;
+    const navigation = navigationAction(scope.navigation, action);
+    updateVault(id, old => ({ ...old, navigation }));
+    persist(`dynote.navigation.${id}`, navigation);
+  }, [updateVault, vaultsRef]);
+  const openNote = useCallback((path, id = vault?.id) => {
+    const key = documentKey(id, path);
+    if (!key || !vaultsRef.current[id]) return;
+    updateNavigation({ type: "visit", path }, id);
+    workspace.setActive(key);
+    updateEditorJump(null);
+    attachmentRequest.current++;
+    setAttachment(null);
+    setTabs(old => old.includes(key) ? old : [...old, key]);
+    setSection(old => (["graph", "planner", "ess", "journal"].includes(old) ? "files" : old));
+    setModal(null);
+  }, [vault?.id, vaultsRef, updateNavigation, workspace.setActive]);
+  const openWorkspaceKey = key => {
+    const target = documentRef(key, vault?.id);
+    openNote(target.path, target.vaultId);
+  };
+  const addPane = (key, side = "right", anchor = workspace.active) => {
+    const anchorScope = documentRef(anchor, vault?.id).vaultId;
+    const target = documentRef(key, anchorScope);
+    const scopedKey = documentKey(target.vaultId, target.path);
+    if (busy || !models.get(target.vaultId)?.notes.some(note => note.path === target.path)) return;
+    if (workspace.paths.length >= 3 && !workspace.paths.includes(scopedKey)) { setError("최대 3개 문서까지 비교할 수 있습니다."); return; }
+    workspace.dispatch({ type: "add", path: scopedKey, side, anchor });
+    updateNavigation({ type: "visit", path: target.path }, target.vaultId);
+    setTabs(old => old.includes(scopedKey) ? old : [...old, scopedKey]);
+    setEditorJump(null);
+    attachmentRequest.current++;
     setSection("files"); setAttachment(null);
   };
 
@@ -587,32 +674,32 @@ export default function App() {
   useEffect(() => {
     if (!api?.onPluginOpen) return;
     return api.onPluginOpen(async value => {
-      if (value.vaultId !== currentVault.current) return;
+      const id = value.vaultId;
+      if (id !== selectedVault.current) return;
       try {
         await flush();
         if (value.created) {
-          const snapshot = await invoke(api.snapshot());
-          if (value.vaultId !== currentVault.current) return;
+          const snapshot = await invoke(api.snapshot({ vaultId: id }));
+          if (id !== selectedVault.current) return;
           const created = snapshot.notes.find(note => note.path === value.path);
-          if (created) { revisions.current.set(created.path, created.revision); setRaw(old => [...old.filter(note => note.path !== created.path), created]); }
+          if (created) {
+            revisionMap(id).set(created.path, created.revision);
+            updateVault(id, old => old && ({ ...old, notes: [...old.notes.filter(note => note.path !== created.path), created] }));
+          }
         }
-        if (value.vaultId === currentVault.current) openNote(value.path);
+        if (id === selectedVault.current) openNote(value.path, id);
       } catch (error) { setError(error.message); }
     });
-  }, [flush, openNote]);
-  const hasOriginalPlugins = pluginData.entries.some(entry => entry.phase === 'loaded');
+  }, [flush, openNote, revisionMap, updateVault]);
+  const hasOriginalPlugins = pluginData.entries.some(entry => entry.phase === "loaded");
   useEffect(() => {
     if (!api?.pluginContext || !vault?.id || !hasOriginalPlugins) return;
     invoke(api.pluginContext({ vaultId: vault.id, notes: raw.map(note => ({ ...note, cache: { frontmatter: parseMetadata(note.content).properties } })), active, dailyOptions: journalPreferences.daily || {} })).catch(error => setError(error.message));
   }, [vault?.id, raw, active, journalPreferences, hasOriginalPlugins]);
 
-  const updateNavigation = (action) => {
-    const next = navigationAction(navigationRef.current, action);
-    navigationRef.current = next; setNavigation(next);
-    persist(`dynote.navigation.${vault.id}`, next);
-  };
-  const updateJournalPreferences = (value) => {
-    setJournalPreferences(value); persist(`dynote.journal.${vault.id}`, value);
+  const updateJournalPreferences = value => {
+    updateVault(vault.id, old => ({ ...old, journalPreferences: value }));
+    persist(`dynote.journal.${vault.id}`, value);
   };
   const createPeriodic = async (target) => {
     const vaultId = vault.id;
@@ -620,7 +707,7 @@ export default function App() {
     try {
       await flush();
       const templatePath = journalPreferences[target.period]?.template;
-      const template = templatePath ? effectiveNotes.find(n => n.path === templatePath) : null;
+      const template = templatePath ? model.notes.find(n => n.path === templatePath) : null;
       if (templatePath && !template) throw new Error("템플릿을 찾을 수 없습니다. 일지 설정을 확인해 주세요.");
       const content = template ? renderTemplate(template.content, target) : `# ${target.title}\n\n${target.period === "daily" ? "- " : ""}`;
       const created = await invoke(api.openOrCreateNote({ vaultId, path: target.path, content }));
@@ -637,13 +724,14 @@ export default function App() {
     if (!note || content === note.content) return;
     changeFile(note.path, content);
   };
-  const changeFile = (path, content) => {
-    if (edits.edit(path, content)) return;
-    const source = [...raw, ...documents].find((n) => n.path === path);
+  const changeFile = (path, content, id = vault?.id) => {
+    if (editState.forVault(id).edit(path, content)) return;
+    const scope = vaultsRef.current[id];
+    const field = documentKind(path) ? "documents" : "notes";
+    const source = scope?.[field].find(file => file.path === path);
     if (!source || source.content === content || busy) return;
-    queue.current.set({ path, content, revision: revisions.current.get(path) ?? source.revision });
-    const update = (old) => old.map((n) => n.path === path ? { ...n, content } : n);
-    if (documentKind(path)) setDocuments(update); else setRaw(update);
+    queue.set(id, { path, content, revision: revisionMap(id).get(path) ?? source.revision });
+    updateVault(id, old => ({ ...old, [field]: old[field].map(file => file.path === path ? { ...file, content } : file) }));
     setStatus("dirty");
     clearTimeout(timer.current);
     timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
@@ -673,14 +761,16 @@ export default function App() {
   };
 
   const reload = async () => {
+    setBusy(true);
     try {
       if (edits.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
       await flush();
-      install(await invoke(api.snapshot()));
+      if (together && vault.purpose) await loadSpaces({ refresh: true });
+      else install(await invoke(api.snapshot({ vaultId: vault.id })));
       setModal(null);
     } catch (err) {
       setError(err.message);
-    }
+    } finally { setBusy(false); }
   };
 
   useEffect(() => {
@@ -695,7 +785,7 @@ export default function App() {
       ) {
         event.preventDefault();
         const key = event.key.toLowerCase();
-        if (key === "s") flush().catch(() => {});
+        if (key === "s") flush(true).catch(() => {});
         else if (key === "n") {
           setNewName("");
           setModal("new");
@@ -712,7 +802,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [flush, busy]);
 
-  const importFiles = async (files) => {
+  const importFiles = async (files, id = vault.id) => {
     try {
       const imported = [];
       for (const file of files) {
@@ -721,17 +811,14 @@ export default function App() {
         imported.push(
           await invoke(
             api.importAttachment({
-              vaultId: vault.id,
+              vaultId: id,
               name: file.name,
               bytes: new Uint8Array(await file.arrayBuffer()),
             }),
           ),
         );
       }
-      setVault((old) => ({
-        ...old,
-        attachments: [...(old.attachments ?? []), ...imported],
-      }));
+      updateVault(id, old => old && ({ ...old, attachments: [...(old.attachments ?? []), ...imported] }));
       return imported;
     } catch (err) {
       setError(err.message);
@@ -765,34 +852,33 @@ export default function App() {
       setBusy(false);
     }
   };
-  const openAttachment = async (path, fragment = "") => {
-    const vaultId = vault.id;
+  const openAttachment = async (path, fragment = "", vaultId = vault.id) => {
+    const request = ++attachmentRequest.current;
     try {
-      const data = await invoke(
-        api.readAttachment({ vaultId, path }),
-      );
-      if (currentVault.current !== vaultId) return;
-      setAttachment({ ...data, fragment });
+      const data = await invoke(api.readAttachment({ vaultId, path }));
+      if (request !== attachmentRequest.current || !vaultsRef.current[vaultId]) return;
+      setAttachment({ ...data, fragment, vaultId });
       setSection("files");
     } catch (err) {
-      setError(err.message);
+      if (request === attachmentRequest.current) setError(err.message);
     }
   };
-  const openFile = (path) => {
-    if ([...effectiveNotes, ...documents].some((n) => n.path === path)) openNote(path);
-    else if ((vault.attachments ?? []).some((n) => n.path === path)) openAttachment(path);
+  const openFile = (path, vaultId = vault.id) => {
+    const scope = vaultsRef.current[vaultId];
+    if (scope && [...models.get(vaultId).notes, ...scope.documents].some(n => n.path === path)) openNote(path, vaultId);
+    else if (scope?.attachments.some(file => file.path === path)) openAttachment(path, "", vaultId);
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
   const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
-  const prepareFile = async (path, action, folder = false) => {
+  const prepareFile = async (path, action, folder = false, vaultId = vault.id) => {
     try {
-      let revision = revisions.current.get(path);
+      let revision = revisionMap(vaultId).get(path);
       if (!folder && !/\.(md|canvas|base)$/i.test(path))
         revision = (
-          await invoke(api.readAttachment({ vaultId: vault.id, path }))
+          await invoke(api.readAttachment({ vaultId, path }))
         ).revision;
       setError("");
-      setFileTarget({ path, revision, folder });
+      setFileTarget({ path, revision, folder, vaultId });
       setNewName(path);
       setModal(action);
     } catch (err) {
@@ -804,30 +890,31 @@ export default function App() {
     setBusy(true);
     try {
       await flush();
-      const revision =
-        revisions.current.get(fileTarget.path) ?? fileTarget.revision;
+      const vaultId = fileTarget.vaultId;
+      const revision = revisionMap(vaultId).get(fileTarget.path) ?? fileTarget.revision;
+      const preferences = vaultsRef.current[vaultId]?.journalPreferences;
       if (modal === "move") {
         const snapshot = await invoke(
           api.moveFile({
-            vaultId: vault.id,
+            vaultId,
             from: fileTarget.path,
             to: newName.trim(),
             revision,
           }),
         );
-        updateNavigation({ type: "rename", from: fileTarget.path, to: newName.trim() });
+        updateNavigation({ type: "rename", from: fileTarget.path, to: newName.trim() }, vaultId);
         install(snapshot);
-        if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim());
-        else await openAttachment(newName.trim());
+        if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim(), vaultId);
+        else await openAttachment(newName.trim(), "", vaultId);
       } else {
         const item = await invoke(
           fileTarget.folder
-            ? api.trashFolder({ vaultId: vault.id, path: fileTarget.path, protectedFolders: protectedTreeFolders(journalPreferences) })
-            : api.trashFile({ vaultId: vault.id, path: fileTarget.path, revision }),
+            ? api.trashFolder({ vaultId, path: fileTarget.path, protectedFolders: protectedTreeFolders(preferences) })
+            : api.trashFile({ vaultId, path: fileTarget.path, revision }),
         );
-        setLastTrash({ ...item, vaultId: vault.id });
-        updateNavigation({ type: "remove", path: fileTarget.path });
-        install(await invoke(api.snapshot()));
+        setLastTrash({ ...item, vaultId });
+        updateNavigation({ type: "remove", path: fileTarget.path }, vaultId);
+        install(await invoke(api.snapshot({ vaultId })));
       }
       setModal(null);
     } catch (err) {
@@ -844,8 +931,8 @@ export default function App() {
         api.restoreTrash({ vaultId: lastTrash.vaultId, id: lastTrash.id }),
       );
       install(snapshot);
-      if (/\.(md|canvas|base)$/i.test(lastTrash.path)) openNote(lastTrash.path);
-      else await openAttachment(lastTrash.path);
+      if (/\.(md|canvas|base)$/i.test(lastTrash.path)) openNote(lastTrash.path, lastTrash.vaultId);
+      else await openAttachment(lastTrash.path, "", lastTrash.vaultId);
       setLastTrash(null);
     } catch (err) {
       setError(err.message);
@@ -854,20 +941,23 @@ export default function App() {
     }
   };
 
-  const followEditorLink = (target, kind, sourcePath = active) => {
+  const followEditorLink = (target, kind, sourcePath = active, vaultId = vault.id) => {
     if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
       invoke(api.openExternal(target)).catch((err) => setError(err.message));
       return;
     }
-    const asset = resolveLink(target, sourcePath, vault.attachments ?? [], { kind });
-    if (asset.status === "resolved" && vault.attachments?.some((a) => a.path === asset.path)) {
-      openAttachment(asset.path, target.split("#").slice(1).join("#"));
+    const sourceVault = vaultsRef.current[vaultId];
+    const sourceModel = models.get(vaultId);
+    if (!sourceVault || !sourceModel) return;
+    const asset = resolveLink(target, sourcePath, sourceVault.attachments ?? [], { kind });
+    if (asset.status === "resolved" && sourceVault.attachments?.some(a => a.path === asset.path)) {
+      openAttachment(asset.path, target.split("#").slice(1).join("#"), vaultId);
       return;
     }
-    const resolved = resolveLink(target, sourcePath, [...model.notes, ...documents], { kind });
+    const resolved = resolveLink(target, sourcePath, [...sourceModel.notes, ...sourceVault.documents], { kind });
     if (resolved.status === "resolved") {
-      if (resolved.path !== sourcePath) openNote(resolved.path);
-      setEditorJump({ path: resolved.path, fragment: target.split("#")[1] ?? "" });
+      if (resolved.path !== sourcePath) openNote(resolved.path, vaultId);
+      setEditorJump({ path: resolved.path, fragment: target.split("#")[1] ?? "" }, vaultId);
     } else if (resolved.status === "ambiguous") {
       setError("같은 이름의 문서가 여러 개 있습니다. 링크에 폴더 경로를 적어 주세요.");
     } else {
@@ -876,8 +966,11 @@ export default function App() {
     }
   };
 
-  const followLink = (event, sourcePath = active, sourcePreview = preview.current) => {
-    const sourceNote = model.notes.find(n=>n.path===sourcePath);
+  const followLink = (event, sourcePath = active, sourcePreview = preview.current, vaultId = vault.id) => {
+    const sourceVault = vaultsRef.current[vaultId];
+    const sourceModel = models.get(vaultId);
+    if (!sourceVault || !sourceModel) return;
+    const sourceNote = sourceModel.notes.find(n => n.path === sourcePath);
     const checkbox = event.target.closest("input[data-task-line]");
     if (checkbox) {
       event.preventDefault();
@@ -888,7 +981,7 @@ export default function App() {
               sourceNote.content,
               Number(checkbox.dataset.taskLine),
               checkbox.checked,
-            ),
+            ), vaultId,
           );
         } catch (err) {
           setError(err.message);
@@ -899,7 +992,7 @@ export default function App() {
     if (!anchor) return;
     event.preventDefault();
     if (anchor.dataset.attachment) {
-      openAttachment(anchor.dataset.attachment, anchor.dataset.attachmentFragment ?? "");
+      openAttachment(anchor.dataset.attachment, anchor.dataset.attachmentFragment ?? "", vaultId);
       return;
     }
     if (anchor.dataset.anchor) {
@@ -911,14 +1004,14 @@ export default function App() {
     }
     const target = anchor.dataset.note;
     if (target !== undefined) {
-      const resolved = resolveLink(target, sourcePath, [...model.notes, ...documents]);
+      const resolved = resolveLink(target, sourcePath, [...sourceModel.notes, ...sourceVault.documents]);
       if (resolved.status === "resolved") {
-        if (resolved.path !== sourcePath) openNote(resolved.path);
+        if (resolved.path !== sourcePath) openNote(resolved.path, vaultId);
         const heading = target.split("#")[1];
         if (heading)
           setTimeout(() => {
             const headingNode = [
-              ...(preview.current?.querySelectorAll("h1,h2,h3,h4,h5,h6") ?? []),
+              ...(document.querySelector(`[data-vault-id="${CSS.escape(vaultId)}"][data-document-path="${CSS.escape(resolved.path)}"]`)?.querySelectorAll("h1,h2,h3,h4,h5,h6") ?? []),
             ].find((h) => h.textContent === decodeURIComponent(heading));
             headingNode?.scrollIntoView({ behavior: "smooth" });
           }, 50);
@@ -939,13 +1032,17 @@ export default function App() {
     const anchor = event.target.closest?.("a[data-note], [data-live-target]");
     if (!anchor || hoverAnchor.current === anchor || modal) return;
     clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current);
-    const resolved = resolveLink(anchor.dataset.note ?? anchor.dataset.liveTarget, anchor.closest("[data-document-path]")?.dataset.documentPath ?? active, model.notes, { kind: anchor.dataset.liveKind ?? "wiki" });
+    const source = anchor.closest("[data-document-path]");
+    const vaultId = source?.dataset.vaultId ?? vault.id;
+    const notes = models.get(vaultId)?.notes;
+    if (!notes) return;
+    const resolved = resolveLink(anchor.dataset.note ?? anchor.dataset.liveTarget, source?.dataset.documentPath ?? active, notes, { kind: anchor.dataset.liveKind ?? "wiki" });
     if (resolved.status !== "resolved") { setHover(null); return; }
     hoverAnchor.current = anchor;
     hoverTimer.current = setTimeout(() => {
       if (!anchor.isConnected) return;
       const bounds = anchor.getBoundingClientRect();
-      setHover({ path: resolved.path, position: { left: Math.max(12, Math.min(bounds.left, window.innerWidth - 372)), top: Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - 320)) } });
+      setHover({ path: resolved.path, vaultId, position: { left: Math.max(12, Math.min(bounds.left, window.innerWidth - 372)), top: Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - 320)) } });
     }, 350);
   };
   const closeLinkPreview = (event) => {
@@ -956,7 +1053,7 @@ export default function App() {
   };
 
   const insertTemplate = (path) => {
-    const template = effectiveNotes.find(n => n.path === path), view = editorView.current;
+    const template = model.notes.find(n => n.path === path), view = editorView.current;
     if (!template || !note || !view || view.state.readOnly || busy || edits.blocked()) return;
     const target = { ...periodicNote("daily", localDate()), title: note.path.split("/").at(-1).replace(/\.md$/i, "") };
     const insert = renderTemplate(template.content, target);
@@ -998,7 +1095,7 @@ export default function App() {
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
     ...[["planner", "개발 플래너"], ["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
-    { id: "bookmark", label: "현재 문서 북마크 전환", disabled: !note && !structured, run: () => { updateNavigation({ type: "bookmark", path: active }); setModal(null); } },
+    { id: "bookmark", label: "현재 문서 북마크 전환", disabled: !note && !structured, run: () => { updateNavigation({ type: "bookmark", path: active }, vault.id); setModal(null); } },
     { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
     ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
     { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
@@ -1037,6 +1134,43 @@ export default function App() {
         <p>{error || "생각을 연결할 준비를 하고 있어요…"}</p>
       </div>
     );
+  const resolveDocument = key => {
+    const { vaultId, path } = documentRef(key);
+    const scope = vaults[vaultId];
+    const notes = models.get(vaultId)?.notes;
+    const document = notes?.find(note => note.path === path);
+    return document && {
+      note: document, notes, vault: scope, journalPaths: journalPaths.get(vaultId),
+      scopeLabel: together ? spaceLabel(scope) : undefined,
+      edits: editState.forVault(vaultId),
+      jump: editorJump?.vaultId === vaultId ? editorJump : null,
+    };
+  };
+  const renderTree = scope => <FileTree vaultId={scope.id} notes={[...models.get(scope.id).notes, ...scope.documents]}
+    active={vault.id === scope.id ? active : null} disabled={busy} onOpen={path => openNote(path, scope.id)}
+    onContext={(event, target) => {
+      if (busy || editState.forVault(scope.id).blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)))) {
+        setTreeMenu(null);
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      setTreeMenu({
+        ...target, vaultId: scope.id, origin: event.currentTarget,
+        x: Math.max(4, Math.min(event.clientX || rect.left + 20, window.innerWidth - 194)),
+        y: Math.max(4, Math.min(event.clientY || rect.bottom, window.innerHeight - 48)),
+      });
+    }} />;
+  const spaceSelector = label => together && <label className="space-filter">
+    <span>문서 공간</span>
+    <select aria-label={label} value={filter} onChange={event => setSpaceFilter(event.target.value)}>
+      <option value="all">전체 공간</option>
+      <option value="personal">개인 노트</option>
+      {connectedSpaces.filter(scope => scope.purpose === "team").map(scope => <option key={scope.id} value={scope.id}>{spaceLabel(scope)}</option>)}
+      {filter !== "all" && filter !== "personal" && vaults[filter]?.purpose !== "team" &&
+        <option value={filter}>{spaceLabel(vaults[filter])}</option>}
+    </select>
+  </label>;
+  const hoverModel = hover ? models.get(hover.vaultId) : null;
   const incoming = model.backlinks[active] ?? [];
   const outgoing = model.edges
     .filter((e) => e.source === active)
@@ -1127,6 +1261,9 @@ export default function App() {
             </span>
             <ChevronDown size={16} />
           </button>
+          {together && <button className="search-shortcut together-shortcut" disabled={busy} onClick={() => { setSpaceFilter("all"); setSection("files"); }}>
+            <Files size={15} /><span>개인·팀 함께 보기</span>
+          </button>}
           <button
             className="search-shortcut"
             onClick={() => {
@@ -1147,7 +1284,7 @@ export default function App() {
               <IconButton
                 label="문서 새로고침"
                 onClick={() =>
-                  queue.current?.dirty ? setModal("reload") : reload()
+                  queue.dirty ? setModal("reload") : reload()
                 }
                 disabled={busy}
               >
@@ -1165,6 +1302,8 @@ export default function App() {
               </IconButton>
             </div>
           </div>
+          {section !== "journal" && !["recent", "bookmarks"].includes(section) && spaceSelector("문서 공간 범위")}
+          {spaceWarnings.map(warning => <p key={warning} className="space-warning" role="status">{warning}</p>)}
           {section === "journal" ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
           : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
           : section === "search" ? (
@@ -1180,14 +1319,16 @@ export default function App() {
               <span className="result-count">{results.length}개의 문서</span>
               {results.map((n) => (
                 <button
-                  className={`search-result ${n.path === active ? "selected" : ""}`}
-                  key={n.path}
-                  onClick={() => openNote(n.path)}
+                  className={`search-result ${n.key === workspace.active ? "selected" : ""}`}
+                  key={n.key}
+                  disabled={busy}
+                  onClick={() => openNote(n.path, n.vaultId)}
                 >
                   <strong>
                     <FileText size={14} />
                     {n.title}
                   </strong>
+                  {together && <small className="search-space">{n.scopeLabel} · {n.path}</small>}
                   <span>{n.snippet || n.path}</span>
                 </button>
               ))}
@@ -1196,11 +1337,12 @@ export default function App() {
               )}
             </div>
           ) : (
-            <FileTree notes={[...model.notes, ...documents]} active={active} onOpen={openNote} onContext={(event, target) => {
-              if (busy || edits.blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(journalPreferences)))) { setTreeMenu(null); return; }
-              const rect=event.currentTarget.getBoundingClientRect();
-              setTreeMenu({...target, origin:event.currentTarget, x:Math.max(4,Math.min(event.clientX||rect.left+20,window.innerWidth-194)), y:Math.max(4,Math.min(event.clientY||rect.bottom,window.innerHeight-48))});
-            }} />
+            together ? <div className="space-trees">
+              {visibleSpaces.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)}>
+                <h3>{spaceLabel(scope)}</h3>
+                {renderTree(scope)}
+              </section>)}
+            </div> : renderTree(vault)
           )}
           <div className="structured-create-actions">
             <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
@@ -1258,29 +1400,30 @@ export default function App() {
         <main className="workspace">
           <div className="tabbar">
             <div className="tabs">
-              {tabs.map((path) => (
-                <div
-                  className={`tab ${path === active && !["graph", "ess"].includes(section) ? "active" : ""}`}
-                  key={path}
-                >
-                  <button className="tab-label" draggable={/\.md$/i.test(path)} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,path);e.dataTransfer.effectAllowed="copy";}} onClick={() => openNote(path)}>
+              {tabs.map(key => {
+                const { vaultId, path } = documentRef(key);
+                const scope = vaults[vaultId];
+                if (!scope) return null;
+                const label = together ? spaceLabel(scope) : null;
+                return <div className={`tab ${key === workspace.active && !["graph", "ess"].includes(section) ? "active" : ""}`} key={key}>
+                  <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
+                    draggable={!busy && /\.md$/i.test(path)}
+                    onDragStart={event => { event.dataTransfer.setData(DOCUMENT_DRAG, key); event.dataTransfer.effectAllowed = "copy"; }}
+                    onClick={() => openNote(path, vaultId)}>
                     <FileText size={13} />
-                    <span>{path.split("/").at(-1).replace(/\.md$/i, "")}</span>
+                    <span className={label ? "tab-document" : undefined}>
+                      <span>{path.split("/").at(-1).replace(/\.md$/i, "")}</span>
+                      {label && <small className="tab-space">{label}</small>}
+                    </span>
                   </button>
-                  <button
-                    className="tab-close"
-                    aria-label={`${path} 탭 닫기`}
-                    onClick={() => {
-                      const next = tabs.filter((p) => p !== path);
-                      setTabs(next);
-                      workspace.dispatch({type:"close",path});
-                      if (workspace.paths.length === 1 && next.length) setActive(next.at(-1));
-                    }}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
+                  <button className="tab-close" aria-label={`${path} 탭 닫기`} disabled={busy} onClick={() => {
+                    const next = tabs.filter(value => value !== key);
+                    setTabs(next);
+                    workspace.dispatch({ type: "close", path: key });
+                    if (workspace.paths.length === 1 && workspace.active === key && next.length) workspace.setActive(next.at(-1));
+                  }}><X size={12} /></button>
+                </div>;
+              })}
               {essOpened && <div className={`tab ${section === "ess" ? "active" : ""}`}>
                 <button className="tab-label" onClick={() => openEss()}><Box size={13}/>ESS LINK 3D</button>
                 <button className="tab-close" aria-label="ESS LINK 3D 탭 닫기" onClick={() => {setEssOpened(false);setEssTarget(null);if(section==="ess")setSection("files");}}><X size={12}/></button>
@@ -1318,7 +1461,7 @@ export default function App() {
               {note && !["graph", "ess", "planner"].includes(section) && <button className="text-action" onClick={() => openEss(noteEssLinks(note.content)[0])}><Box size={14}/> ESS LINK 보기</button>}
               {!["graph", "ess"].includes(section) && (note || structured) && (
                 <>
-                  <IconButton label="현재 문서 북마크" active={navigation.bookmarks.includes(active)} disabled={busy} onClick={() => updateNavigation({ type: "bookmark", path: active })}><Bookmark size={15}/></IconButton>
+                  <IconButton label="현재 문서 북마크" active={navigation.bookmarks.includes(active)} disabled={busy} onClick={() => updateNavigation({ type: "bookmark", path: active }, vault.id)}><Bookmark size={15}/></IconButton>
                   <button
                     className="text-action"
                     disabled={busy || !note}
@@ -1409,7 +1552,7 @@ export default function App() {
             <div className="error-banner" role="alert">
               <span>{error}</span>
               {status === "error" && (
-                <button onClick={() => flush().catch(() => {})}>
+                <button onClick={() => flush(true).catch(() => {})}>
                   저장 재시도
                 </button>
               )}
@@ -1431,7 +1574,7 @@ export default function App() {
               </div>
             </div>
           </div>}
-          {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery()).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
+          {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery({ vaultId: vault.id })).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
           {section!=="journal"&&journalNote&&!attachment&&!["planner","graph","ess"].includes(section)&&<>
             <CopilotJournalToolbar {...captureControls} disabled={busy||edits.blocked()}/>
             <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
@@ -1483,7 +1626,7 @@ export default function App() {
                     onCopy={(text) => invoke(api.copyText({ vaultId: vault.id, text }))} onOpenNote={openNote}
                     onFollow={(fragment) => setAttachment(old => ({ ...old, fragment }))}
                     onPreviewEdit={async input => { const vaultId=vault.id; const result=await invoke(api.previewPdf({vaultId,input:{...input,sourceRevision:attachment.revision}})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); return result; }}
-                    onApplyEdit={async preview => { const vaultId=vault.id; const result=await invoke(api.applyPdf({vaultId,input:preview.input,revision:preview.revision})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); setAttachment(old=>old?.path===preview.input.path?{...result.attachment,fragment:`page=${preview.input.page}`+(result.annotationId?`&annotation=${encodeURIComponent(result.annotationId)}`:'')}:old); return result; }}/>
+                    onApplyEdit={async preview => { const vaultId=vault.id; const result=await invoke(api.applyPdf({vaultId,input:preview.input,revision:preview.revision})); if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다."); setAttachment(old=>old?.path===preview.input.path?{...result.attachment,vaultId,fragment:`page=${preview.input.page}`+(result.annotationId?`&annotation=${encodeURIComponent(result.annotationId)}`:'')}:old); return result; }}/>
                 ) : attachment.mime.startsWith("audio/") ? <AudioViewer bytes={attachment.bytes} mime={attachment.mime}/> : (
                   <img
                     alt={attachment.path}
@@ -1498,11 +1641,11 @@ export default function App() {
               </div>
             ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || edits.blocked()} onError={setError}/>
             : note ? (
-              <DocumentWorkspace workspace={workspace} notes={model.notes} journalPaths={journalPaths} vault={vault} onOpen={openNote} onAdd={addPane}
+              <DocumentWorkspace workspace={workspace} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
                 fonts={fonts} onFontSettings={()=>{setSettingsTab("fonts");setModal("settings");}}
                 onChange={changeFile} onImportFiles={importFiles} onLink={followEditorLink} onPreviewLink={followLink}
-                jump={editorJump} disabled={busy} edits={edits}/>
+                disabled={busy}/>
             ) : (
               <div className="empty-workspace">
                 <BookOpen size={40} />
@@ -1523,7 +1666,7 @@ export default function App() {
           <footer className="statusbar">
             <div
               className={`save-status ${status}`}
-              onClick={() => flush().catch(() => {})}
+              onClick={() => flush(true).catch(() => {})}
             >
               {status === "saving" ? (
                 <LoaderCircle size={13} className="spin" />
@@ -1542,7 +1685,7 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
-            <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
+            <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
               {note && <span>{statistics.words.toLocaleString()}단어</span>}
               <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
@@ -1561,30 +1704,46 @@ export default function App() {
               </button>
               <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />AI 채팅</button>
             </div>
-            <CopilotPanel key={vault.id ?? "missing"} api={api} session={aiSession}
-              vaultId={vault.id} note={section === "graph" || attachment || structured ? null : note}
-              notes={raw} liveEdits={edits} onOpenVault={() => { setSettingsTab("vault"); setModal("settings"); }}
-              onBeginLive={async (requestId) => { await flush(); edits.begin(requestId); }}
-              selection={!note || mode === "read" ? null : editorSelection} busy={busy} visible={rightTab === "copilot"}
-              onReview={(path) => { openNote(path); setMode("edit"); }}
-              onApply={async (proposal) => {
-                if (busy) throw new Error("저장 작업이 끝난 뒤 다시 적용해 주세요.");
-                if (proposal.kind === "create") {
+            {together && <div className="context-space" aria-label="현재 문서 공간">{spaceLabel(vault)}</div>}
+            {Object.values(vaults).map(scope => {
+              const id = scope.id;
+              const focused = id === vault.id;
+              const scopeEdits = editState.forVault(id);
+              const contextNote = focused ? (section === "graph" || attachment || structured ? null : note)
+                : models.get(id).notes.find(n => n.path === chatPaths.current.get(id));
+              return <CopilotPanel key={id ?? "missing"} api={api} session={aiSession} vaultId={id}
+                note={contextNote} notes={scope.notes} liveEdits={scopeEdits}
+                onOpenVault={() => { setSettingsTab("vault"); setModal("settings"); }}
+                onBeginLive={async requestId => { await flush(); scopeEdits.begin(requestId); }}
+                selection={focused && note && mode !== "read" ? editorSelection : null}
+                busy={busy || !focused} visible={focused && rightTab === "copilot"}
+                onReview={path => {
+                  openNote(path, id);
+                  workspace.dispatch({ type: "mode", path: documentKey(id, path), mode: "edit" });
+                }}
+                onApply={async proposal => {
+                  if (busy) throw new Error("저장 작업이 끝난 뒤 다시 적용해 주세요.");
+                  const key = documentKey(id, proposal.path);
+                  if (proposal.kind === "create") {
+                    await flush();
+                    const created = await invoke(api.createNote({ vaultId: id, path: proposal.path, content: proposal.content }));
+                    revisionMap(id).set(created.path, created.revision);
+                    updateVault(id, old => old && ({ ...old, notes: [...old.notes, created] }));
+                    if (currentVault.current === id) {
+                      openNote(created.path, id);
+                      workspace.dispatch({ type: "mode", path: key, mode: "edit" });
+                    }
+                    return;
+                  }
+                  const target = vaultsRef.current[id]?.notes.find(n => n.path === proposal.path);
+                  const content = applyProposal(proposal.target, { vaultId: id, ...target }, proposal.content);
+                  const view = editorView.current;
+                  if (currentVault.current === id && view && !view.state.readOnly && note?.path === proposal.path) {
+                    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });
+                  } else changeFile(proposal.path, content, id);
                   await flush();
-                  const created = await invoke(api.createNote({ vaultId: vault.id, path: proposal.path, content: proposal.content }));
-                  revisions.current.set(created.path, created.revision);
-                  setRaw((old) => [...old, created]);
-                  openNote(created.path); setMode("edit");
-                  return;
-                }
-                const target = raw.find((n) => n.path === proposal.path);
-                const content = applyProposal(proposal.target, { vaultId: vault.id, ...target }, proposal.content);
-                const view = editorView.current;
-                if (view && !view.state.readOnly && note?.path === proposal.path) {
-                  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });
-                } else changeFile(proposal.path, content);
-                await flush();
-              }} />
+                }} />;
+            })}
             <div className="document-info" hidden={rightTab !== "info"}>
             {note && (
               <section className="context-section">
@@ -1766,13 +1925,13 @@ export default function App() {
       </div>
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
-        <button role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder);}}>휴지통으로 이동</button>
+        <button role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>
       </div>}
       {lastTrash && (
         <div className="undo-toast">
           {lastTrash.systemTrash ? "폴더를 시스템 휴지통으로 이동했습니다. 복구는 시스템 휴지통에서 할 수 있습니다." : "휴지통으로 이동했습니다."}{" "}
           {!lastTrash.systemTrash && <button
-            disabled={busy || lastTrash.vaultId !== vault.id}
+            disabled={busy || !vaults[lastTrash.vaultId]}
             onClick={restoreLast}
           >
             되돌리기
@@ -1791,7 +1950,7 @@ export default function App() {
           onClose={() => !busy && setModal(null)}
         >
           <form onSubmit={alterFile}>
-            <p>{fileTarget?.path}</p>
+            <p>{together && vaults[fileTarget?.vaultId] ? `${spaceLabel(vaults[fileTarget.vaultId])} · ` : ""}{fileTarget?.path}</p>
             {error && (
               <p role="alert" className="error-banner">
                 {error}
@@ -1885,8 +2044,8 @@ export default function App() {
           {!commandResults.length && <p className="muted">일치하는 명령이 없습니다.</p>}</div>
         <p className="muted">↑ ↓ 선택 · Enter 실행 · Esc 닫기 · 문서 이동 {shortcut} K</p>
       </Modal>}
-      {hover && model.notes.some(n => n.path === hover.path) && <NoteHover note={model.notes.find(n => n.path === hover.path)} notes={model.notes} vault={vault} position={hover.position}
-        onEnter={() => clearTimeout(hoverClose.current)} onLeave={() => setHover(null)} onOpen={() => { openNote(hover.path); setHover(null); }}/>}
+      {hoverModel?.notes.some(n => n.path === hover.path) && <NoteHover note={hoverModel.notes.find(n => n.path === hover.path)} notes={hoverModel.notes} vault={vaults[hover.vaultId]} position={hover.position}
+        onEnter={() => clearTimeout(hoverClose.current)} onLeave={() => setHover(null)} onOpen={() => { openNote(hover.path, hover.vaultId); setHover(null); }}/>}
       {modal?.startsWith("compose-") && note && <Modal title="문서 정리" wide onClose={() => !busy && setModal(null)}>
         <ComposerDialog key={`${modal}:${note.path}`} kind={modal.slice(8)} source={note} notes={model.notes} selection={editorSelection?.path === active ? editorSelection : null} busy={busy}
           onPreview={async (input) => {
@@ -1899,7 +2058,7 @@ export default function App() {
             try {
               await flush(); const result = await invoke(api.applyComposition({ vaultId, input: preview.input, revision: preview.revision }));
               if (currentVault.current !== vaultId) throw new Error("보관함이 변경되었습니다.");
-              if (preview.input.kind === "merge") updateNavigation({ type: "rename", from: preview.input.sourcePath, to: preview.input.targetPath });
+              if (preview.input.kind === "merge") updateNavigation({ type: "rename", from: preview.input.sourcePath, to: preview.input.targetPath }, vaultId);
               install(result.snapshot); openNote(preview.input.targetPath); setMode("edit"); setModal(null); setCompositionRecovery(result.recoveryPath);
             } finally { setBusy(false); }
           }}/>
@@ -1982,20 +2141,21 @@ export default function App() {
               placeholder="이름이나 내용으로 찾아보세요…"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && switchResults[0])
-                  openNote(switchResults[0].path);
+                  openNote(switchResults[0].path, switchResults[0].vaultId);
               }}
             />
             <kbd>ESC</kbd>
           </div>
+          {spaceSelector("빠른 검색 공간 범위")}
           <div className="switch-results">
             {switchResults.map((n) => (
-              <button key={n.path} onClick={() => openNote(n.path)}>
+              <button key={n.key} onClick={() => openNote(n.path, n.vaultId)}>
                 <FileText size={17} />
                 <span>
                   <strong>{n.title}</strong>
-                  <small>{n.path}</small>
+                  <small>{together ? `${n.scopeLabel} · ` : ""}{n.path}</small>
                 </span>
-                {n.path === active && <Check size={15} />}
+                {n.key === workspace.active && <Check size={15} />}
               </button>
             ))}
             {!switchResults.length && (
@@ -2003,14 +2163,14 @@ export default function App() {
             )}
           </div>
           <div className="switch-footer">
-            Enter로 첫 문서 열기<span>내 보관함 안에서만 검색합니다</span>
+            Enter로 첫 문서 열기<span>{together ? "선택한 공간 범위에서 검색합니다" : "내 보관함 안에서만 검색합니다"}</span>
           </div>
         </Modal>
       )}
       {modal === "classify" && note && <Modal title="저널 폴더 분류" wide onClose={()=>!busy&&setModal(null)}><ClassificationReview suggestions={classification}
         onPreview={async input=>{await flush();return invoke(api.previewClassification({vaultId:vault.id,input}));}}
         onApply={async value=>{const id=vault.id;setBusy(true);try{await flush();const result=await invoke(api.applyClassification({vaultId:id,input:value.input,revision:value.revision}));if(currentVault.current!==id)return;install(result.snapshot);setModal(null);}finally{setBusy(false);}}}/></Modal>}
-      {modal === "compare" && <Modal title="문서 나란히 보기" onClose={()=>setModal(null)}><p>파일이나 탭을 문서의 왼쪽·오른쪽으로 끌어 놓으면 최대 3개를 비교합니다.</p>{model.notes.filter(n=>!workspace.paths.includes(n.path)).map(n=><button key={n.path} disabled={workspace.paths.length>=3} onClick={()=>{addPane(n.path);setModal(null);}}>{n.path} 옆에 열기</button>)}</Modal>}
+      {modal === "compare" && <Modal title="문서 나란히 보기" onClose={()=>setModal(null)}><p>파일이나 탭을 문서의 왼쪽·오른쪽으로 끌어 놓으면 최대 3개를 비교합니다.</p>{searchAcross("").filter(n=>!workspace.paths.includes(n.key)).map(n=><button key={n.key} disabled={workspace.paths.length>=3} onClick={()=>{addPane(n.key);setModal(null);}}>{together ? `${n.scopeLabel} · ` : ""}{n.path} 옆에 열기</button>)}</Modal>}
       {modal === "about" && (
         <Modal title="Dynote 정보" onClose={() => setModal(null)}>
           <p className="app-version-details">현재 버전 v{version}</p>
@@ -2029,7 +2189,7 @@ export default function App() {
           <button
             className="secondary-button"
             onClick={() =>
-              invoke(api.showRecovery()).catch((err) => setError(err.message))
+              invoke(api.showRecovery({ vaultId: vault.id })).catch((err) => setError(err.message))
             }
           >
             <FolderOpen size={15} />
@@ -2051,25 +2211,25 @@ export default function App() {
               <button key={key} aria-pressed={settingsTab === key} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
-          {settingsTab === "vault" && <VaultSettings key={vault.id ?? "missing"}
+          {settingsTab === "vault" && <VaultSettings key={selectedVaultId ?? "missing"}
             onList={loadSpaces}
-            onPurpose={async (root, purpose) => { await invoke(api.setVaultPurpose({ root, purpose })); }}
-            onOpenGit={() => setSettingsTab("git")}
+            onPurpose={async (root, purpose) => { await flush(); await invoke(api.setVaultPurpose({ root, purpose })); }}
+            onOpenGit={() => { setGitSettingsId(selectedVaultId); setSettingsTab("git"); }}
             onPick={async (purpose) => {
               setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) install(snapshot); }
+              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } }
               finally { setBusy(false); }
             }}
             onSelect={async (root) => {
               setBusy(true);
-              try { await flush(); install(await invoke(api.selectVault({ root }))); }
+              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter(snapshot.id); install(snapshot, true); }
               finally { setBusy(false); }
             }}
-            onForget={(root) => invoke(api.forgetVault({ root }))} />}
+            onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&vault.id&&<CopilotJournalSettings key={vault.id} state={captureState} disabled={busy}
-            onRefresh={async()=>{const id=vault.id,state=await invoke(api.captureStatus({vaultId:id}));if(currentVault.current===id)setCaptureState(state);return state;}}
-            onSource={async()=>{const id=vault.id,state=await invoke(api.pickCaptureSource({vaultId:id}));if(state&&currentVault.current===id)setCaptureState(state);return state;}}
-            onSave={async input=>{const id=vault.id,state=await invoke(api.configureCapture({vaultId:id,input}));if(currentVault.current===id){setCaptureState(state);captureContext.current={...captureContext.current,state};}return state;}}
+            onRefresh={async () => { const id = vault.id, state = await invoke(api.captureStatus({ vaultId: id })); updateCaptureState(id, () => state); return state; }}
+            onSource={async () => { const id = vault.id, state = await invoke(api.pickCaptureSource({ vaultId: id })); if (state) updateCaptureState(id, () => state); return state; }}
+            onSave={async input => { const id = vault.id, state = await invoke(api.configureCapture({ vaultId: id, input })); updateCaptureState(id, () => state); return state; }}
             onImport={()=>captureAction("sync",true)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
           {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
@@ -2077,42 +2237,42 @@ export default function App() {
             onEnable={(id, enabled) => invoke(api.enablePlugin({ vaultId: vault.id, id, enabled }))}
             onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
           {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
-          {settingsTab === "git-workspace" && vault.id && <GitWorkspace key={vault.id} busy={busy} backupEnabled={gitStatus.enabled}
-            onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: vault.id }))}
-            onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: vault.id, path, staged }))}
-            onOpen={(path) => { openFile(path); setModal(null); }}
+          {settingsTab === "git-workspace" && gitVault.id && <GitWorkspace key={gitVault.id} busy={busy} backupEnabled={gitSettingsStatus.enabled}
+            onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
+            onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: gitVault.id, path, staged }))}
+            onOpen={(path) => { openFile(path, gitVault.id); setModal(null); }}
             onAction={async (action) => {
               setBusy(true);
               try {
                 await flush();
-                const result = await invoke(api.gitWorkspaceAction({ vaultId: vault.id, action }));
+                const result = await invoke(api.gitWorkspaceAction({ vaultId: gitVault.id, action }));
                 if (result.snapshot) install(result.snapshot);
                 return result.status;
               } finally { setBusy(false); }
             }}/>}
-          {["git", "history", "git-workspace"].includes(settingsTab) && !vault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
-          {settingsTab === "git" && vault.id && <GitSettings key={`${vault.id}:${gitStatus.config?.remote ?? ""}`} status={gitStatus} space={space} onManageSpaces={() => setSettingsTab("vault")}
-            onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: vault.id }))}
-            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: vault.id, config }))); }}
+          {["git", "history", "git-workspace"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
+          {settingsTab === "git" && gitVault.id && <GitSettings key={`${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
+            onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
+            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);
-              try { const snapshot = await invoke(api.cloneGit({ vaultId: vault.id, config })); if (snapshot) { install(snapshot); setModal(null); } }
+              try { const snapshot = await invoke(api.cloneGit({ vaultId: gitVault.id, config })); if (snapshot) { install(snapshot, true); setModal(null); } }
               finally { setBusy(false); }
             }}
-            onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: vault.id }))); }}
-            onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: vault.id })))} />}
-          {settingsTab === "history" && vault.id && <GitHistory key={vault.id} busy={busy}
-            onList={(month) => invoke(api.gitHistory({ vaultId: vault.id, month }))}
-            onPreview={async (commit) => { await flush(); return invoke(api.previewGit({ vaultId: vault.id, commit })); }}
+            onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: gitVault.id }))); }}
+            onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: gitVault.id })))} />}
+          {settingsTab === "history" && gitVault.id && <GitHistory key={gitVault.id} busy={busy}
+            onList={(month) => invoke(api.gitHistory({ vaultId: gitVault.id, month }))}
+            onPreview={async (commit) => { await flush(); return invoke(api.previewGit({ vaultId: gitVault.id, commit })); }}
             onRestore={async (preview) => {
               setBusy(true);
               try {
                 await flush();
-                const result = await invoke(api.restoreGit({ vaultId: vault.id, commit: preview.commit, revision: preview.revision }));
+                const result = await invoke(api.restoreGit({ vaultId: gitVault.id, commit: preview.commit, revision: preview.revision }));
                 install(result.snapshot); return result;
               } finally { setBusy(false); }
             }}
-            onRecovery={() => invoke(api.showRecovery()).catch((e) => setError(e.message))} />}
+            onRecovery={() => invoke(api.showRecovery({ vaultId: gitVault.id })).catch((e) => setError(e.message))} />}
         </Modal>
       )}
       {modal === "reload" && (

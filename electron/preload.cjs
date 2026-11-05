@@ -3,7 +3,8 @@ const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
 contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
-    snapshot: () => call("snapshot"),
+    snapshot: args => call("snapshot", args),
+    workspaceSnapshots: () => call("workspace-snapshots"),
     captureStatus: args => call("capture-status", args),
     configureCapture: args => call("capture-configure", args),
     pickCaptureSource: args => call("capture-source", args),
@@ -107,7 +108,7 @@ contextBridge.exposeInMainWorld(
     trashFile: (args) => call("trash-file", args),
     trashFolder: (args) => call("trash-folder", args),
     restoreTrash: (args) => call("restore-trash", args),
-    showRecovery: () => call("recovery"),
+    showRecovery: args => call("recovery", args),
     openExternal: (url) => call("external", url),
     gitStatus: (args) => call("git-status", args),
     connectGit: (args) => call("git-connect", args),

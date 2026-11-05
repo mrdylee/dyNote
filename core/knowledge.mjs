@@ -5,6 +5,7 @@ import footnote from "markdown-it-footnote";
 import { katex } from "@mdit/plugin-katex";
 import { createLinkIndex, resolvePath, scanLinks } from "./links.mjs";
 import { SearchIndex } from "./searchIndex.mjs";
+import { documentKey } from "./document-workspace.mjs";
 import { parseMetadata } from "./metadata.mjs";
 import { installMarkdownExtensions } from "./markdown-extensions.mjs";
 import { headingText, headingId } from "./headings.mjs";
@@ -176,30 +177,29 @@ const searchIndex = new SearchIndex();
 const indexed = new Map();
 export function searchNotes(notes, query) {
   if (!query.trim()) return notes;
-  const present = new Set(notes.map((n) => n.path));
+  const byId = new Map(notes.map(n => [documentKey(n.vaultId, n.path) ?? n.path, n]));
   for (const key of indexed.keys())
-    if (!present.has(key)) {
+    if (!byId.has(key)) {
       searchIndex.remove(key);
       indexed.delete(key);
     }
-  for (const n of notes) {
+  for (const [id, n] of byId) {
     const signature = [n.content, n.title, (n.tags ?? []).join("\0")];
-    const previous = indexed.get(n.path);
+    const previous = indexed.get(id);
     if (!previous || signature.some((v, i) => v !== previous[i])) {
       searchIndex.add({
-        id: n.path,
+        id,
         path: n.path,
         title: n.title ?? n.path,
         text: n.content,
         tags: n.tags ?? [],
         mtime: 0,
       });
-      indexed.set(n.path, signature);
+      indexed.set(id, signature);
     }
   }
-  const byPath = new Map(notes.map((n) => [n.path, n]));
   return searchIndex.search(query, { limit: 1000 }).map((hit) => ({
-    ...byPath.get(hit.path),
+    ...byId.get(hit.id),
     score: hit.score,
     snippet: hit.snippet,
   }));

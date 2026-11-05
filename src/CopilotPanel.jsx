@@ -106,9 +106,9 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   }, [messages, progress, proposals, visible]);
   const authBusy = auth && ["starting", "waiting"].includes(auth.phase);
   useEffect(() => {
-    session.setActivity("chat", !!(running || authBusy || extensionsBusy));
-    return () => session.setActivity("chat", false);
-  }, [running, authBusy, extensionsBusy, session.setActivity]);
+    session.setActivity("chat", !!(running || authBusy || extensionsBusy), vaultId);
+    return () => session.setActivity("chat", false, vaultId);
+  }, [running, authBusy, extensionsBusy, vaultId, session.setActivity]);
   const newConversation = () => {
     setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
@@ -118,7 +118,8 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || extensionsBusy || session.activity.planner, applying, running, label,
+  const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || extensionsBusy || session.activity.planner || otherChatRunning, applying, running, label,
     vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
