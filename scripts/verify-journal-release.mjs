@@ -11,4 +11,5 @@ await access(executable);
 const env={...process.env,DYNOTE_EXECUTABLE:executable,DYNOTE_PLAYWRIGHT_MODULE:playwright};
 const scripts=['verify-copilot-journal.mjs','verify-journal-logseq-editing.mjs','verify-journal-review.mjs','verify-journal-ergonomics.mjs','verify-outline-regions.mjs','verify-journal-threading.mjs','verify-journal-outline.mjs','verify-vault-together.mjs','verify-vault-spaces.mjs','verify-vault-space-fixes.mjs','verify-vault-history-runtime.mjs','verify-git-workspace.mjs','verify-ai-providers.mjs','verify-settings-runtime.mjs',...(process.platform==='darwin'?['verify-journal-workspace.mjs','verify-editor-tools.mjs','verify-editor-usability.mjs','verify-journal-write-large-markdown.mjs','verify-planner-review.mjs']:[])];
 for(const script of scripts)execFileSync(process.execPath,[`scripts/${script}`],{env,stdio:'inherit',timeout:180000});
+execFileSync(process.execPath,['--test','scripts/verify-sticky-review.mjs'],{env,stdio:'inherit',timeout:180000});
 console.log(`Verified ${scripts.length} native ${process.platform} package scenarios.`);
