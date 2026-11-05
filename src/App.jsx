@@ -236,16 +236,25 @@ export default function App() {
   const [selectedVaultId, setSelectedVaultId] = useState(null);
   const selectedVault = useRef(null);
   const workspace = useDocumentWorkspace();
+  const [section, setSection] = useState("files");
+  const [journalScopeId, setJournalScopeId] = useState(null);
+  const [spaces, setSpaces] = useState({ entries: [] });
+  const personalSpace = spaces.entries.find(entry => entry.purpose === "personal");
+  const together = !!personalSpace && spaces.entries.some(entry => entry.purpose === "team");
+  const registryReady = !!spaces.current && vaults[selectedVaultId]?.root === spaces.current;
+  const dailyRoot = registryReady ? together ? personalSpace.root : spaces.current : null;
+  const dailyVaultId = dailyRoot && Object.values(vaults).find(scope => scope.root === dailyRoot)?.id;
+  const showCalendar = section === "journal" && (!together || journalScopeId !== null);
   const { vaultId: focusedVaultId, path: focusedPath } = documentRef(workspace.active, selectedVaultId);
   const [openedAttachment, setAttachment] = useState(null);
   const attachment = vaults[openedAttachment?.vaultId] ? openedAttachment : null;
   const attachmentRequest = useRef(0);
-  const vault = vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
-  const active = attachment && attachment.vaultId !== focusedVaultId ? null : focusedPath;
+  const journalScope = section === "journal" ? vaults[journalScopeId ?? dailyVaultId] : null;
+  const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
+  const active = vault?.id === focusedVaultId ? focusedPath : null;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
   const { mode, setMode } = workspace;
-  const [spaces, setSpaces] = useState({ entries: [] });
   const [spaceFilter, setSpaceFilter] = useState("all");
   const [spaceWarnings, setSpaceWarnings] = useState([]);
   const spaceLoad = useRef(0);
@@ -276,7 +285,10 @@ export default function App() {
   },[]);
   const [startup, setStartup] = useState(() => stored("dynote.startup", "journal"));
   const [tabs, setTabs] = useState([]);
-  const [section, setSection] = useState("files");
+  const [today, setToday] = useState(localDate);
+  const [checkedJournal, setCheckedJournal] = useState(null);
+  const completedJournal = useRef(null);
+  const dailyKey = dailyVaultId && documentKey(dailyVaultId, today);
   const [essOpened, setEssOpened] = useState(false);
   const [essTarget, setEssTarget] = useState(null);
   const [editorJump, updateEditorJump] = useState(null);
@@ -442,7 +454,6 @@ export default function App() {
   const journalNote = note && journalPaths.get(vault.id)?.has(note.path);
   const classification = useMemo(()=>journalNote && status === "saved" ? classificationSuggestions(note,model.notes) : [],[journalNote,note,model.notes,status]);
   const statistics = useMemo(() => wordStatistics(note?.content ?? ""), [note?.content]);
-  const together = spaces.entries.some(entry => entry.purpose === "personal") && spaces.entries.some(entry => entry.purpose === "team");
   const filter = spaceFilter === "personal" || vaults[spaceFilter] ? spaceFilter : "all";
   const connectedSpaces = Object.values(vaults).filter(scope => scope.id).sort((a, b) =>
     Number(b.purpose === "personal") - Number(a.purpose === "personal") || a.name.localeCompare(b.name, "ko"));
@@ -488,6 +499,7 @@ export default function App() {
     if (changedVault) {
       setEssOpened(false);
       setEssTarget(null);
+      setJournalScopeId(null);
       const startPath = navigation.recent[0] ?? snapshot.notes.find(n => n.path === "시작하기.md")?.path
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
       const key = documentKey(snapshot.id, startPath);
@@ -531,6 +543,49 @@ export default function App() {
   useEffect(() => {
     if (api?.vaults && selectedVaultId) loadSpaces().catch(error => setError(error.message));
   }, [selectedVaultId, loadSpaces]);
+
+  useEffect(() => {
+    let current = true, checking = false;
+    const check = async () => {
+      const date = localDate();
+      setToday(date);
+      const key = documentKey(dailyVaultId, date);
+      if (!key || busy || automaticCaptureId === dailyVaultId || checking || completedJournal.current === key) return;
+      checking = true;
+      try {
+        const scope = vaultsRef.current[dailyVaultId];
+        const preferences = scope.journalPreferences;
+        const target = periodicNote("daily", date, { ...preferences.daily, locale: preferences.locale });
+        if (!scope.notes.some(note => note.path === target.path)) {
+          const content = periodicContent(target, preferences, scope.notes);
+          // Keep the draft editor read-only until this file has a revision.
+          setCheckedJournal(null);
+          const saved = await invoke(api.openOrCreateNote({ vaultId: dailyVaultId, path: target.path, content }));
+          updateVault(dailyVaultId, old => {
+            if (!old || old.notes.some(note => note.path === saved.path)) return old;
+            revisionMap(dailyVaultId).set(saved.path, saved.revision);
+            return { ...old, notes: [...old.notes, saved] };
+          });
+        }
+        if (current) completedJournal.current = key;
+      } catch (error) {
+        if (current) setError(`오늘의 저널 · ${error.message}`);
+      } finally {
+        checking = false;
+        if (current) setCheckedJournal(key);
+      }
+    };
+    check();
+    const timer = setInterval(check, 30000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [dailyVaultId, busy, automaticCaptureId, vaultsRef, revisionMap, updateVault]);
 
   const flush = useCallback(async (allowDrafts = false) => {
     if (!allowDrafts && editsRef.current.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
@@ -1250,12 +1305,12 @@ export default function App() {
             <IconButton label="명령 팔레트" disabled={busy} onClick={() => { setCommandQuery(""); setCommandIndex(0); setModal("commands"); }}><Terminal size={20}/></IconButton>
             <IconButton label="최근 파일" active={section === "recent"} onClick={() => setSection("recent")}><History size={20}/></IconButton>
             <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
-            <IconButton label="달력과 일지" active={section === "journal"} onClick={() => setSection("journal")}><CalendarDays size={20}/></IconButton>
+            <IconButton label="달력과 일지" active={showCalendar} onClick={() => { setJournalScopeId(vault.id); setSection("journal"); }}><CalendarDays size={20}/></IconButton>
             <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><Sparkles size={20}/></IconButton>
             <IconButton label="ESS LINK 3D 보기" active={section === "ess"} onClick={() => openEss()}><Box size={20}/></IconButton>
             <IconButton
               label="파일 목록"
-              active={section === "files"}
+              active={section === "files" || (section === "journal" && !showCalendar)}
               onClick={() => setSection("files")}
             >
               <Files size={20} />
@@ -1297,9 +1352,6 @@ export default function App() {
             </span>
             <ChevronDown size={16} />
           </button>
-          {together && <button className="search-shortcut together-shortcut" disabled={busy} onClick={() => { setSpaceFilter("all"); setSection("files"); }}>
-            <Files size={15} /><span>개인·팀 함께 보기</span>
-          </button>}
           <button
             className="search-shortcut"
             onClick={() => {
@@ -1338,9 +1390,9 @@ export default function App() {
               </IconButton>
             </div>
           </div>
-          {section !== "journal" && !["recent", "bookmarks"].includes(section) && spaceSelector("문서 공간 범위")}
+          {!showCalendar && !["recent", "bookmarks"].includes(section) && spaceSelector("문서 공간 범위")}
           {spaceWarnings.map(warning => <p key={warning} className="space-warning" role="status">{warning}</p>)}
-          {section === "journal" ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
+          {showCalendar ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
           : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
           : section === "search" ? (
             <div className="search-panel">
@@ -1618,11 +1670,12 @@ export default function App() {
           {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&captureState?.records?.some(record=>record.path===note.path)&&<CopilotJournalEntries records={captureState.records.filter(record=>record.path===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
+              currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}
               onOpen={openNote} onChange={(path, content) => changeFile(path, content, vault.id, true)}
               onImportFiles={files => importFiles(files, vault.id)} onLink={followEditorLink}
               jump={editorJump?.vaultId === vault.id ? editorJump : null}
               fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
-              disabled={!vault.id || busy || captureLocked || edits.blocked()} capture={captureControls}/>
+              disabled={!registryReady || (!journalScopeId && !dailyVaultId) || busy || captureLocked || edits.blocked()} capture={captureControls}/>
             : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
@@ -2285,7 +2338,7 @@ export default function App() {
             }}
             onSelect={async (root) => {
               setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter(snapshot.id); install(snapshot, true); }
+              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter("all"); install(snapshot, true); }
               finally { setBusy(false); }
             }}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}

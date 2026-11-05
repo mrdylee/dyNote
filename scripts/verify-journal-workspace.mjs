@@ -23,8 +23,8 @@ try {
   const dailyPath=`Journal/${localDate()}.md`;
   await feed.waitFor();
   assert.equal(await page.getByRole('button',{name:'편집 보기',exact:true}).count(),0,'journal feed must not expose actions for a hidden document');
-  await assert.rejects(readFile(`${vault}/${dailyPath}`),{code:'ENOENT'});
   await feed.locator('.cm-live-preview.cm-focused').waitFor();
+  assert.equal(await readFile(`${vault}/${dailyPath}`,'utf8'),`# ${localDate()}\n\n- `);
   await page.keyboard.type('First keystrokes');
   await page.keyboard.press('Meta+s');
   await page.locator('.save-status.saved').waitFor();
@@ -119,7 +119,7 @@ try {
   assert.equal(await readFile(`${vault}/Journal/${localDate()}.md`,'utf8'),original);
   await journalWindow.screenshot({path:'output/playwright/journal-startup.png'});
   assert.deepEqual(errors,[]);
-  const report={checks:['journal startup opens Live Preview and writes only on first edit','three panes and fourth rejected','internal drop never inserts text','pane-specific saved edits','same-vault refresh retains panes','classification preview/exclusion/confirmation preserves original','weekly update options persist','startup choices survive restart'],errors};
+  const report={checks:['journal startup creates today’s file and opens Live Preview','three panes and fourth rejected','internal drop never inserts text','pane-specific saved edits','same-vault refresh retains panes','classification preview/exclusion/confirmation preserves original','weekly update options persist','startup choices survive restart'],errors};
   await writeFile('output/playwright/journal-workspace.json',JSON.stringify(report,null,2));console.log(report);
 } catch(error) {
   const page=app.windows()[0];

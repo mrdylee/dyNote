@@ -23,7 +23,6 @@ const captureState=()=>page.evaluate(async()=>{const {value}=await window.notes.
 try{
  await setup();
  await check('journal offers an import button before any project is configured',async()=>assert.equal(await page.getByRole('button',{name:'가져오기',exact:true}).count(),1));
- await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  await page.getByRole('region',{name:'문서 Shared.md',exact:true}).waitFor();
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
@@ -49,13 +48,13 @@ try{
   assert.match(await readFile(path.join(vault,journal),'utf8'),/사용자가 직접 작성한 기록/);
   assert.match(await readFile(path.join(source,'project/chatSessions/first.json'),'utf8'),/첫 질문 원문/);
  });
- await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
+ await page.getByRole('button',{name:'파일 목록',exact:true}).click();
  await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
  await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});
- await page.getByRole('button',{name:'개인·팀 함께 보기',exact:true}).click();
+ await page.getByRole('button',{name:'파일 목록',exact:true}).click();
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  const teamPane=page.getByRole('region',{name:'문서 Shared.md',exact:true});
  await teamPane.waitFor();

@@ -42,11 +42,12 @@ try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
-  await page.getByRole('button', { name: '개인·팀 함께 보기', exact: true }).click();
+  await page.getByRole('region', { name: '저널 피드', exact: true }).waitFor();
   const personalTree = page.getByRole('region', { name: '개인 노트 · Personal', exact: true });
   const teamTree = page.getByRole('region', { name: '팀 공유 노트 · Team', exact: true });
   await personalTree.waitFor();
   await teamTree.waitFor();
+  checks.push('both file trees are available directly from the journal startup screen');
   await personalTree.getByRole('button', { name: '회의록', exact: true }).click();
   const panes = page.locator('.document-pane');
   const personalPane = panes.filter({ hasText: '개인 노트 · Personal' });
@@ -168,7 +169,7 @@ try {
   assert.ok((await personalPane.boundingBox()).width > width + 20);
   checks.push('dragging the separator resizes the pane with the matching vault and path');
 
-  await page.getByRole('button', { name: '개인·팀 함께 보기', exact: true }).click();
+  await page.getByRole('button', { name: '파일 목록', exact: true }).click();
   await page.getByRole('tab', { name: '문서 정보', exact: true }).click();
   await mkdir('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/vault-together.png' });
@@ -239,7 +240,6 @@ try {
   await app.close();
   app = await launch();
   const restarted = await app.firstWindow();
-  await restarted.getByRole('button', { name: '개인·팀 함께 보기', exact: true }).click();
   await restarted.getByRole('region', { name: '개인 노트 · Personal', exact: true }).waitFor();
   await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).waitFor();
   assert.equal(await readFile(path.join(personal, same), 'utf8'), personalText);
@@ -258,8 +258,21 @@ try {
   assert.equal(revoked.ok, false);
   assert.deepEqual(await readFile(path.join(personal, 'manual.pdf')), pdf);
   assert.deepEqual(await readFile(path.join(team, 'manual.pdf')), pdf);
-  assert.deepEqual(errors, []);
   checks.push('both roots survive restart; disconnect closes the team PDF and revokes access without changing either copy');
+
+  await restarted.getByRole('button', { name: '공간 전환·관리', exact: true }).click();
+  await app.evaluate(({ dialog }, root) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] });
+  }, team);
+  await settings.getByRole('button', { name: '팀 공유 폴더 연결', exact: true }).click();
+  await registeredTeam.getByText('사용 중', { exact: true }).waitFor();
+  await settings.getByRole('button', { name: '닫기', exact: true }).click();
+  await restarted.getByRole('region', { name: '저널 피드', exact: true }).waitFor();
+  await restarted.getByRole('region', { name: '개인 노트 · Personal', exact: true }).waitFor();
+  await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).waitFor();
+  await restarted.screenshot({ path: 'output/playwright/vault-together-startup.png' });
+  assert.deepEqual(errors, []);
+  checks.push('connecting the team folder in Settings shows both trees without a separate view switch');
   await writeFile('output/playwright/vault-together.json', JSON.stringify({ checks, errors }, null, 2) + '\n');
   console.log({ checks, errors });
 } finally {
