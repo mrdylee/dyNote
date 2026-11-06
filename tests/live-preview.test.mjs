@@ -105,6 +105,20 @@ test("fenced and indented code lines receive the code font without hiding source
   assert.equal(s.doc.toString(), doc);
 });
 
+test("completed Mermaid fences become block widgets outside the selection", () => {
+  const first = "```mermaid\nflowchart LR\nA --> B\n```";
+  const nested = "~~~Mermaid\n  flowchart LR\n  B --> C\n  ~~~";
+  const doc = [first, "- Diagram\n\n  " + nested, "```mermaid\nflowchart LR\nD --> E"].join("\n\n");
+  const diagrams = (s) => hidden(s).filter((r) => r.spec.block).map((r) => r.text);
+  let s = state(doc, 0);
+  assert.deepEqual(diagrams(s), [first, nested]);
+  s = s.update({ selection: { anchor: doc.indexOf("A --> B") } }).state;
+  assert.deepEqual(diagrams(s), [nested]);
+  s = s.update({ selection: { anchor: first.length } }).state;
+  assert.deepEqual(diagrams(s), [first, nested]);
+  assert.equal(s.doc.toString(), doc);
+});
+
 test("BOM frontmatter stays literal and empty wiki aliases display their target", () => {
   const s = state('\uFEFF---\ntitle: "**raw**"\n---\n\n[[Guide| ]]\n\nend');
   assert.equal(hidden(s).some((r) => r.text === "**"), false);

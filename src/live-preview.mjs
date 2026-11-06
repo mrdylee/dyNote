@@ -5,6 +5,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemir
 import { syntaxTree } from "@codemirror/language";
 import MarkdownIt from "markdown-it";
 import { attachmentUrl } from "../core/knowledge.mjs";
+import { renderMermaid } from "./mermaid-preview.mjs";
 
 const { unescapeAll } = new MarkdownIt().utils;
 
@@ -113,6 +114,35 @@ class ImagePreview extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+class MermaidPreview extends WidgetType {
+  constructor(source) { super(); this.source = source; }
+  eq(other) { return this.source === other.source; }
+  toDOM(view) {
+    const doc = view.dom.ownerDocument;
+    const container = doc.createElement("div");
+    container.className = "mermaid-diagram cm-live-mermaid";
+    container.title = "클릭하여 Mermaid Markdown 편집";
+    const code = doc.createElement("pre");
+    code.className = "cm-live-code-block";
+    code.textContent = this.source;
+    container.append(code);
+    container.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      view.dispatch({ selection: { anchor: view.posAtDOM(container) + 1 }, scrollIntoView: true });
+      view.focus();
+    });
+    renderMermaid(this.source).then((svg) => {
+      container.innerHTML = svg;
+      if (container.isConnected) view.requestMeasure();
+    }, () => {
+      container.title = "다이어그램 문법을 확인해 주세요. 클릭하여 편집할 수 있습니다.";
+    });
+    return container;
+  }
+  ignoreEvent() { return true; }
+}
+
 class RevealRegion extends RangeValue {
   constructor(replacements) { super(); this.replacements = replacements; }
 }
@@ -129,6 +159,16 @@ function decorate(state) {
       const last = state.doc.lineAt(Math.max(from, to - 1)).number;
       for (let line = state.doc.lineAt(from).number; line <= last; line++)
         ranges.push(Decoration.line({ class: "cm-live-code-block" }).range(state.doc.line(line).from));
+      const info = name === "FencedCode" && node.getChild("CodeInfo");
+      if (info && /^mermaid(?:\s|$)/i.test(state.sliceDoc(info.from, info.to)) && node.lastChild.name === "CodeMark") {
+        const source = node.getChildren("CodeText").map((part) => state.sliceDoc(part.from, part.to)).join("");
+        if (source.trim()) {
+          const replacement = Decoration.replace({ block: true, inclusive: false, widget: new MermaidPreview(source) }).range(from, to);
+          // The boundary is still a valid caret position, including when a note opens at offset zero.
+          reveals.push(new RevealRegion([replacement]).range(from + 1, to - 1));
+          if (!selected(state, from + 1, to - 1)) ranges.push(replacement);
+        }
+      }
       return false;
     }
     if (literal.has(name)) return false;

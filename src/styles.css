@@ -1586,6 +1586,16 @@ kbd {
   max-width: 100%;
   height: auto;
 }
+.cm-live-mermaid {
+  margin: 0;
+  padding: 8px 0;
+  cursor: text;
+}
+.cm-live-mermaid pre {
+  margin: 0;
+  text-align: left;
+  white-space: pre-wrap;
+}
 .properties-editor {
   width: 100%;
   min-height: 230px;

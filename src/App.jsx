@@ -1126,7 +1126,7 @@ export default function App() {
     ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
     { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
     ...[["up", "목록 항목 위로 이동"], ["down", "목록 항목 아래로 이동"], ["indent", "목록 들여쓰기"], ["outdent", "목록 내어쓰기"], ["fold", "목록 접기"], ["unfold", "목록 펼치기"]].map(([action,label]) => ({ id: `outline-${action}`, label, disabled: !note || edits.blocked(), run: () => { setModal(null); if (!["edit", "live", "split"].includes(mode)) setMode("edit"); setEditorCommand({ path: active, action }); } })),
-    { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("mermaid"); } },
+    { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { if (mode === "read" || mode === "mindmap") setMode("edit"); setModal("mermaid"); } },
     { id: "mindmap", label: "마인드맵 보기", disabled: !note || edits.blocked(), run: () => { setMode("mindmap"); setModal(null); } },
     { id: "new-map", label: "새 마인드맵 만들기", run: () => { setNewName("새 마인드맵.md"); setModal("newMap"); } },
     { id: "timestamp", label: "일지 시간 기록 삽입", disabled: !note || edits.blocked(), run: () => { setModal(null); setMode("edit"); setEditorCommand({ path: active, type: "timestamp", now: new Date().toISOString(), atEnd: !editorView.current }); } },
