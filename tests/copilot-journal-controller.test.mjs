@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,symlink,rename} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,symlink,rename,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -44,6 +44,92 @@ test('manual import brings today into the journal with automation off and ignore
  const result=await f.controller.sync(f.vault,{},true);assert.equal(result.status.records.length,1);
  assert.match(await readFile(path.join(f.vault.root,result.status.records[0].path),'utf8'),/오늘 대화/);
  assert.doesNotMatch(JSON.stringify(result.status),/수집하면 안됨/);
+});
+test('manual date ranges import both boundaries into their own journals once',async t=>{
+ const f=await fixture(t),day=86400000;
+ const from=localDate(f.now()-2*day),to=localDate(f.now()-day),dateRange={from,to};
+ const earlierJournal=`Journal/${from}.md`;
+ await writeFile(path.join(f.vault.root,earlierJournal),'# Earlier\n\n직접 쓴 일지\n');
+ for(const [days,text] of [[3,'기간 전'],[2,'첫날 대화'],[1,'마지막 날 대화'],[0,'오늘 대화']]){
+  await f.put(`q${days}`,text,f.now()-days*day-1,path.join(f.source,`project/chatSessions/session-${days}.json`));
+ }
+ await f.configure(true);
+ assert.equal((await f.controller.sync(f.vault,{},false,{dateRange})).changed,false);
+ const result=await f.controller.sync(f.vault,{},true,{dateRange});
+ assert.deepEqual(result.status.records.map(record=>record.date).sort(),[from,to]);
+ for(const [date,text] of [[from,'첫날 대화'],[to,'마지막 날 대화']]){
+  const record=result.status.records.find(record=>record.date===date);
+  assert.match(await readFile(path.join(f.vault.root,record.path),'utf8'),new RegExp(text));
+  assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,`Journal/${date}.md`),'utf8')).length,1);
+ }
+ assert.match(await readFile(path.join(f.vault.root,earlierJournal),'utf8'),/직접 쓴 일지/);
+ assert.equal((await f.controller.sync(f.vault,{},true,{dateRange})).changed,false);
+});
+test('manual import rejects invalid or future date ranges',async t=>{
+ const f=await fixture(t);await f.configure(false);
+ for(const dateRange of [
+  {from:'2026-02-29',to:f.date},
+  {from:f.date,to:'2026-11-03'},
+  {from:f.date,to:'2026-11-05'},
+  {from:f.date},
+  null,
+ ]){
+  await assert.rejects(f.controller.sync(f.vault,{},true,{dateRange}),/날짜/);
+ }
+});
+test('WSL projects in VS Code workspaceStorage can be selected and imported',async t=>{
+ const f=await fixture(t);
+ await writeFile(path.join(f.source,'project/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BUbuntu/home/dev/WSL%20Work'}));
+ await writeFile(path.join(f.source,'other/workspace.json'),JSON.stringify({workspace:'vscode-remote://wsl+Debian/home/dev/Shared.code-workspace'}));
+ await mkdir(path.join(f.source,'ssh'));
+ await writeFile(path.join(f.source,'ssh/workspace.json'),JSON.stringify({folder:'vscode-remote://ssh-remote%2Bdev/home/dev/Remote'}));
+ const {projects}=await f.controller.status(f.vault);
+ assert.deepEqual(projects.map(({id,label,path})=>({id,label,path})),[
+  {id:'other',label:'Shared',path:'WSL (Debian) · /home/dev/Shared.code-workspace'},
+  {id:'project',label:'WSL Work',path:'WSL (Ubuntu) · /home/dev/WSL Work'},
+ ]);
+ await f.configure(false);await f.put('wsl','WSL 질문');
+ const result=await f.controller.sync(f.vault,{},true);
+ assert.equal(result.changed,true);
+ assert.match(await readFile(path.join(f.vault.root,result.status.records[0].path),'utf8'),/WSL 질문/);
+ assert.match(await readFile(path.join(f.vault.root,f.journal),'utf8'),/WSL Work AI 대화/);
+ assert.equal((await f.controller.sync(f.vault,{},true)).changed,false);
+});
+test('a selected WSL project imports its own VS Code Agent Host history from session-state',async t=>{
+ const f=await fixture(t),wslRoot=path.join(await realpath(f.root),'session-state');
+ await writeFile(path.join(f.source,'project/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BUbuntu/home/dev/Work'}));
+ await writeFile(path.join(f.source,'other/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BDebian/home/dev/Work'}));
+ await f.controller.configure(f.vault,{enabled:true,projects:['project','other']},true);
+ const config=f.controller.config(f.vault);
+ await f.controller.persist(f.vault,{...config,wslSource:{root:wslRoot,distro:'ubuntu'}});
+ const yesterday=f.now()-86400000,date=localDate(yesterday);
+ const put=async(id,cwd,client,at,question)=>{
+  const folder=path.join(wslRoot,id);await mkdir(folder,{recursive:true});
+  await writeFile(path.join(folder,'workspace.yaml'),`cwd: ${cwd}\nclient_name: ${client}\n`);
+  const timestamp=new Date(at).toISOString();
+  await writeFile(path.join(folder,'events.jsonl'),[
+   {type:'session.start',data:{sessionId:id}},
+   {type:'user.message',id:'u',timestamp,data:{content:question}},
+   {type:'assistant.message',id:'a',timestamp,data:{content:'WSL 답변',reasoningText:'PRIVATE REASONING'}},
+   {type:'assistant.turn_end',data:{}},
+  ].map(event=>JSON.stringify(event)).join('\n')+'\n');
+ };
+ await put('past','/home/dev/Work/','vscode-agent-host',yesterday,'이전 WSL 질문');
+ await put('current','/home/dev/Work','vscode-agent-host',f.now()+1,'새 WSL 질문');
+ await put('unselected','/home/dev/Work-other','vscode-agent-host',yesterday,'다른 프로젝트');
+ await put('cli','/home/dev/Work','github/cli',yesterday,'독립 CLI 대화');
+ const result=await f.controller.sync(f.vault,{},true,{dateRange:{from:date,to:date}});
+ assert.equal(result.status.records.length,1);
+ const [record]=result.status.records;
+ assert.equal(record.date,date);
+ const content=await readFile(path.join(f.vault.root,record.path),'utf8');
+ assert.match(content,/이전 WSL 질문/);
+ assert.doesNotMatch(content,/PRIVATE REASONING|다른 프로젝트|독립 CLI 대화|새 WSL 질문/);
+ assert.equal((await f.controller.sync(f.vault,{},true,{dateRange:{from:date,to:date}})).changed,false);
+ const automatic=await f.controller.sync(f.vault,{});
+ assert.equal(automatic.status.records.length,2);
+ const today=automatic.status.records.find(record=>record.date===f.date);
+ assert.match(await readFile(path.join(f.vault.root,today.path),'utf8'),/새 WSL 질문/);
 });
 test('title trash removes the source copy and journal link, stays excluded across restart and supports undo',async t=>{
  const f=await fixture(t);await f.configure(true);await f.put();let result=await f.controller.sync(f.vault,{});const record=result.status.records[0];

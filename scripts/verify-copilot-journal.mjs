@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
 import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await realpath(await mkdtemp(path.join(tmpdir(),'dynote-copilot-journal-'))),profile=path.join(root,'profile'),vault=path.join(root,'vault'),team=path.join(root,'team'),source=path.join(root,'workspaceStorage');
@@ -11,9 +10,8 @@ for(const directory of [profile,path.join(vault,'Journal'),team,path.join(source
 await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vault,vaults:[vault,team],vaultPurposes:{[vault]:'personal',[team]:'team'}}));
 await writeFile(path.join(vault,journal),'# Today\n\n사용자가 직접 작성한 기록\n');
 await writeFile(path.join(team,'Shared.md'),'# 팀 기록\n');
-await writeFile(path.join(source,'project/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(root,'Work')).href}));
+await writeFile(path.join(source,'project/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BUbuntu/home/dev/WSL%20Work'}));
 const put=async(id,title,question)=>writeFile(path.join(source,`project/chatSessions/${id}.json`),JSON.stringify({version:3,sessionId:id,customTitle:title,requests:[{requestId:'q',timestamp:Date.now(),message:{text:question},modelState:{value:1},response:[{kind:'thinking',value:'DO NOT IMPORT THINKING'},{value:'검증용 답변'}]}]}));
-await put('first','검토 대화','첫 질문 원문');
 const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||path.join(process.cwd(),'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 let app=await launch(),page;const checks=[],errors=[];
 const setup=async()=>{page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1280,1000));await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();};
@@ -63,12 +61,25 @@ try{
  const sourceButton=settings().getByRole('button',{name:'기록 폴더 선택',exact:true});
  await settings().getByRole('button',{name:'프로젝트 새로고침',exact:true,disabled:false}).waitFor();
  assert.equal(await sourceButton.isEnabled(),true,'Copilot settings should be usable from the team journal');
- await sourceButton.click();await page.waitForFunction(source=>document.querySelector('.capture-source-path')?.textContent===source,source);await settings().locator('.capture-project input').check();
+ await sourceButton.click();await page.waitForFunction(source=>document.querySelector('.capture-source-path')?.textContent===source,source);
+ await settings().getByText('WSL (Ubuntu) · /home/dev/WSL Work',{exact:true}).waitFor();
+ await check('WSL source selection rejects a regular Windows or Mac folder',async()=>{
+  await settings().getByRole('button',{name:'WSL 기록 폴더 선택',exact:true}).click();
+  await settings().getByRole('alert').getByText('WSL 배포판의 session-state 폴더를 선택해 주세요.',{exact:true}).waitFor();
+ });
+ await settings().locator('.capture-project input').check();
+ await check('manual import reports when there is no new conversation',async()=>{
+  await settings().getByRole('button',{name:'오늘 대화 가져오기',exact:true}).click();
+  await settings().getByText('오늘 새로 가져올 대화가 없습니다.',{exact:true}).waitFor({timeout:5000});
+  assert.equal((await captureState()).records.length,0);
+ });
+ await put('first','검토 대화','첫 질문 원문');
  await settings().getByRole('button',{name:'오늘 대화 가져오기',exact:true}).click();
  await page.waitForFunction(async()=>{
   const {value}=await window.notes.snapshot();
   return (await window.notes.captureStatus({vaultId:value.id})).value?.records.length===1;
  });
+ await settings().getByText('오늘 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
  await closeSettings();
  let state=await captureState(),record=state.records[0];
  await check('manual import from the team journal writes only to the personal vault',async()=>{
@@ -151,7 +162,7 @@ try{
  await check('a title delete button removes only that conversation and reimport cannot revive it',async()=>{
   await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('1건'));
   await page.getByRole('button',{name:'가져오기',exact:true}).click();
-  await page.waitForFunction(()=>!document.querySelector('.capture-toolbar button')?.disabled);
+  await page.locator('.capture-toolbar').getByText('오늘 새로 가져올 대화가 없습니다.',{exact:true}).waitFor();
   state=await captureState();assert.equal(state.records[0].sessions.length,1);const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/두 번째 질문/);assert.doesNotMatch(content,/첫 질문 원문/);
   assert.doesNotMatch(await readFile(path.join(profile,'copilot-journal.json'),'utf8'),/첫 질문 원문/);
  });
@@ -159,14 +170,51 @@ try{
  await check('Live Preview hides capture control markers',async()=>assert.doesNotMatch(await editor.textContent(),/dynote:copilot/));await editor.click();await page.keyboard.press(`${mod}+End`);await put('third','세 번째 대화','자동 수집 중 질문');await page.keyboard.type('입력 중인 내용도 보존합니다'.repeat(20),{delay:15});await page.keyboard.press(`${mod}+s`);
  await check('automatic refresh keeps the user journal text and the editor mode',async()=>{await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));assert.match(await readFile(path.join(vault,journal),'utf8'),/입력 중인 내용도 보존합니다/);assert.equal(await page.locator('.journal-feed .cm-live-preview').count(),1);});
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
- await page.getByRole('button',{name:`Work ${localDate()} 기록 삭제`,exact:true}).click();
+ const deleteGroup=page.getByRole('button',{name:`${record.label} ${localDate()} 기록 삭제`,exact:true});
+ await deleteGroup.click();
  await check('group title delete removes the record and managed link together',async()=>{await page.locator('.capture-record').waitFor({state:'detached'});await assert.rejects(readFile(path.join(vault,record.path)),{code:'ENOENT'});const content=await readFile(path.join(vault,journal),'utf8');assert.match(content,/입력 중인 내용도 보존합니다/);assert.doesNotMatch(content,/dynote:copilot /);});
  await page.getByRole('button',{name:'삭제 되돌리기',exact:true}).click();await page.locator('.capture-record').waitFor();
  await check('undo restores the document and journal link without unrelated deleted chats',async()=>{const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/두 번째 질문/);assert.doesNotMatch(content,/첫 질문 원문/);assert.match(await readFile(path.join(vault,journal),'utf8'),/dynote:copilot /);});
- await page.getByRole('button',{name:`Work ${localDate()} 기록 삭제`,exact:true}).click();await page.locator('.capture-record').waitFor({state:'detached'});
- await app.close();app=await launch();await setup();
+ await deleteGroup.click();await page.locator('.capture-record').waitFor({state:'detached'});
+ const vaultId=await page.evaluate(async()=>(await window.notes.snapshot()).value.id);
+ await app.close();
+ const wslRoot=path.join(root,'session-state'),configFile=path.join(profile,'copilot-journal.json');
+ await mkdir(wslRoot,{recursive:true});
+ const config=JSON.parse(await readFile(configFile,'utf8'));
+ config.vaults[vaultId].wslSource={root:wslRoot,distro:'ubuntu'};
+ await writeFile(configFile,JSON.stringify(config));
+ app=await launch();await setup();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.capture-toolbar button')?.disabled);
  await check('deletion exclusions survive restart and explicit import',async()=>{assert.equal((await captureState()).records.length,0);await assert.rejects(readFile(path.join(vault,record.path)),{code:'ENOENT'});});
+ await check('a past WSL Agent Host date is imported into its journal and retried without a duplicate',async()=>{
+  const pastAt=new Date();pastAt.setHours(12,0,0,0);pastAt.setDate(pastAt.getDate()-1);
+  const date=localDate(pastAt),timestamp=pastAt.toISOString();
+  await mkdir(path.join(wslRoot,'past'),{recursive:true});
+  await writeFile(path.join(wslRoot,'past/workspace.yaml'),'cwd: /home/dev/WSL Work\nclient_name: vscode-agent-host\n');
+  await writeFile(path.join(wslRoot,'past/events.jsonl'),[
+   {type:'session.start',data:{sessionId:'past'}},
+   {type:'user.message',id:'u',timestamp,data:{content:'어제 작성한 질문'}},
+   {type:'assistant.message',id:'a',timestamp,data:{content:'검증용 답변',reasoningText:'DO NOT IMPORT THINKING'}},
+   {type:'assistant.turn_end',data:{}},
+  ].map(event=>JSON.stringify(event)).join('\n')+'\n');
+  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();
+  await settings().getByText(wslRoot,{exact:true}).waitFor();
+  const range=settings().getByRole('group',{name:'가져올 기간',exact:true});
+  await range.getByLabel('시작일',{exact:true}).fill(date);
+  await range.getByLabel('종료일',{exact:true}).fill(date);
+  const importRange=settings().getByRole('button',{name:'기간 대화 가져오기',exact:true});
+  await importRange.click();
+  await settings().getByText(`${date} · 대화를 개인 노트에 가져왔습니다.`,{exact:true}).waitFor();
+  const [imported]=(await captureState()).records;
+  assert.equal(imported.date,date);
+  assert.equal(imported.journalPath,`Journal/${date}.md`);
+  const content=await readFile(path.join(vault,imported.path),'utf8');
+  assert.match(content,/어제 작성한 질문/);assert.doesNotMatch(content,/DO NOT IMPORT THINKING/);
+  await importRange.click();
+  await settings().getByText(`${date} · 새로 가져올 대화가 없습니다.`,{exact:true}).waitFor();
+  assert.equal((await readFile(path.join(vault,imported.journalPath),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);
+  await closeSettings();
+ });
  await check('team and stale-vault IPC cannot capture private chats',async()=>{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);
   assert.equal(result[0].ok,true);assert.equal(result[1].ok,false);assert.equal(result[2].ok,false);assert.match(result[2].error,/개인/);

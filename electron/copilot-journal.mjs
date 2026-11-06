@@ -3,16 +3,22 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
+import {parseDocument} from 'yaml';
 import {parseChatSource,captureId,renderCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
 import {localDate,periodicNote} from '../core/periodic-notes.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const directoryName=value=>/^[\w-]{1,128}$/.test(value);
+const linuxFolder=value=>path.posix.normalize(value).replace(/\/+$/,'')||'/';
+const wslDistro=value=>{
+ const unc=path.win32.normalize(value).replace(/^\\\\\?\\UNC\\/i,'\\\\');
+ return /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)\\/i.exec(unc)?.[1].toLowerCase();
+};
 const clone=value=>structuredClone(value);
 async function atomic(file,value){
  await mkdir(path.dirname(file),{recursive:true});const temporary=`${file}.${randomUUID()}.tmp`;
  await writeFile(temporary,JSON.stringify(value),{flag:'wx',mode:0o600});await rename(temporary,file);
 }
-async function sourceFile(root,relative){
+async function sourceFile(root,relative,maxBytes=64*1024*1024){
  let target=root;
  if(await realpath(root)!==root)throw new Error('VS Code 기록 경로가 바뀌었습니다. 폴더를 다시 선택해 주세요.');
  for(const part of relative.split('/')){
@@ -22,9 +28,9 @@ async function sourceFile(root,relative){
  }
  const resolved=await realpath(target),relativePath=path.relative(root,resolved);
  if(path.isAbsolute(relativePath)||relativePath.split(path.sep).includes(".."))throw new Error("보관함 밖 대화 기록 경로는 가져올 수 없습니다.");
- const handle=await open(resolved,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ const handle=await open(resolved,constants.O_RDONLY|(constants.O_NOFOLLOW??0)|(constants.O_NONBLOCK??0));
  try{
-  const before=await handle.stat();if(!before.isFile()||before.size>64*1024*1024)throw new Error('64MB 이하의 일반 대화 기록 파일만 가져올 수 있습니다.');
+  const before=await handle.stat();if(!before.isFile()||before.size>maxBytes)throw new Error('허용된 크기의 일반 대화 기록 파일만 가져올 수 있습니다.');
   const content=await handle.readFile('utf8'),after=await handle.stat();
   if(before.size!==after.size||before.mtimeMs!==after.mtimeMs)throw new Error('VS Code에서 대화를 저장 중입니다. 잠시 후 다시 가져옵니다.');
   return content;
@@ -52,19 +58,42 @@ export class CopilotJournal{
    let data;
    try{data=JSON.parse(await sourceFile(root,`${entry.name}/workspace.json`));}catch(error){if(error.code==='ENOENT')continue;throw error;}
    const uri=data.folder??data.workspace;
-   if(typeof uri!=='string'||!uri.startsWith('file:'))continue;
-   let projectPath;try{projectPath=fileURLToPath(uri);}catch{continue;}
-   result.push({id:entry.name,key:captureId(uri),label:path.basename(projectPath).replace(/\.code-workspace$/i,''),path:projectPath});
+   if(typeof uri!=='string')continue;
+   let projectPath,label,wsl;
+   try{
+    if(uri.startsWith('file:')){
+     projectPath=fileURLToPath(uri);label=path.basename(projectPath);
+    }else{
+     const remote=new URL(uri);
+     if(remote.protocol!=='vscode-remote:'||!remote.pathname)continue;
+     const distro=decodeURIComponent(remote.hostname).match(/^wsl\+(.+)$/)?.[1];
+     if(!distro)continue;
+     const folder=decodeURIComponent(remote.pathname);
+     projectPath=`WSL (${distro}) · ${folder}`;
+     label=path.posix.basename(folder)||distro;
+     wsl={distro:distro.toLowerCase(),folder:linuxFolder(folder)};
+    }
+   }catch{continue;}
+   result.push({id:entry.name,key:captureId(uri),label:label.replace(/\.code-workspace$/i,''),path:projectPath,...(wsl?{wsl}:{})});
   }
   return result.sort((a,b)=>a.label.localeCompare(b.label));
  }
  async status(vault){
   const config=this.config(vault);let projects=[],error='';
   try{projects=await this.projects(config.sourceRoot);}catch(e){error=e.message;}
-  return {sourceRoot:config.sourceRoot,enabled:config.enabled,projects:projects.map(p=>({...p,selected:Object.hasOwn(config.projects,p.id)})),error,
+  return {sourceRoot:config.sourceRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,projects:projects.map(p=>({...p,selected:Object.hasOwn(config.projects,p.id)})),error,
    records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,path:r.path,journalPath:r.journalPath,sessions:Object.entries(r.sessions).map(([id,s])=>({id,title:s.title}))})),trashId:config.trashId??null};
  }
  async setSource(vault,root){const config=clone(this.config(vault));config.sourceRoot=await realpath(root);if(!(await lstat(config.sourceRoot)).isDirectory())throw new Error('VS Code 기록 폴더를 선택해 주세요.');config.enabled=false;config.projects={};await this.persist(vault,config);return this.status(vault);}
+ async setWslSource(vault,directory){
+  const distro=wslDistro(directory);
+  const problem=()=>new Error('WSL 배포판의 session-state 폴더를 선택해 주세요.');
+  if(!distro||path.win32.basename(directory)!=='session-state')throw problem();
+  const root=await realpath(directory);
+  if(wslDistro(root)!==distro||!(await lstat(root)).isDirectory())throw problem();
+  await this.persist(vault,{...this.config(vault),wslSource:{root,distro}});
+  return this.status(vault);
+ }
  async configure(vault,input,personal){
   if(!personal)throw new Error('저널 자동기록은 개인 노트 공간에서 설정해 주세요.');
   const previous=this.config(vault),projects=await this.projects(previous.sourceRoot);
@@ -91,6 +120,37 @@ export class CopilotJournal{
   }
   return [...sessions].map(([id,pair])=>{const source=pair.chat?.messages.length?pair.chat:pair.transcript??pair.chat;return {id,...source,title:pair.chat?.title||source.title};});
  }
+ async wslSources(source,projects){
+  const sessions=new Map();
+  if(!source)return {sessions};
+  const {root,distro}=source;
+  const matches=projects.filter(project=>project.wsl?.distro===distro);
+  if(!matches.length)return {sessions};
+  let error='';
+  try{
+   if(await realpath(root)!==root)throw new Error('WSL 기록 경로가 바뀌었습니다.');
+   for(const entry of await readdir(root,{withFileTypes:true})){
+    if(!entry.isDirectory()||!directoryName(entry.name))continue;
+    try{
+     const metadata=parseDocument(await sourceFile(root,`${entry.name}/workspace.yaml`,16*1024));
+     if(metadata.errors.length||!['vscode-agent-host','vscode'].includes(metadata.get('client_name')))continue;
+     const cwd=metadata.get('cwd');
+     if(typeof cwd!=='string'||!path.posix.isAbsolute(cwd))continue;
+     const folder=linuxFolder(cwd);
+     const project=matches.find(candidate=>candidate.wsl.folder===folder);
+     if(!project)continue;
+     const parsed=parseChatSource(await sourceFile(root,`${entry.name}/events.jsonl`),entry.name);
+     if(!sessions.has(project.id))sessions.set(project.id,[]);
+     sessions.get(project.id).push({id:entry.name,...parsed});
+    }catch(failure){
+     if(failure.code!=='ENOENT')error='WSL 대화 일부를 읽지 못했습니다. 기록 폴더를 확인해 주세요.';
+    }
+   }
+  }catch{
+   error='WSL 기록 폴더에 접근할 수 없습니다. WSL과 기록 폴더를 확인해 주세요.';
+  }
+  return {sessions,error};
+ }
  async commit(vault,previous,next){
   if(await realpath(vault.root)!==vault.root)throw new Error('보관함 경로가 바뀌었습니다. 다시 열어 주세요.');
   const snapshot=await vault.documentSnapshot(),notes=new Map(snapshot.notes.map(n=>[n.path,n])),edits=new Map();
@@ -112,17 +172,28 @@ export class CopilotJournal{
   await this.persist(vault,next);
   return {changed:changes.length>0,...result,status:await this.status(vault)};
  }
- async sync(vault,daily={},manual=false,{checkOnly=false}={}){
+ async sync(vault,daily={},manual=false,{checkOnly=false,dateRange}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
   if(!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 저널 자동기록에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
   const next=clone(previous),today=localDate(this.now());
-  for(const project of await this.projects(previous.sourceRoot)){
-   if(!Object.hasOwn(previous.projects,project.id))continue;
-   for(const source of await this.sources(previous.sourceRoot,project.id)){
+  let from=today,to=today;
+  if(manual&&dateRange!==undefined){
+   ({from,to}=dateRange??{});
+   if(typeof from!=='string'||typeof to!=='string'||from>to||to>today)throw new Error('오늘까지의 올바른 날짜 범위를 선택해 주세요.');
+   periodicNote('daily',from);periodicNote('daily',to);
+  }
+  const projects=(await this.projects(previous.sourceRoot)).filter(project=>Object.hasOwn(previous.projects,project.id));
+  const wsl=await this.wslSources(previous.wslSource,projects);
+  for(const project of projects){
+   const local=await this.sources(previous.sourceRoot,project.id);
+   const localIds=new Set(local.filter(source=>source.messages.length).map(source=>source.id));
+   const remote=(wsl.sessions.get(project.id)??[]).filter(source=>!localIds.has(source.id));
+   for(const source of [...local,...remote]){
     const sessionId=captureId(project.key,source.id);if(next.blocked.includes(`s:${sessionId}`))continue;
     for(const message of source.messages){
-     if(!Number.isFinite(message.at)||(!manual&&message.at<previous.projects[project.id].since)||(manual&&localDate(message.at)!==today))continue;
-     const date=localDate(message.at),id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
+     if(!Number.isFinite(message.at)||(!manual&&message.at<previous.projects[project.id].since))continue;
+     const date=localDate(message.at);if(manual&&(date<from||date>to))continue;
+     const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      const record=next.records[id]??={id,date,label:project.label,path:`AI Conversations/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
      const session=record.sessions[sessionId]??={title:source.title||'대화',messages:[]};
      const messages=new Map(session.messages.map(m=>[m.id,m]));messages.set(message.id,message);session.messages=[...messages.values()].sort((a,b)=>a.at-b.at);
@@ -130,9 +201,11 @@ export class CopilotJournal{
     }
    }
   }
-  if(JSON.stringify(previous)===JSON.stringify(next))return {changed:false,status:await this.status(vault)};
-  if(checkOnly)return {pending:true};
-  return this.commit(vault,previous,next);
+  const changed=JSON.stringify(previous)!==JSON.stringify(next);
+  if(checkOnly&&changed)return {pending:true};
+  const result=changed?await this.commit(vault,previous,next):{changed:false,status:await this.status(vault)};
+  if(wsl.error)result.status.error=wsl.error;
+  return result;
  }
  async trash(vault,{id,sessionId}){
   if(!/^[a-f0-9]{20}$/.test(id)||(sessionId!==undefined&&!/^[a-f0-9]{20}$/.test(sessionId)))throw new Error('잘못된 대화 기록입니다.');
