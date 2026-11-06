@@ -14,6 +14,17 @@ test('GIT-01 status/stage/diff/commit/unstage use the actual index and preserve 
  assert.equal(await readFile(`${root}/B.md`,'utf8'),'new\n');await git.action({kind:'stage',path:'B.md'});await git.action({kind:'unstage',path:'B.md'});
  assert.equal((await runGit(root,['diff','--cached','--name-only'])).stdout,'');
 });
+test('new journals in an untracked folder can be staged individually',async t=>{
+ const {root}=await fixture(t),git=new tools.GitWorkspace(root),journal='Journal/2026-11-06.md';
+ await mkdir(`${root}/Journal`);
+ await writeFile(`${root}/${journal}`,'# Today\n');
+ await writeFile(`${root}/Journal/data.tmp`,'synthetic non-note');
+ const status=await git.status();
+ assert.deepEqual(status.files.map(file=>file.path),[journal]);
+ assert.equal(status.excluded,1);
+ await git.action({kind:'stage',path:journal});
+ assert.equal((await runGit(root,['diff','--cached','--name-only'])).stdout.trim(),journal);
+});
 test('GIT-01 excluded staging and invalid native arguments cannot commit unreviewed files',async t=>{
  assert.equal(typeof tools.GitWorkspace,'function');const {root}=await fixture(t),git=new tools.GitWorkspace(root);
  await writeFile(`${root}/.secret`,'synthetic only');await runGit(root,['add','--','.secret']);

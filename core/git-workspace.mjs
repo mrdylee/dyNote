@@ -19,7 +19,7 @@ export class GitWorkspace {
   async status(){
     if(!await this.backup.repository())return {available:false,branch:'',branches:[],files:[],excluded:0,remotes:[],remoteUrls:[]};
     const [state,branch,branches,remotes]=await Promise.all([
-      this.git(['status','--porcelain=v1','-z']),this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),
+      this.git(['status','--porcelain=v1','--untracked-files=all','-z']),this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),
       this.git(['for-each-ref','--format=%(refname:short)','refs/heads/']),this.git(['remote']),
     ]);
     const records=state.stdout.split('\0'),files=[];let excluded=0;
