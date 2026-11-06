@@ -34,6 +34,10 @@ header {
 
 header span {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--quiet);
   font-weight: 600;
   user-select: none;
@@ -75,8 +79,9 @@ footer {
   flex: none;
   min-height: 24px;
   padding: 3px 15px 7px;
-  color: var(--quiet);
+  color: #912e22;
   font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
-footer.error { color: #912e22; overflow-wrap: anywhere; }
+footer:empty { display: none; }

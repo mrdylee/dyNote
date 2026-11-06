@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -156,6 +156,31 @@ test("older saved cards remain available beyond the eight most recent", async ()
       const oldest = await openCard(app, records[0]);
       assert.equal(await markdown(oldest), "- 저장된 메모 1");
     });
+});
+
+test("sticky titles follow the first written line without showing routine save status", async () => {
+  await fixture(["\r\n- \r\n- 회의 제목\r\n  - 안건"], async ({ app, vault, records: [record], restart }) => {
+    const card = await openCard(app, record);
+    const header = card.locator("header span");
+    const footer = card.locator("footer");
+    assert.deepEqual([await header.textContent(), await footer.isVisible()], ["회의 제목", false]);
+
+    const edited = "# 다음 회의\n- 안건";
+    await memo(card).fill(edited);
+    assert.deepEqual([await header.textContent(), await footer.isVisible()], ["다음 회의", false]);
+    const file = path.join(vault, record.path);
+    await until(() => readFile(file, "utf8"), value => value === edited.replaceAll("\n", "\r\n"),
+      "title edits autosave to the original Markdown file");
+    assert.deepEqual(await readdir(path.dirname(file)), [path.basename(file)]);
+    await until(() => app.evaluate((_electron, id) => globalThis.stickyReviewMenu.getMenuItemById(id)?.label,
+      "sticky-recent-" + record.id), value => value === "다음 회의", "the tray shows the saved title");
+    assert.equal(await footer.isVisible(), false);
+
+    const restarted = await restart();
+    const reopened = await openCard(restarted.app, record);
+    assert.deepEqual([await reopened.locator("header span").textContent(), await reopened.locator("footer").isVisible()],
+      ["다음 회의", false]);
+  });
 });
 
 test("hiding the main window lets an active Copilot edit finish", async () => {

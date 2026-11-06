@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/pro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rewriteLinks } from "../core/links.mjs";
+import { stickyTitle } from "../core/sticky-title.mjs";
 import { validNotePath } from "../core/vault.mjs";
 import { fitStickyBounds, nextStickyPlacement, STICKY_COLORS, STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 
@@ -11,11 +12,6 @@ const url = "notes://app/sticky.html";
 const preload = fileURLToPath(new URL("./sticky-preload.cjs", import.meta.url));
 const icon = fileURLToPath(new URL("./sticky-trayTemplate.png", import.meta.url));
 const saveDelay = 550;
-
-function titleFor(content) {
-  const first = content.split(/\r?\n/).find(line => line.trim());
-  return first?.trim().replace(/^(?:#{1,6}|[-+*])\s+/, "").slice(0, 54) || "포스트잇";
-}
 
 function notePath(id, title) {
   const name = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, " ").replace(/^\.+/, "").trim().slice(0, 36);
@@ -58,7 +54,7 @@ export class StickyNotes {
       const state = this.#sender(event);
       if (!state) throw new Error("신뢰할 수 없는 요청입니다.");
       const { color, pinned } = state.record;
-      return { color, pinned, content: state.content, saved: Boolean(state.revision) };
+      return { color, pinned, content: state.content };
     });
     ipcMain.on("sticky:edit", (event, content, moveVersion) => {
       const state = this.#sender(event);
@@ -69,7 +65,6 @@ export class StickyNotes {
       for (const { from, to, files } of state.pendingMoves) content = rewriteLinks(content, from, from, to, files);
       if (content === state.content) return;
       state.content = content;
-      this.#status(state, "저장 중…");
       this.#schedule(state);
     });
     ipcMain.on("sticky:pin", event => {
@@ -203,7 +198,7 @@ export class StickyNotes {
           if (response === 0) return;
         }
         if (!window.isDestroyed()) window.destroy();
-      }).catch(error => this.#status(state, error.message, true)).finally(() => { state.closing = false; });
+      }).catch(error => this.#status(state, error.message)).finally(() => { state.closing = false; });
     });
     window.once("closed", () => {
       clearTimeout(state.timer);
@@ -225,8 +220,8 @@ export class StickyNotes {
     return [...this.#windows.values()].find(state => state.window.webContents === event.sender);
   }
 
-  #status(state, message, error = false) {
-    if (!state.window.isDestroyed()) state.window.webContents.send("sticky:status", { message, error });
+  #status(state, message) {
+    if (!state.window.isDestroyed()) state.window.webContents.send("sticky:status", message);
   }
 
   #schedule(state) {
@@ -245,23 +240,24 @@ export class StickyNotes {
       while (true) {
         const content = state.content;
         if (content !== state.saved && (state.revision || content.trim())) {
-          state.record.path ??= notePath(state.record.id, titleFor(content));
+          const title = stickyTitle(content).slice(0, 54);
+          state.record.path ??= notePath(state.record.id, title);
           const saved = await this.saveNote(state.record.root, state.record.path, content, state.revision);
           state.saved = content;
           state.revision = saved.revision;
-          state.record = { ...state.record, title: titleFor(content), updatedAt: Date.now() };
+          state.record = { ...state.record, title, updatedAt: Date.now() };
         } else if (state.revision && this.#records.get(state.record.id) !== state.record) {
           const record = state.record;
           await this.#remember(record);
           this.#records.set(record.id, record);
           this.#refreshMenu();
         } else {
-          this.#status(state, state.revision ? "저장됨" : "");
+          this.#status(state, "");
           return true;
         }
       }
     } catch (error) {
-      this.#status(state, error.message, true);
+      this.#status(state, error.message);
       return false;
     }
   }
