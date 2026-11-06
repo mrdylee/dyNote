@@ -1,17 +1,27 @@
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
+import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
 const fixture=await mkdtemp(`${tmpdir()}/dynote-editor-tools-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
 const original='- Parent\n  - Child\n- Sibling\n';
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/List.md`,original);
+await mkdir(`${vault}/Journal`);
+const journalDiagram='```mermaid\n---\nconfig:\n  htmlLabels: true\n  flowchart:\n    htmlLabels: true\n---\nflowchart LR\nA[시작] --> B[완료]\n```';
+for(const date of [localDate(),'2020-01-01'])await writeFile(`${vault}/Journal/${date}.md`,journalDiagram);
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 const errors=[];
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
- await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();
- await page.keyboard.press('Meta+k');await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:List.md');await page.keyboard.press('Enter');
+ const feed=page.getByRole('region',{name:'저널 피드'});
+ for(const selector of ['.cm-live-mermaid svg','.markdown-preview .mermaid-diagram svg']){
+  const svg=feed.locator(selector);await svg.waitFor();
+  assert.equal(await svg.getByText('완료',{exact:true}).count(),1,'per-diagram HTML label settings preserve the node label as SVG text');
+ }
+ await page.locator('.titlebar').getByRole('button',{name:/문서로 이동/}).click();
+ await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:List.md');
+ await page.locator('.switch-results').getByRole('button',{name:/List\.md/}).click();
  await page.getByRole('button',{name:'편집 보기',exact:true}).click();
  const editor=page.getByRole('textbox',{name:'Markdown 편집기'});await editor.waitFor();
  const content=async()=>(await page.locator('.cm-content .cm-line').allTextContents()).join('\n');
@@ -28,10 +38,26 @@ try {
  assert.equal(await page.getByRole('combobox',{name:'Mermaid 도표 종류'}).locator('option').count(),20);
  await page.getByRole('button',{name:'도표 삽입',exact:true}).click();assert.match(await content(),/```mermaid/);
  await page.keyboard.press('Meta+z');assert.equal(await content(),original);
+ await page.getByRole('button',{name:'Live Preview',exact:true}).click();
  await palette('Mermaid 작성 도구');await page.getByRole('button',{name:'도표 삽입',exact:true}).click();
+ const diagram=page.locator('.cm-live-mermaid svg');
+ await diagram.click();
+ assert.match(await content(),/```mermaid/);
+ assert.equal(await editor.evaluate(dom=>{
+  const state=dom.cmTile.root.view.state;
+  return state.doc.lineAt(state.selection.main.head).text;
+ }), 'flowchart LR', 'click-to-edit places the caret in the body');
+ await page.evaluate(()=>{
+  const view=document.querySelector('.cm-content').cmTile.root.view;
+  const from=view.state.doc.toString().indexOf('종료');
+  view.dispatch({selection:{anchor:from,head:from+2}});
+ });
+ await page.keyboard.insertText('갱신됨');
+ await page.keyboard.press('Meta+End');
+ await diagram.getByText('갱신됨',{exact:true}).waitFor();
  await page.getByRole('button',{name:'분할 보기',exact:true}).click();await page.locator('.markdown-preview .mermaid-diagram svg').waitFor();
  await page.screenshot({path:'output/playwright/native-editor-tools.png'});
  assert.deepEqual(errors,[]);
- const report={checks:['original Outliner subtree move output','one-step undo','fold/unfold preserve disk bytes','twenty Mermaid families','diagram insertion undo','actual Mermaid SVG rendering'],errors};
+ const report={checks:['original Outliner subtree move output','one-step undo','fold/unfold preserve disk bytes','twenty Mermaid families','diagram insertion undo','today and prior journal Mermaid SVGs','live insertion, click to edit and updated SVG','split Mermaid SVG'],errors};
  await writeFile('output/playwright/native-editor-tools.json',JSON.stringify(report,null,2));console.log(report);
 }finally{await app.close();await rm(fixture,{recursive:true,force:true});}

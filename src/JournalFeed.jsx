@@ -46,7 +46,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
     {entries.slice(0,count).map(note=><article className="journal-entry" key={note.path} data-document-path={note.path} data-vault-id={vault.id}>
       <header><h2><button className="journal-date" disabled={disabled} onClick={()=>onOpen(note.path)}>{note.date}</button></h2></header>
       {capture&&<CopilotJournalEntries records={capture.state?.records?.filter(record=>record.journalPath===note.path)} disabled={disabled} onOpen={onOpen} onTrash={capture.onTrash}/>}
-      <DiagramPreview renderDiagrams={false} html={DOMPurify.sanitize(renderMarkdown(withoutCaptureLinks(note.content),notes,note.path,{vaultId:vault.id,attachments:vault.attachments??[]}),{FORBID_TAGS:['input','iframe','form','style'],ADD_ATTR:['data-note'],ADD_URI_SAFE_ATTR:['src']})} onClick={e=>{if(e.target.closest('a'))e.preventDefault();}}/>
+      <DiagramPreview html={DOMPurify.sanitize(renderMarkdown(withoutCaptureLinks(note.content),notes,note.path,{vaultId:vault.id,attachments:vault.attachments??[]}),{FORBID_TAGS:['input','iframe','form','style'],ADD_ATTR:['data-note'],ADD_URI_SAFE_ATTR:['src']})} onClick={e=>{if(e.target.closest('a'))e.preventDefault();}}/>
     </article>)}
     {entries.length>count&&<button onClick={()=>setCount(count+14)}>이전 기록 더 보기</button>}
   </section>;

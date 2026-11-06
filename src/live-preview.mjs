@@ -4,9 +4,12 @@ import { Facet, RangeSet, RangeValue, StateEffect, StateField, Transaction } fro
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import MarkdownIt from "markdown-it";
+import { isMermaidFence } from "../core/diagram-tools.mjs";
 import { attachmentUrl } from "../core/knowledge.mjs";
+import { renderMermaid } from "./mermaid-preview.mjs";
 
-const { unescapeAll } = new MarkdownIt().utils;
+const markdown = new MarkdownIt().disable("inline");
+const { unescapeAll } = markdown.utils;
 
 // This grammar participates in Markdown parsing, so escaped brackets and code
 // never become wiki links through a second, unrelated regex pass.
@@ -113,6 +116,39 @@ class ImagePreview extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+class MermaidPreview extends WidgetType {
+  constructor(source, editOffset) {
+    super();
+    this.source = source;
+    this.editOffset = editOffset;
+  }
+  eq(other) { return this.source === other.source && this.editOffset === other.editOffset; }
+  toDOM(view) {
+    const doc = view.dom.ownerDocument;
+    const container = doc.createElement("div");
+    container.className = "mermaid-diagram cm-live-mermaid";
+    container.title = "클릭하여 Mermaid Markdown 편집";
+    const code = doc.createElement("pre");
+    code.className = "cm-live-code-block";
+    code.textContent = this.source;
+    container.append(code);
+    container.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      view.dispatch({ selection: { anchor: view.posAtDOM(container) + this.editOffset }, scrollIntoView: true });
+      view.focus();
+    });
+    renderMermaid(this.source).then((svg) => {
+      container.innerHTML = svg;
+      if (container.isConnected) view.requestMeasure();
+    }, () => {
+      container.title = "다이어그램 문법을 확인해 주세요. 클릭하여 편집할 수 있습니다.";
+    });
+    return container;
+  }
+  ignoreEvent() { return true; }
+}
+
 class RevealRegion extends RangeValue {
   constructor(replacements) { super(); this.replacements = replacements; }
 }
@@ -121,14 +157,37 @@ function decorate(state) {
   const ranges = [], reveals = [], options = state.facet(config), context = options.getContext?.() ?? {};
   const source = state.doc.toString();
   const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(source)?.[0].length ?? 0;
+  const fenceBodies = new Map();
   const mark = (from, to, name, attributes) => { if (to > from) ranges.push(Decoration.mark({ class: `cm-live-${name}`, attributes }).range(from, to)); };
   syntaxTree(state).iterate({ enter(ref) {
     const node = ref.node, { name, from, to } = node;
     if (to <= frontmatter) return false;
     if (name === "FencedCode" || name === "CodeBlock") {
+      const opening = state.doc.lineAt(from);
       const last = state.doc.lineAt(Math.max(from, to - 1)).number;
-      for (let line = state.doc.lineAt(from).number; line <= last; line++)
+      for (let line = opening.number; line <= last; line++)
         ranges.push(Decoration.line({ class: "cm-live-code-block" }).range(state.doc.line(line).from));
+      const info = name === "FencedCode" && node.getChild("CodeInfo");
+      if (!info || !isMermaidFence(state.sliceDoc(info.from, info.to)) || node.lastChild.name !== "CodeMark") return false;
+      const parts = node.getChildren("CodeText");
+      if (!parts.length) return false;
+      if (!fenceBodies.has(opening.number)) {
+        // Parse the containing Markdown block to retain list and quote indentation rules.
+        let block = node;
+        while (block.parent?.parent) block = block.parent;
+        const first = state.doc.lineAt(block.from);
+        for (const token of markdown.parse(state.sliceDoc(first.from, block.to), {})) {
+          if (token.type === "fence") fenceBodies.set(first.number + token.map[0], token.content);
+        }
+      }
+      const diagram = fenceBodies.get(opening.number);
+      if (diagram?.trim()) {
+        const widget = new MermaidPreview(diagram, parts[0].from - from);
+        const replacement = Decoration.replace({ block: true, inclusive: false, widget }).range(from, to);
+        // The boundary is still a valid caret position, including when a note opens at offset zero.
+        reveals.push(new RevealRegion([replacement]).range(from + 1, to - 1));
+        if (!selected(state, from + 1, to - 1)) ranges.push(replacement);
+      }
       return false;
     }
     if (literal.has(name)) return false;

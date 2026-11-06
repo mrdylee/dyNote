@@ -20,12 +20,15 @@ export const diagramSamples = [
   {id:'block',label:'블록',code:'block-beta\n  columns 3\n  input["입력"] process["처리"] output["출력"]\n  input --> process\n  process --> output'},
   {id:'packet',label:'패킷',code:'packet-beta\n  0-7: "Header"\n  8-31: "Payload"'},
 ];
+export function isMermaidFence(info) {
+  return /^\s*mermaid(?:\s|$)/i.test(info);
+}
 export function diagramInsertion(content, from, code) {
   let fence=null, mermaid=false;
   for(const line of content.slice(0,from).split(/\r\n|\r|\n/)) {
     const marker=line.match(/^\s*(`{3,}|~{3,})(.*)$/);
     if(!marker)continue;
-    if(!fence){fence=marker[1];mermaid=/^mermaid\s*$/.test(marker[2]);}
+    if(!fence){fence=marker[1];mermaid=isMermaidFence(marker[2]);}
     else if(marker[1][0]===fence[0] && marker[1].length>=fence.length){fence=null;mermaid=false;}
   }
   return fence && mermaid ? code : `\n\`\`\`mermaid\n${code}\n\`\`\`\n`;
