@@ -769,6 +769,13 @@ app
       selectRoot: stickyRoot,
       readNote: async (root, relative) => (await stickyVault(root)).vault.readNote(relative),
       saveNote: saveStickyNote,
+      openLink: async (root, sourcePath, target, kind) => {
+        const { vault: source } = await stickyVault(root);
+        if (!window || window.isDestroyed() || quitRequested) return;
+        if (!workspaceVault(source.id)) throw new Error("메인 창에서 포스트잇 보관함을 먼저 열어 주세요.");
+        showMainWindow();
+        window.webContents.send("notes:sticky-link", { vaultId: source.id, sourcePath, target, kind });
+      },
       showMain: showMainWindow,
       canOpen: () => !quitRequested,
       quitReady: () => quitReady,
