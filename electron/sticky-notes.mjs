@@ -12,10 +12,11 @@ const url = "notes://app/sticky.html";
 const preload = fileURLToPath(new URL("./sticky-preload.cjs", import.meta.url));
 const icon = fileURLToPath(new URL("./sticky-trayTemplate.png", import.meta.url));
 const saveDelay = 550;
+const stickyFolder = "포스트잇/";
 
 function notePath(id, title) {
   const name = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, " ").replace(/^\.+/, "").trim().slice(0, 36);
-  return `포스트잇/${name || "메모"}-${id.slice(0, 13)}.md`;
+  return `${stickyFolder}${name || "메모"}-${id.slice(0, 13)}.md`;
 }
 
 export class StickyNotes {
@@ -25,8 +26,8 @@ export class StickyNotes {
   #lastPlacement;
   #tray;
 
-  constructor({ directory, selectRoot, readNote, saveNote, showMain, canOpen, quitReady }) {
-    Object.assign(this, { directory, selectRoot, readNote, saveNote, showMain, canOpen, quitReady });
+  constructor({ directory, selectRoot, readNote, saveNote, openLink, showMain, canOpen, quitReady }) {
+    Object.assign(this, { directory, selectRoot, readNote, saveNote, openLink, showMain, canOpen, quitReady });
   }
 
   async start() {
@@ -66,6 +67,16 @@ export class StickyNotes {
       if (content === state.content) return;
       state.content = content;
       this.#schedule(state);
+    });
+    ipcMain.on("sticky:open-link", (event, target, kind, moveVersion) => {
+      const state = this.#sender(event);
+      if (!state || !this.canOpen() || typeof target !== "string" || !target.trim()
+        || /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(target.trim()) || !["markdown", "wiki"].includes(kind)
+        || !Number.isInteger(moveVersion) || moveVersion < 0 || moveVersion > state.moveVersion) return;
+      const pendingMove = state.pendingMoves.find(move => move.version > moveVersion);
+      const sourcePath = pendingMove?.from ?? state.record.path ?? stickyFolder;
+      void this.openLink(state.record.root, sourcePath, target, kind)
+        .catch(error => dialog.showErrorBox("Dynote 포스트잇", error.message));
     });
     ipcMain.on("sticky:pin", event => {
       const state = this.#sender(event);

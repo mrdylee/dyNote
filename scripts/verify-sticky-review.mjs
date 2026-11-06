@@ -183,6 +183,27 @@ test("sticky titles follow the first written line without showing routine save s
   });
 });
 
+test("sticky links open notes in the hidden main window after the card moves", async () => {
+  const body = "- 연결 확인\n- [상대경로](../Reference.md)\n- [[포스트잇/검증 카드 2|위키 링크]]";
+  await fixture([body, "# 위키 대상"], async ({ app, main, records: [record, target] }) => {
+    const card = await openCard(app, record);
+    const moved = await move(main, record.path, "정리/완료/연결.md");
+    assert.equal(moved.ok, true, moved.error);
+    await until(() => markdown(card), text => text === body.replace("../Reference.md", "../../Reference.md"),
+      "the moved card has the updated relative link");
+    await memo(card).evaluate(field => field.cmTile.root.view.dispatch({ selection: { anchor: 0 } }));
+
+    const mainWindow = await app.browserWindow(main);
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    for (const [label, destination] of [["상대경로", "Reference.md"], ["위키 링크", target.path]]) {
+      await mainWindow.evaluate(win => win.hide());
+      await card.locator("[data-live-target]").filter({ hasText: label }).click({ modifiers: [modifier] });
+      await until(() => mainWindow.evaluate(win => win.isVisible()), Boolean, "the link reveals the main window");
+      await main.getByRole("region", { name: "문서 " + destination, exact: true }).waitFor();
+    }
+  });
+});
+
 test("hiding the main window lets an active Copilot edit finish", async () => {
   await fixture([], async ({ app, main, profile }) => {
     await app.evaluate(({ app, ipcMain }) => {

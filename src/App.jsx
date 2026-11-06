@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Box,
@@ -1206,6 +1206,15 @@ export default function App() {
       setModal("new");
     }
   };
+
+  const followStickyLink = useEffectEvent(({ target, kind, sourcePath, vaultId }) => {
+    if (!models.has(vaultId)) {
+      setError("포스트잇 보관함을 불러온 뒤 링크를 다시 열어 주세요.");
+      return;
+    }
+    followEditorLink(target, kind, sourcePath, vaultId);
+  });
+  useEffect(() => api?.onStickyLink?.(followStickyLink), []);
 
   const followLink = (event, sourcePath = active, sourcePreview = preview.current, vaultId = vault.id) => {
     const sourceVault = vaultsRef.current[vaultId];

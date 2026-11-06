@@ -45,7 +45,7 @@ const view = new EditorView({
     history(),
     drawSelection(),
     markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
-    livePreview(),
+    livePreview({ onLink: (target, kind) => window.sticky.openLink(target, kind, moveVersion) }),
     journalOutline({ live: true }),
     EditorView.lineWrapping,
     keymap.of([{ key: "Enter", run: startJournalBullet }, ...defaultKeymap, ...historyKeymap, indentWithTab]),

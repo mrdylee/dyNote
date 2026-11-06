@@ -126,6 +126,11 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:sticky-saved", listener);
       return () => ipcRenderer.removeListener("notes:sticky-saved", listener);
     },
+    onStickyLink: (callback) => {
+      const listener = (_event, value) => callback(value);
+      ipcRenderer.on("notes:sticky-link", listener);
+      return () => ipcRenderer.removeListener("notes:sticky-link", listener);
+    },
     confirmClose: (id, ready) => ipcRenderer.send("notes:close-ready", id, ready),
     onBeforeClose: (callback) => {
       const listener = (_event, request) => callback(request);
