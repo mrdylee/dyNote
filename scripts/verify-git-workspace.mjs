@@ -2,12 +2,16 @@ import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
 import {runGit} from '../core/git-backup.mjs';
+import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
 const fixture=await mkdtemp(`${tmpdir()}/dynote-git-ui-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 await runGit(vault,['init','--initial-branch=main']);await runGit(vault,['config','user.name','Fixture']);await runGit(vault,['config','user.email','fixture@example.test']);
-await writeFile(`${vault}/A.md`,'original\n');await runGit(vault,['add','--','A.md']);await runGit(vault,['commit','-m','initial']);await writeFile(`${vault}/A.md`,'native changed\n');
+const today=`Journal/${localDate()}.md`;
+await mkdir(`${vault}/Journal`);
+await writeFile(`${vault}/${today}`,`# ${localDate()}\n\n- `);
+await writeFile(`${vault}/A.md`,'original\n');await runGit(vault,['add','--','A.md',today]);await runGit(vault,['commit','-m','initial']);await writeFile(`${vault}/A.md`,'native changed\n');
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));

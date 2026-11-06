@@ -26,7 +26,7 @@ const row=name=>page.locator('.vault-settings-list li').filter({has:page.getByTe
 const close=()=>page.getByRole('dialog',{name:'설정',exact:true}).getByRole('button',{name:'닫기',exact:true}).click();
 const picker=folder=>app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},folder);
 async function connect(purpose){
- await page.getByRole('button',{name:'백업·복원',exact:true}).click();
+ await page.getByRole('button',{name:'이 공간의 Git 설정',exact:true}).click();
  await page.getByRole('textbox',{name:'Git 저장소 주소',exact:true}).fill(remotes[purpose]);
  await page.getByRole('button',{name:'연결하고 백업 시작',exact:true}).click();
  await page.locator('.git-space-context').getByText(remotes[purpose],{exact:true}).waitFor();
@@ -48,7 +48,8 @@ try{
  report.checks.push('nested personal/team folders are rejected and the original space stays selected');
  await connect('personal');
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
- await picker(team);await page.getByRole('button',{name:'팀 공유 폴더 연결',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.vault-switch')?.textContent.includes('팀 공유 노트'));
+ await picker(team);await page.getByRole('button',{name:'팀 공유 폴더 연결',exact:true}).click();
+ await row(team).getByText('사용 중',{exact:true}).waitFor();
  await connect('team');assert.match(await page.locator('.git-space-context').innerText(),/팀 공유 노트/);assert.match(await page.locator('.git-space-context').innerText(),/접근 권한/);
  assert.equal(git('--git-dir',`${root}/personal.git`,'show','main:Private.md'),original);
  assert.equal(git('--git-dir',`${root}/team.git`,'show','main:Shared.md'),shared);
@@ -58,12 +59,18 @@ try{
  await close();await page.getByRole('button',{name:'파일 목록',exact:true}).click();await page.locator('.file-row[title="Shared.md"]').click();
  await page.getByRole('button',{name:'편집 보기',exact:true}).click();await page.locator('.cm-content').click();await page.keyboard.press(process.platform==='darwin'?'Meta+End':'Control+End');await page.keyboard.insertText('Team edit\n');
  await identity().click();await row(personal).getByRole('button',{name:'열기',exact:true}).click();
- await identity().filter({hasText:'개인 노트'}).waitFor();
+ await row(personal).getByText('사용 중',{exact:true}).waitFor();
  assert.match(await identity().innerText(),/개인 노트/);assert.equal(await readFile(`${team}/Shared.md`,'utf8'),shared+'Team edit\n');
- await page.getByRole('button',{name:'백업·복원',exact:true}).click();assert.equal(await page.getByRole('textbox',{name:'Git 저장소 주소',exact:true}).inputValue(),remotes.personal);
+ await row(personal).getByRole('button',{name:'이 공간의 Git 설정',exact:true}).click();
+ await page.locator('.git-space-context').getByText(remotes.personal,{exact:true}).waitFor();
+ assert.equal(await page.getByRole('textbox',{name:'Git 저장소 주소',exact:true}).inputValue(),remotes.personal);
  await close();await page.getByRole('button',{name:'전체 검색',exact:true}).click();await page.getByRole('textbox',{name:'전체 문서 검색',exact:true}).fill('Shared fixture');
+ const results=page.locator('.search-result');
+ await results.filter({hasText:'Shared'}).waitFor();
+ await page.getByRole('combobox',{name:'문서 공간 범위',exact:true}).selectOption('personal');
+ await results.first().waitFor({state:'hidden'});
  assert.equal(await page.locator('.search-result').count(),0);
- report.checks.push('space switch flushes team edits, restores the personal Git address and keeps search scoped to the current space');
+ report.checks.push('space switch flushes team edits, restores the personal Git address and the personal search filter excludes team results');
  await app.close();await start();await identity().filter({hasText:'개인 노트'}).waitFor();assert.match(await identity().innerText(),/개인 노트/);await identity().click();
  assert.equal(await page.getByRole('combobox',{name:'Personal 공간 용도',exact:true}).inputValue(),'personal');assert.equal(await page.getByRole('combobox',{name:'Team 공간 용도',exact:true}).inputValue(),'team');
  for(const width of [1050,800]){
