@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld(
     readAttachment: (args) => call("read-attachment", args),
     copyText: (args) => call("copy-text", args),
     moveFile: (args) => call("move-file", args),
+    copyFile: (args) => call("copy-file", args),
     trashFile: (args) => call("trash-file", args),
     trashFolder: (args) => call("trash-folder", args),
     restoreTrash: (args) => call("restore-trash", args),

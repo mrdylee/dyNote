@@ -432,7 +432,7 @@ app
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
-      "move-file", "trash-file", "trash-folder", "restore-trash", "recovery",
+      "move-file", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
     ]);
     for (const [name, action] of Object.entries({
       "plugins-list": args => { checkVault(args); return plugins.status(); },
@@ -636,6 +636,17 @@ app
           ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
           : vault.moveFile(args.from, args.to, args.revision);
       },
+      "copy-file": async (args, target) => {
+        checkVault(args, target);
+        const source = args.workspace === true ? workspaceVault(args.sourceVaultId) : target;
+        checkVault({ vaultId: args.sourceVaultId }, source);
+        if (source !== target) {
+          await openedVaults.get(source.id)?.ready;
+          if (workspaceVault(source.id) !== source || await realpath(source.root) !== source.root)
+            throw new Error("원본 보관함 위치가 변경되었습니다.");
+        }
+        return target.copyDocument(args.from, args.folder, args.revision, source);
+      },
       "trash-file": (args, vault) => {
         checkVault(args, vault);
         return vault.trashFile(args.path, args.revision);
@@ -674,7 +685,7 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const exclusive = ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
         const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
@@ -702,7 +713,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

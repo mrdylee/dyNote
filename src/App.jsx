@@ -48,7 +48,7 @@ import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
 import { DOCUMENT_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
-import { protectedTreeFolders, canTrashFolder } from "../core/file-tree.mjs";
+import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
@@ -127,15 +127,28 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
   );
 }
 
-function FileTree({ notes, vaultId, active, onOpen, onContext, disabled }) {
+function FileTree({ notes, folders, active, reveal, onOpen, onContext, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
   const [closed, setClosed] = useState(new Set());
+  useEffect(() => {
+    if (!reveal?.folder) return;
+    setClosed(old => {
+      if (!old.has(reveal.folder)) return old;
+      const next = new Set(old);
+      next.delete(reveal.folder);
+      return next;
+    });
+  }, [reveal]);
   const tree = Object.create(null);
-  for (const note of notes) {
+  const children = parts => {
     let cursor = tree;
-    const parts = note.path.split("/");
-    for (const part of parts.slice(0, -1))
+    for (const part of parts)
       cursor = (cursor[part] ??= { children: Object.create(null) }).children;
-    cursor[parts.at(-1)] = { note };
+    return cursor;
+  };
+  for (const folder of folders) children(folder.split("/"));
+  for (const note of notes) {
+    const parts = note.path.split("/");
+    children(parts.slice(0, -1))[parts.at(-1)] = { note };
   }
   const render = (level, prefix = "", depth = 0) =>
     Object.entries(level)
@@ -152,12 +165,14 @@ function FileTree({ notes, vaultId, active, onOpen, onContext, disabled }) {
               key={path}
               className={`file-row ${active === path ? "selected" : ""}`}
               style={{ paddingLeft: 17 + depth * 16 }}
-              onClick={() => onOpen(path)}
+              onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
+              onPointerDown={event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
-              draggable={!disabled && /\.md$/i.test(path)}
-              onDragStart={e => { e.dataTransfer.setData(DOCUMENT_DRAG, documentKey(vaultId, path)); e.dataTransfer.effectAllowed="copy"; }}
+              draggable={!disabled}
+              onDragStart={event => onDragDocument(event, path)}
+              onDragEnd={onDragEnd}
             >
               <FileText size={14} />
               <span>{name.replace(/\.md$/i, "")}</span>
@@ -170,6 +185,7 @@ function FileTree({ notes, vaultId, active, onOpen, onContext, disabled }) {
             <button
               className="folder-row"
               title={path}
+              {...dropProps(path)}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:true}); }}
               style={{ paddingLeft: 12 + depth * 16 }}
               onClick={() =>
@@ -373,6 +389,11 @@ export default function App() {
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
   const [fileTarget, setFileTarget] = useState(null);
+  const treeDrag = useRef(null);
+  const macCopyDrag = useRef(null);
+  const [treeDrop, setTreeDrop] = useState(null);
+  const [treeReveal, setTreeReveal] = useState(null);
+  const [crossCopy, setCrossCopy] = useState(null);
   const [classificationHelpDismissed, setClassificationHelpDismissed] = useState(false);
   const classificationHelpRef = useRef(null);
   useEffect(() => {
@@ -882,7 +903,13 @@ export default function App() {
           setModal("switch");
         }
       }
-      if (event.key === "Escape") setModal(null);
+      if (event.key === "Escape") {
+        if (macCopyDrag.current) {
+          macCopyDrag.current = null;
+          setTreeDrop(null);
+        }
+        setModal(null);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -956,6 +983,136 @@ export default function App() {
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
   const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
+  const moveWorkspaceFile = async (vaultId, from, to, revision) => {
+    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision }));
+    const oldKey = documentKey(vaultId, from), newKey = documentKey(vaultId, to);
+    workspace.dispatch({ type: "rename", path: oldKey, to: newKey });
+    setTabs(old => [...new Set(old.map(key => key === oldKey ? newKey : key))]);
+    updateNavigation({ type: "rename", from, to }, vaultId);
+    acceptSnapshot(snapshot);
+    setError(snapshot.warnings.join(" · "));
+  };
+  const transferTreeFile = async ({ source, vaultId, folder, operation, confirmedRevision }) => {
+    if (busy || !vaultsRef.current[source.vaultId] || !vaultsRef.current[vaultId]) return;
+    setBusy(true);
+    try {
+      await flush();
+      const revision = confirmedRevision ?? revisionMap(source.vaultId).get(source.path);
+      if (!revision) throw new Error("원본 문서를 새로고침해 주세요.");
+      if (source.vaultId !== vaultId && !confirmedRevision) {
+        setCrossCopy({ source, vaultId, folder, operation, confirmedRevision: revision });
+        setModal("tree-copy");
+        return;
+      }
+      const name = source.path.split("/").at(-1);
+      if (operation === "move") {
+        await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision);
+      } else {
+        const saved = await invoke(api.copyFile({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
+        const field = saved.kind ? "documents" : "notes";
+        revisionMap(vaultId).set(saved.path, saved.revision);
+        updateVault(vaultId, old => old && ({ ...old, [field]: [...old[field].filter(file => file.path !== saved.path), saved] }));
+        setError("");
+      }
+      setTreeReveal({ vaultId, folder });
+      if (confirmedRevision) setModal(null);
+    } catch (error) {
+      if (confirmedRevision) setModal(null);
+      setError(error.message);
+    } finally { setBusy(false); }
+  };
+  const startTreeDrag = (event, vaultId, path) => {
+    if (macCopyDrag.current) { event.preventDefault(); return; }
+    treeDrag.current = { vaultId, path };
+    const key = documentKey(vaultId, path);
+    event.dataTransfer.setData(FILE_TREE_DRAG, key);
+    if (/\.md$/i.test(path)) event.dataTransfer.setData(DOCUMENT_DRAG, key);
+    event.dataTransfer.effectAllowed = "copyMove";
+  };
+  const endTreeDrag = () => { treeDrag.current = null; setTreeDrop(null); };
+  const highlightTreeDrop = (vaultId, folder, operation) => {
+    setTreeDrop(old => !operation ? null
+      : old?.vaultId === vaultId && old.folder === folder && old.operation === operation ? old : { vaultId, folder, operation });
+  };
+  const treeDropProps = (vaultId, folder) => {
+    const current = treeDrop?.vaultId === vaultId && treeDrop.folder === folder ? treeDrop : null;
+    const operationAt = (event, source) => {
+      if (busy || !source || !event.dataTransfer.types.includes(FILE_TREE_DRAG)) return null;
+      if (event.ctrlKey || source.vaultId !== vaultId) return "copy";
+      return source.path.split("/").slice(0, -1).join("/") === folder ? null : "move";
+    };
+    return {
+      "data-tree-drop-vault": vaultId,
+      "data-tree-drop-folder": folder,
+      "data-drop-label": current ? current.operation === "copy" ? "복사" : "이동" : undefined,
+      onDragOver: event => {
+        if (!event.dataTransfer.types.includes(FILE_TREE_DRAG)) return;
+        event.preventDefault();
+        const operation = operationAt(event, treeDrag.current);
+        event.dataTransfer.dropEffect = operation ?? "none";
+        highlightTreeDrop(vaultId, folder, operation);
+      },
+      onDragLeave: event => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setTreeDrop(old => old?.vaultId === vaultId && old.folder === folder ? null : old);
+      },
+      onDrop: event => {
+        if (!event.dataTransfer.types.includes(FILE_TREE_DRAG)) return;
+        event.preventDefault();
+        const source = treeDrag.current, operation = operationAt(event, source);
+        endTreeDrag();
+        if (!operation || event.dataTransfer.getData(FILE_TREE_DRAG) !== documentKey(source.vaultId, source.path)) return;
+        void transferTreeFile({ source, vaultId, folder, operation });
+      },
+    };
+  };
+  const showTreeMenu = (origin, x, y, target, vaultId) => {
+    const scope = vaultsRef.current[vaultId];
+    if (!scope || busy || editState.forVault(vaultId).blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)))) {
+      setTreeMenu(null);
+      return;
+    }
+    const rect = origin.getBoundingClientRect();
+    setTreeMenu({
+      ...target, vaultId, origin,
+      x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
+      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 48)),
+    });
+  };
+  const startMacCopy = (event, vaultId, path) => {
+    if (!isMac || busy || !event.ctrlKey || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    macCopyDrag.current = {
+      source: { vaultId, path }, origin: event.currentTarget, pointerId: event.pointerId,
+      x: event.clientX, y: event.clientY, dragging: false,
+    };
+  };
+  const macCopyTarget = (event) => {
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-tree-drop-vault]");
+    return target && { vaultId: target.dataset.treeDropVault, folder: target.dataset.treeDropFolder };
+  };
+  const moveMacCopy = (event) => {
+    const drag = macCopyDrag.current;
+    if (drag?.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 5) drag.dragging = true;
+    if (!drag.dragging) return;
+    const target = macCopyTarget(event);
+    highlightTreeDrop(target?.vaultId, target?.folder, target && !busy ? "copy" : null);
+  };
+  const finishMacCopy = (event) => {
+    const drag = macCopyDrag.current;
+    if (drag?.pointerId !== event.pointerId) return;
+    macCopyDrag.current = null;
+    setTreeDrop(null);
+    if (event.type !== "pointerup") return;
+    if (!drag.dragging) {
+      showTreeMenu(drag.origin, event.clientX, event.clientY, { path: drag.source.path, folder: false }, drag.source.vaultId);
+      return;
+    }
+    const target = macCopyTarget(event);
+    if (target) void transferTreeFile({ ...target, source: drag.source, operation: "copy" });
+  };
   const prepareFile = async (path, action, folder = false, vaultId = vault.id) => {
     try {
       let revision = revisionMap(vaultId).get(path);
@@ -980,16 +1137,7 @@ export default function App() {
       const revision = revisionMap(vaultId).get(fileTarget.path) ?? fileTarget.revision;
       const preferences = vaultsRef.current[vaultId]?.journalPreferences;
       if (modal === "move") {
-        const snapshot = await invoke(
-          api.moveFile({
-            vaultId,
-            from: fileTarget.path,
-            to: newName.trim(),
-            revision,
-          }),
-        );
-        updateNavigation({ type: "rename", from: fileTarget.path, to: newName.trim() }, vaultId);
-        install(snapshot);
+        await moveWorkspaceFile(vaultId, fileTarget.path, newName.trim(), revision);
         if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim(), vaultId);
         else await openAttachment(newName.trim(), "", vaultId);
       } else {
@@ -1233,19 +1381,15 @@ export default function App() {
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
   };
-  const renderTree = scope => <FileTree vaultId={scope.id} notes={[...models.get(scope.id).notes, ...scope.documents]}
+  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents]} folders={scope.folders ?? emptyFiles}
     active={vault.id === scope.id ? active : null} disabled={busy} onOpen={path => openNote(path, scope.id)}
+    reveal={treeReveal?.vaultId === scope.id ? treeReveal : null}
+    onDragDocument={(event, path) => startTreeDrag(event, scope.id, path)} onDragEnd={endTreeDrag}
+    onCopyPointer={(event, path) => startMacCopy(event, scope.id, path)}
+    dropProps={folder => treeDropProps(scope.id, folder)}
     onContext={(event, target) => {
-      if (busy || editState.forVault(scope.id).blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)))) {
-        setTreeMenu(null);
-        return;
-      }
-      const rect = event.currentTarget.getBoundingClientRect();
-      setTreeMenu({
-        ...target, vaultId: scope.id, origin: event.currentTarget,
-        x: Math.max(4, Math.min(event.clientX || rect.left + 20, window.innerWidth - 194)),
-        y: Math.max(4, Math.min(event.clientY || rect.bottom, window.innerHeight - 48)),
-      });
+      if (macCopyDrag.current && event.ctrlKey) return;
+      showTreeMenu(event.currentTarget, event.clientX, event.clientY, target, scope.id);
     }} />;
   const spaceSelector = label => together && <label className="space-filter">
     <span>문서 공간</span>
@@ -1264,7 +1408,8 @@ export default function App() {
     .map((e) => model.notes.find((n) => n.path === e.target))
     .filter(Boolean);
   return (
-    <div className="app-shell">
+    <div className="app-shell" onPointerMove={moveMacCopy} onPointerUp={finishMacCopy}
+      onPointerCancel={finishMacCopy} onLostPointerCapture={finishMacCopy}>
       <header className={isMac ? "titlebar titlebar-mac" : "titlebar"}>
         <button className="app-version" aria-label="앱 버전 정보" title="DyNote 버전 정보" onClick={() => setModal("about")}>
           <img src="./brand/dynote.svg" width="30" height="30" alt="" />
@@ -1342,7 +1487,7 @@ export default function App() {
           </div>
         </nav>
         <aside className="navigator" style={{ width: panelLayout.left }}>
-          <button className="vault-switch" aria-label="공간 전환·관리" disabled={busy} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>
+          <button className="vault-switch" aria-label="공간 전환·관리" disabled={busy} {...(!together ? treeDropProps(vault.id, "") : {})} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>
             <span className="vault-icon">
               <FolderOpen size={18} />
             </span>
@@ -1427,7 +1572,7 @@ export default function App() {
           ) : (
             together ? <div className="space-trees">
               {visibleSpaces.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)}>
-                <h3>{spaceLabel(scope)}</h3>
+                <h3 {...treeDropProps(scope.id, "")}>{spaceLabel(scope)}</h3>
                 {renderTree(scope)}
               </section>)}
             </div> : renderTree(vault)
@@ -2099,6 +2244,17 @@ export default function App() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {modal === "tree-copy" && crossCopy && vaults[crossCopy.source.vaultId] && vaults[crossCopy.vaultId] && (
+        <Modal title="다른 보관함에 복사" onClose={() => !busy && setModal(null)}>
+          <p>원본 · {spaceLabel(vaults[crossCopy.source.vaultId])} / {crossCopy.source.path}</p>
+          <p>대상 · {spaceLabel(vaults[crossCopy.vaultId])}{crossCopy.folder && ` / ${crossCopy.folder}`}</p>
+          <p className="muted">선택한 문서 파일 1개를 복사합니다. 연결된 문서와 첨부파일은 개별 파일입니다.</p>
+          <div className="modal-actions">
+            <button type="button" disabled={busy} onClick={() => setModal(null)}>취소</button>
+            <button type="button" className="primary-button" disabled={busy} onClick={() => transferTreeFile(crossCopy)}>복사</button>
+          </div>
         </Modal>
       )}
       {modal === "properties" && (

@@ -2003,6 +2003,12 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .space-tree { display:flex; flex-direction:column; min-height:0; }
 .space-tree:not(:only-child) { min-height:min(84px, 100%); }
 .space-tree h3 { flex:none; margin:10px 12px 3px; padding:6px; border-top:1px solid var(--border); color:var(--text-secondary); font-size:11px; overflow-wrap:anywhere; }
+.folder-row[data-drop-label], .space-tree h3[data-drop-label], .vault-switch[data-drop-label] {
+  display: flex; align-items: center; gap: 8px; background: #eee9f8; outline: 1px solid #b9a7d7; outline-offset: -1px;
+}
+[data-drop-label]::after {
+  content: attr(data-drop-label); margin-left: auto; flex-shrink: 0; padding: 2px 5px; border-radius: 4px; background: #e2d8f3; color: #624b89; font-size: 10px;
+}
 .space-warning { margin:6px 14px; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .context-space { padding:6px 12px; border-bottom:1px solid var(--border); color:var(--muted); font-size:11px; }
 .document-separator { width:6px; flex-shrink:0; cursor:col-resize; background:var(--border); touch-action:none; }

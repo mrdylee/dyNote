@@ -1,3 +1,5 @@
+export const FILE_TREE_DRAG = "application/x-dynote-tree-file";
+
 const builtInFolders=['Journal','Templates','Attachments','_attachments'];
 const fold=value=>value.normalize('NFC').toLowerCase().replace(/\/+$/,'');
 export function protectedTreeFolders(preferences={}){

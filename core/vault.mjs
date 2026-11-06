@@ -1,4 +1,5 @@
 import {
+  copyFile,
   open,
   realpath,
   lstat,
@@ -329,12 +330,14 @@ export class Vault {
     const warnings = [];
     const attachments = [];
     const documents = [];
+    const folders = [];
     const walk = async (directory, prefix = "") => {
       const items = await readdir(directory, { withFileTypes: true });
       for (const item of items) {
         if (item.name.startsWith(".") || item.isSymbolicLink()) continue;
         const relative = prefix + item.name;
         if (item.isDirectory()) {
+          if (validFilePath(relative + "/folder.md")) folders.push(relative);
           try {
             await walk(path.join(directory, item.name), relative + "/");
           } catch {
@@ -354,7 +357,7 @@ export class Vault {
     await walk(this.root);
     notes.sort((a, b) => a.path.localeCompare(b.path, "ko"));
     documents.sort((a, b) => a.path.localeCompare(b.path, "ko"));
-    return { id: this.id, name: this.name, notes, documents, attachments, warnings };
+    return { id: this.id, name: this.name, notes, documents, attachments, folders, warnings };
   }
 
   async readNote(relative) {
@@ -565,6 +568,53 @@ export class Vault {
     });
   }
 
+  async copyDocument(from, folder, expectedRevision, source = this) {
+    if (!validFilePath(from) || (!validNotePath(from) && !documentKind(from)) || typeof folder !== "string")
+      throw new Error("복사할 수 없는 문서 또는 폴더입니다.");
+    const readSource = async () => {
+      const file = await source.#read(from);
+      if (file.revision !== expectedRevision)
+        throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
+      return file;
+    };
+    let original;
+    if (source !== this) {
+      await source.#tail;
+      original = await readSource();
+    }
+    return this.#enqueue(async () => {
+      const file = original ?? await readSource();
+      const inFolder = name => folder ? folder + "/" + name : name;
+      const filename = path.basename(from);
+      const directory = path.dirname(await this.#file(inFolder(filename)));
+      const key = name => name.normalize("NFC").toLowerCase();
+      const taken = new Set((await readdir(directory)).map(key));
+      const ext = path.extname(filename), stem = filename.slice(0, -ext.length);
+      let name = filename;
+      for (let index = 1; taken.has(key(name)); index++)
+        name = `${stem} (복사본${index === 1 ? "" : " " + index})${ext}`;
+      const to = inFolder(name), destination = await this.#file(to);
+      let content = file.content;
+      if (source === this && file.kind !== "base") {
+        const { notes, documents, attachments } = await this.#snapshot();
+        const files = [...notes, ...documents, ...attachments];
+        content = file.kind === "canvas" ? rewriteCanvas(content, from, from, to, files)
+          : rewriteLinks(content, from, from, to, files);
+      }
+      const temporary = path.join(directory, `.dynote-copy-${randomUUID()}`);
+      try {
+        await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
+        await copyFile(temporary, destination, constants.COPYFILE_EXCL);
+      } catch (error) {
+        if (error.code === "EEXIST") throw new Error("대상 폴더에 같은 이름의 문서가 있습니다.");
+        throw error;
+      } finally {
+        await unlink(temporary).catch(() => {});
+      }
+      return this.#read(to);
+    });
+  }
+
   moveFile(from, to, expectedRevision) {
     return this.#enqueue(async () => {
       if (
@@ -593,7 +643,12 @@ export class Vault {
         ? Buffer.from(sourceNote.next)
         : current.bytes;
       // Exclusive creation prevents overwriting an unrelated destination.
-      await writeFile(destination, movedBytes, { flag: "wx", mode: 0o600 });
+      try {
+        await writeFile(destination, movedBytes, { flag: "wx", mode: 0o600 });
+      } catch (error) {
+        if (error.code === "EEXIST") throw new Error("대상 폴더에 같은 이름의 문서가 있습니다.");
+        throw error;
+      }
       const saved = [];
       try {
         for (const edit of edits) {

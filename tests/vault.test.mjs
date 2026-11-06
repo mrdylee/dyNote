@@ -142,6 +142,23 @@ test("rejects Windows device names and trailing-dot directory aliases", async (t
   }
 });
 
+test("copying documents keeps relative links, isolates concurrent names, and checks the source revision", async (t) => {
+  const { store, root } = await fixture(t);
+  const source = await store.create("Work/Plan.md", "[ref](../한글.md)\n");
+  await mkdir(join(root, "Archive", "2026"), { recursive: true });
+  const copies = await Promise.all([
+    store.copyDocument(source.path, "Archive/2026", source.revision),
+    store.copyDocument(source.path, "Archive/2026", source.revision),
+  ]);
+  assert.deepEqual(copies.map(file => file.path), ["Archive/2026/Plan.md", "Archive/2026/Plan (복사본).md"]);
+  for (const file of copies) {
+    assert.equal(await readFile(join(root, file.path), "utf8"), "[ref](../../%ED%95%9C%EA%B8%80.md)\n");
+  }
+  assert.equal(await readFile(join(root, source.path), "utf8"), source.content);
+  await assert.rejects(store.copyDocument(source.path, "Archive/2026", "stale"), /외부에서 파일이 변경/);
+  await assert.rejects(store.copyDocument(source.path, "../outside", source.revision), /경로/);
+});
+
 test('JOURNAL-01 concurrent open-or-create returns one file without overwriting existing content', async (t) => {
   const { store, root } = await fixture(t);
   assert.equal(typeof store.openOrCreate, 'function', 'exclusive open-or-create exists');

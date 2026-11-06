@@ -17,6 +17,12 @@ export function workspaceAction(value, action) {
   const {path} = action;
   if (action.type === 'reset') return {paths:path ? [path] : [], active:path ?? null, modes:path&&/\.md$/i.test(path)?{[path]:'live'}:{}};
   if (action.type === 'mode') return {...state, modes:{...state.modes,[path ?? state.active]:action.mode}};
+  if (action.type === 'rename') {
+    const { [path]: mode, ...modes } = state.modes;
+    if (mode) modes[action.to] = mode;
+    const paths = [...new Set(state.paths.map(key => key === path ? action.to : key))];
+    return {...state, paths, active:state.active === path ? action.to : state.active, modes};
+  }
   if (action.type === 'reconcile' || action.type === 'close' || action.type === 'reconcile-vault') {
     const paths = state.paths.filter(p => {
       if (action.type === 'close') return p !== path;
