@@ -31,17 +31,33 @@ try {
     env: { ...process.env, OPEN_NOTES_DATA: profile },
   });
   const page = await app.firstWindow();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 700));
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
   const personalTree = page.getByRole("region", { name: "개인 노트 · Personal", exact: true });
   const teamTree = page.getByRole("region", { name: "팀 공유 노트 · Team", exact: true });
   const row = (tree, title) => tree.getByTitle(title, { exact: true });
   const pane = file => page.getByRole("region", { name: `문서 ${file}`, exact: true });
+  const center = async locator => {
+    await locator.scrollIntoViewIfNeeded();
+    const { x, y, width, height } = await locator.boundingBox();
+    return { x: x + width / 2, y: y + height / 2 };
+  };
   const drag = async (from, to, copy = false) => {
-    await to.waitFor();
+    const start = await center(from);
+    await page.mouse.move(start.x, start.y);
     if (copy) await page.keyboard.down("Control");
-    try { await from.dragTo(to, { steps: 10 }); }
-    finally { if (copy) await page.keyboard.up("Control"); }
+    await page.mouse.down();
+    try {
+      // Start dragging from the file before scrolling can move another row under the pointer.
+      await page.mouse.move(start.x + 12, start.y);
+      const end = await center(to);
+      await page.mouse.move(end.x, end.y, { steps: 10 });
+      await to.and(page.locator("[data-drop-label]")).waitFor();
+    } finally {
+      await page.mouse.up();
+      if (copy) await page.keyboard.up("Control");
+    }
   };
   await page.getByRole("region", { name: "저널 피드", exact: true }).locator(".cm-focused").waitFor();
   await row(personalTree, `Journal/${localDate()}.md`).waitFor();
@@ -81,7 +97,7 @@ try {
   assert.equal(await readFile(path.join(personal, "Conflict/Plan.md"), "utf8"), "# Existing\n");
   assert.equal(await readFile(path.join(personal, "Archive/Plan.md"), "utf8"), moved);
 
-  await drag(row(personalTree, "Copies/Plan.md"), personalTree.getByRole("heading", { name: "개인 노트 · Personal", exact: true }));
+  await drag(row(personalTree, "Copies/Plan.md"), personalTree.locator('h3[data-tree-drop-folder=""]'));
   await row(personalTree, "Plan.md").waitFor();
   assert.equal(await readFile(path.join(personal, "Plan.md"), "utf8"), moved.replace("../Reference.md", "Reference.md"));
   await assert.rejects(readFile(path.join(personal, "Copies/Plan.md")), { code: "ENOENT" });
