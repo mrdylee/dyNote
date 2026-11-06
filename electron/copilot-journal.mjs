@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {parseDocument} from 'yaml';
-import {parseChatSource,captureId,renderCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
+import {parseChatSource,captureId,captureSessionHeading,renderCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
 import {localDate,periodicNote} from '../core/periodic-notes.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const directoryName=value=>/^[\w-]{1,128}$/.test(value);
@@ -82,7 +82,10 @@ export class CopilotJournal{
   const config=this.config(vault);let projects=[],error='';
   try{projects=await this.projects(config.sourceRoot);}catch(e){error=e.message;}
   return {sourceRoot:config.sourceRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,projects:projects.map(p=>({...p,selected:Object.hasOwn(config.projects,p.id)})),error,
-   records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,path:r.path,journalPath:r.journalPath,sessions:Object.entries(r.sessions).map(([id,s])=>({id,title:s.title}))})),trashId:config.trashId??null};
+   records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,path:r.path,journalPath:r.journalPath,
+    projectKey:path.posix.basename(path.posix.dirname(r.path)),
+    sessions:Object.entries(r.sessions).map(([id,s])=>({id,title:s.title,heading:captureSessionHeading(s.title).trim(),lastActivity:s.messages.at(-1).at})),
+   })),trashId:config.trashId??null};
  }
  async setSource(vault,root){const config=clone(this.config(vault));config.sourceRoot=await realpath(root);if(!(await lstat(config.sourceRoot)).isDirectory())throw new Error('VS Code 기록 폴더를 선택해 주세요.');config.enabled=false;config.projects={};await this.persist(vault,config);return this.status(vault);}
  async setWslSource(vault,directory){

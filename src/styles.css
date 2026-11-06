@@ -2080,3 +2080,14 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .capture-project small { display:block; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .capture-source-path { display:block; overflow-wrap:anywhere; font-size:12px; padding:8px; }
 .capture-settings fieldset { border:1px solid var(--border); border-radius:6px; margin:12px 0; }
+.modal.capture-history-modal { width:min(540px,calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow-y:auto; background:var(--surface,#fff); color:var(--text); }
+.capture-history-project { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin:8px 0; }
+.capture-history-project summary { cursor:pointer; overflow-wrap:anywhere; }
+.capture-history-project small, .capture-history-project time { font-size:12px; color:var(--muted); }
+.capture-history-path { display:block; margin:4px 0 0 16px; }
+.capture-history-project ul { list-style:none; margin:8px 0 0; padding:0; }
+.capture-history-project li { border-top:1px solid var(--border); }
+.capture-history-session { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:4px 12px; width:100%; padding:8px 4px; text-align:left; overflow-wrap:anywhere; color:var(--text); background:transparent; border:0; }
+.capture-history-session:hover { background:var(--hover,#f5eff9); }
+.capture-history-dates { margin:0 4px 8px; font-size:12px; }
+.capture-history-dates button { margin:4px 4px 0 0; }

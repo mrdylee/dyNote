@@ -58,9 +58,7 @@ try{
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();await settings().waitFor();
  await app.evaluate(({dialog},source)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[source]});},source);
- const sourceButton=settings().getByRole('button',{name:'기록 폴더 선택',exact:true});
- await settings().getByRole('button',{name:'프로젝트 새로고침',exact:true,disabled:false}).waitFor();
- assert.equal(await sourceButton.isEnabled(),true,'Copilot settings should be usable from the team journal');
+ const sourceButton=settings().getByRole('button',{name:'기록 폴더 선택',exact:true,disabled:false});
  await sourceButton.click();await page.waitForFunction(source=>document.querySelector('.capture-source-path')?.textContent===source,source);
  await settings().getByText('WSL (Ubuntu) · /home/dev/WSL Work',{exact:true}).waitFor();
  await check('WSL source selection rejects a regular Windows or Mac folder',async()=>{
@@ -87,6 +85,7 @@ try{
   assert.deepEqual(await readdir(team),['Shared.md']);
   assert.match(await page.getByRole('button',{name:'공간 전환·관리',exact:true}).innerText(),/팀 공유 노트/);
   assert.equal(await page.locator('.capture-record-title').count(),0);
+  assert.equal(await page.getByRole('button',{name:'프로젝트별 기록',exact:true}).count(),0);
   const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/첫 질문 원문/);assert.doesNotMatch(content,/DO NOT IMPORT/);
   assert.match(await readFile(path.join(vault,journal),'utf8'),/사용자가 직접 작성한 기록/);
   assert.match(await readFile(path.join(source,'project/chatSessions/first.json'),'utf8'),/첫 질문 원문/);
@@ -186,8 +185,8 @@ try{
  app=await launch();await setup();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.capture-toolbar button')?.disabled);
  await check('deletion exclusions survive restart and explicit import',async()=>{assert.equal((await captureState()).records.length,0);await assert.rejects(readFile(path.join(vault,record.path)),{code:'ENOENT'});});
+ const pastAt=new Date();pastAt.setHours(12,0,0,0);pastAt.setDate(pastAt.getDate()-1);
  await check('a past WSL Agent Host date is imported into its journal and retried without a duplicate',async()=>{
-  const pastAt=new Date();pastAt.setHours(12,0,0,0);pastAt.setDate(pastAt.getDate()-1);
   const date=localDate(pastAt),timestamp=pastAt.toISOString();
   await mkdir(path.join(wslRoot,'past'),{recursive:true});
   await writeFile(path.join(wslRoot,'past/workspace.yaml'),'cwd: /home/dev/WSL Work\nclient_name: vscode-agent-host\n');
@@ -214,6 +213,85 @@ try{
   await settings().getByText(`${date} · 새로 가져올 대화가 없습니다.`,{exact:true}).waitFor();
   assert.equal((await readFile(path.join(vault,imported.journalPath),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);
   await closeSettings();
+ });
+ await check('project history groups imported sessions across dates and opens the selected session',async()=>{
+  const earlier=new Date(pastAt);earlier.setDate(earlier.getDate()-1);
+  const from=localDate(earlier),to=localDate(pastAt);
+  const continuedTitle='이어진 세션 #1',continuedHeading='이어진 세션 1';
+  const request=(id,timestamp,text)=>({requestId:id,timestamp,message:{text},modelState:{value:1}});
+  const putSession=(project,id,customTitle,requests)=>writeFile(path.join(source,project,'chatSessions',`${id}.json`),JSON.stringify({version:3,sessionId:id,customTitle,requests}));
+  await mkdir(path.join(source,'other/chatSessions'),{recursive:true});
+  await writeFile(path.join(source,'other/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BDebian/home/dev/WSL%20Work'}));
+  await putSession('project','aaa-older','먼저 끝난 세션',[request('a',+pastAt-3600000,`어제 오전 질문\n\n## ${continuedHeading}\n인용된 대화의 제목`)]);
+  await putSession('project','zzz-continued',continuedTitle,[
+   request('a',+earlier,'처음 질문'),request('b',+pastAt+3600000,'이어진 질문'),
+  ]);
+  await putSession('other','zzz-continued','다른 배포판의 세션',[request('a',+pastAt,'별개 프로젝트 질문')]);
+  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();
+  await settings().getByRole('checkbox',{name:/WSL \(Debian\)/}).check();
+  const range=settings().getByRole('group',{name:'가져올 기간',exact:true});
+  await range.getByLabel('시작일',{exact:true}).fill(from);
+  await range.getByLabel('종료일',{exact:true}).fill(to);
+  await settings().getByRole('button',{name:'기간 대화 가져오기',exact:true}).click();
+  await settings().getByText(`${from} ~ ${to} · 대화를 개인 노트에 가져왔습니다.`,{exact:true}).waitFor();
+  await closeSettings();
+  const {projects,records}=await captureState();
+  const {key}=projects.find(project=>project.id==='project');
+  const history=page.getByRole('dialog',{name:'프로젝트별 기록',exact:true});
+  const openHistory=()=>page.getByRole('button',{name:'프로젝트별 기록',exact:true}).click({timeout:5000});
+  const project=distro=>history.locator('.capture-history-project').filter({has:page.getByText(`WSL (${distro}) · /home/dev/WSL Work`,{exact:true})});
+  const ubuntu=project('Ubuntu'),debian=project('Debian');
+  await openHistory();
+  await ubuntu.locator(':scope > summary').click();
+  await debian.locator(':scope > summary').click();
+  const sessionTitles=group=>group.locator('li > button > span').allTextContents();
+  assert.deepEqual(await sessionTitles(ubuntu),[continuedTitle,'어제 작성한 질문','먼저 끝난 세션']);
+  assert.deepEqual(await sessionTitles(debian),['다른 배포판의 세션']);
+  await history.getByText('이전 날짜 기록',{exact:true}).click();
+  await history.screenshot({path:path.join(output,'project-history.png')});
+  await history.getByRole('button',{name:from,exact:true}).click();
+  const recordFor=date=>records.find(record=>record.path===`AI Conversations/${key}/${date}.md`);
+  await page.getByRole('region',{name:`문서 ${recordFor(from).path}`,exact:true}).waitFor();
+  const openLatest=async()=>{
+   await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+   await openHistory();
+   await ubuntu.locator(':scope > summary').click();
+   await history.getByRole('button',{name:/^이어진 세션/}).click();
+  };
+  const target=recordFor(to).path;
+  const pane=page.getByRole('region',{name:`문서 ${target}`,exact:true});
+  const editor=pane.getByRole('textbox',{name:'Markdown 편집기',exact:true});
+  const cursorLine=()=>editor.evaluate(el=>{
+   const {state}=el.cmTile.root.view;
+   return state.doc.lineAt(state.selection.main.head).text;
+  });
+  await openLatest();
+  assert.equal(await cursorLine(),`## ${continuedHeading}`,'skip matching headings quoted in other conversations');
+  const file=path.join(vault,target);
+  const [heading,...sections]=(await readFile(file,'utf8')).split(/(?=^## )/m);
+  const index=sections.findIndex(section=>section.startsWith(`## ${continuedHeading}\n`));
+  assert.ok(index>0);
+  const reordered=[heading,sections[index],...sections.filter((_,i)=>i!==index)].map(part=>part.trimEnd()).join('\n\n')+'\n';
+  await editor.evaluate((el,content)=>{
+   const view=el.cmTile.root.view;
+   view.dispatch({changes:{from:0,to:view.state.doc.length,insert:content}});
+  },reordered);
+  await page.keyboard.press(`${mod}+s`);
+  await page.locator('.save-status.saved').waitFor();
+  assert.equal(await readFile(file,'utf8'),reordered);
+  await openLatest();
+  assert.equal(await cursorLine(),`## ${continuedHeading}`,'follow the session after reordering sections');
+  await page.getByRole('button',{name:'읽기 보기',exact:true}).click();
+  await page.evaluate(()=>{
+   const scroll=Element.prototype.scrollIntoView;
+   Element.prototype.scrollIntoView=function(...args){
+    if(this.matches('.markdown-preview > h2'))window.captureTestReadHeading=this.textContent;
+    return scroll.apply(this,args);
+   };
+  });
+  await openLatest();
+  await pane.locator('.document-content.read .markdown-preview').waitFor();
+  assert.equal(await page.evaluate(()=>window.captureTestReadHeading),continuedHeading,'scroll to the session in the read view');
  });
  await check('team and stale-vault IPC cannot capture private chats',async()=>{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);

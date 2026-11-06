@@ -284,12 +284,16 @@ export default function Editor({
   }, [pendingOriginal, note.content]);
   useEffect(() => {
     if (!jump || jump.path !== note.path) return;
-    let fragment;
-    try { fragment = decodeURIComponent(jump.fragment); } catch { return; }
-    const heading = note.headings?.find((h) => h.text === fragment || h.plainText === fragment || h.id === fragment || headingId(h.plainText) === fragment);
+    let lineNumber = jump.heading?.line;
+    if (lineNumber === undefined) {
+      let fragment;
+      try { fragment = decodeURIComponent(jump.fragment); } catch { return; }
+      const heading = note.headings?.find((h) => h.text === fragment || h.plainText === fragment || h.id === fragment || headingId(h.plainText) === fragment);
+      lineNumber = heading?.line;
+    }
     const view = editor.current;
-    if (view && heading) {
-      const line = view.state.doc.line(Math.min(view.state.doc.lines, heading.line + 1));
+    if (view && lineNumber !== undefined) {
+      const line = view.state.doc.line(Math.min(view.state.doc.lines, lineNumber + 1));
       view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
       view.focus();
     }

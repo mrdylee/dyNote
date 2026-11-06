@@ -1,12 +1,48 @@
 import {Download,Settings,Trash2,Undo2} from 'lucide-react';
-export function CopilotJournalToolbar({state,importNotice,disabled,onImport,onSettings,onRestore}){
+export function CopilotJournalToolbar({state,importNotice,disabled,onImport,onHistory,onSettings,onRestore}){
  return <div className="capture-toolbar" aria-label="저널 자동기록 작업">
   <span className={state?.error?'capture-error':''} role="status" title={state?.error||undefined}>{state?.error||(state?.enabled?'Copilot 자동 기록 켜짐':'Copilot 대화 기록')}</span>
   {importNotice&&<span role="status">{importNotice}</span>}
   <button disabled={disabled} title="선택한 VS Code 프로젝트의 오늘 대화를 가져옵니다." onClick={onImport}><Download size={14}/>가져오기</button>
+  {onHistory&&<button disabled={disabled} onClick={onHistory}>프로젝트별 기록</button>}
   <button disabled={disabled} aria-label="저널 자동기록 설정" onClick={onSettings}><Settings size={14}/></button>
   {state?.trashId&&<button disabled={disabled} onClick={onRestore}><Undo2 size={14}/>삭제 되돌리기</button>}
  </div>;
+}
+const activityTime=new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const newestFirst=(a,b)=>b.lastActivity-a.lastActivity;
+export function CopilotJournalHistory({state,onOpen}){
+ const projectPaths=new Map(state?.projects?.map(project=>[project.key,project.path]));
+ const groups=new Map();
+ for(const {projectKey,label,path,date,sessions} of state?.records??[]){
+  const group=groups.get(projectKey)??{label,sessions:new Map()};
+  groups.set(projectKey,group);
+  for(const session of sessions){
+   const parts=group.sessions.get(session.id)??[];
+   parts.push({...session,path,date});
+   group.sessions.set(session.id,parts);
+  }
+ }
+ if(!groups.size)return <p>아직 가져온 대화가 없습니다.</p>;
+ return [...groups].sort(([,a],[,b])=>a.label.localeCompare(b.label,'ko')).map(([key,project])=>{
+  const sessions=[...project.sessions.values()]
+   .map(parts=>parts.sort(newestFirst))
+   .sort(([a],[b])=>newestFirst(a,b));
+  return <details className="capture-history-project" key={key}>
+   <summary><strong>{project.label}</strong> <small>{sessions.length}건</small>
+    <small className="capture-history-path">{projectPaths.get(key)??`AI Conversations/${key}`}</small>
+   </summary>
+   <ul>{sessions.map(([latest,...earlier])=><li key={latest.id}>
+    <button className="capture-history-session" onClick={()=>onOpen(latest)}>
+     <span>{latest.title}</span>
+     <time dateTime={new Date(latest.lastActivity).toISOString()}>{latest.date} {activityTime.format(latest.lastActivity)}</time>
+    </button>
+    {earlier.length>0&&<details className="capture-history-dates"><summary>이전 날짜 기록</summary>
+     {earlier.map(part=><button key={part.path} onClick={()=>onOpen(part)}>{part.date}</button>)}
+    </details>}
+   </li>)}</ul>
+  </details>;
+ });
 }
 export default function CopilotJournalEntries({records=[],disabled,onOpen,onTrash}){
  if(!records.length)return null;

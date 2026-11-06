@@ -76,11 +76,12 @@ export function parseChatSource(source,sessionId){
  return {sessionId,title:name,messages};
 }
 const heading=value=>title(value).replace(/[#[\]|<>`]/g,'');
+export const captureSessionHeading=value=>heading(value)||'대화';
 const quote=value=>value.split('\n').map(line=>`> ${line}`).join('\n');
 export function renderCapture(record){
  const parts=[`# ${heading(record.label)} · AI 대화 · ${record.date}`,'','VS Code Copilot에서 가져온 대화 기록입니다.',''];
  for(const session of Object.values(record.sessions)){
-  parts.push(`## ${heading(session.title)||'대화'}`,'');
+  parts.push(`## ${captureSessionHeading(session.title)}`,'');
   for(const message of session.messages)parts.push(`### ${message.role==='user'?'질문':'답변'}`,'',quote(message.text),'');
  }
  return parts.join('\n');

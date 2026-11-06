@@ -43,7 +43,7 @@ import useVaultDocuments from "./useVaultDocuments.jsx";
 import DocumentWorkspace from "./DocumentWorkspace.jsx";
 import useDocumentWorkspace from "./useDocumentWorkspace.jsx";
 import JournalFeed from "./JournalFeed.jsx";
-import CopilotJournalEntries,{CopilotJournalToolbar} from "./CopilotJournalEntries.jsx";
+import CopilotJournalEntries,{CopilotJournalHistory,CopilotJournalToolbar} from "./CopilotJournalEntries.jsx";
 import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
@@ -746,6 +746,7 @@ export default function App() {
   };
   const captureControls = { state: captureState, importNotice: captureImportNotice,
     onImport: () => importCapture().catch(error => setError(error.message)), onSettings: captureSettings,
+    onHistory: vault?.purpose === "personal" ? () => setModal("capture-history") : undefined,
     onRestore: () => captureAction("restore", true, { trashId: captureState.trashId }, vault.id).catch(error => setError(error.message)),
     onTrash: (id, sessionId) => captureAction("trash", true, { id, sessionId }, vault.id).catch(error => setError(error.message)) };
 
@@ -2399,6 +2400,18 @@ export default function App() {
         <input type="date" aria-label="과거 기록 기준 날짜" value={historyDate} onChange={e => { if (e.target.value) setHistoryDate(e.target.value); }}/>
         <NavigationPanel title="지난 기록" paths={onThisDay(model.notes,historyDate,{...journalPreferences.daily,locale:journalPreferences.locale}).map(n=>n.path)} onOpen={openNote}/>
       </Modal>}
+      {modal === "capture-history" && vault?.purpose === "personal" && (
+        <Modal title="프로젝트별 기록" className="capture-history-modal" onClose={() => setModal(null)}>
+          <CopilotJournalHistory state={captureState} onOpen={({path,heading}) => {
+            const target = model.notes.find(note => note.path === path);
+            if (!target) { setModal(null); setError("가져온 대화 문서를 찾을 수 없습니다."); return; }
+            openNote(path, vault.id);
+            const lines = target.content.split(/\r\n?|\n/);
+            const matches = target.headings.filter(h => h.level === 2 && h.text === heading && /^##(?:[ \t]|$)/.test(lines[h.line]));
+            if (matches.length === 1) setEditorJump({ path, heading: matches[0] }, vault.id);
+          }}/>
+        </Modal>
+      )}
       {modal === "audio" && <Modal title="음성 녹음" onClose={() => audioActive.current ? setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요.") : setModal(null)}>
         {audioNotice && <p role="alert">{audioNotice}</p>}
         <AudioRecorder onActive={(value) => { audioActive.current = value; if (value) setAudioNotice(""); }} onCancel={() => setModal(null)} onSave={async ({ name, bytes }) => {

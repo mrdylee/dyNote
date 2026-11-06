@@ -33,6 +33,12 @@ function DocumentPane(props) {
   const html=useMemo(()=>!["read","split"].includes(mode)?"":DOMPurify.sanitize(renderMarkdown(note.content,notes,note.path,{vaultId:vault.id,attachments:vault.attachments??[]}),{
     FORBID_TAGS:['iframe','style','form','svg','math'],ADD_ATTR:['data-note','data-external','data-anchor','data-attachment','data-attachment-fragment','data-task-line','data-embed'],ADD_URI_SAFE_ATTR:['src'],
   }),[note.content,note.path,notes,vault.id,vault.attachments,mode]);
+  useEffect(()=>{
+    const heading=jump?.heading;
+    if(!active||mode!=='read'||!heading||jump.path!==note.path)return;
+    const matches=[...(preview.current?.children??[])].filter(node=>node.tagName==='H2'&&node.id===heading.id&&node.textContent===heading.plainText);
+    if(matches.length===1)matches[0].scrollIntoView({block:'start'});
+  },[active,mode,jump,note.path]);
   return <Pane {...props} onFocus={focus}>
     {pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
