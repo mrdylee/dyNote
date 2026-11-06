@@ -713,14 +713,12 @@ export default function App() {
     }).catch(error => {
       if (alive) updateCaptureState(id, () => ({ enabled: false, projects: [], records: [], error: error.message }));
     });
-    let next = 0;
-    const timer = setInterval(() => {
-      const enabled = ids.filter(id => {
-        const state = captureContext.current.states[id];
-        return state?.personal && state.enabled;
-      });
-      if (enabled.length) captureAction("sync", false, {}, enabled[next++ % enabled.length]);
-    }, 5000);
+    const timer = setInterval(async () => {
+      for (const id of ids) {
+        if (!alive) return;
+        await captureAction("sync", false, {}, id);
+      }
+    }, 60 * 60 * 1000);
     return () => { alive = false; clearInterval(timer); };
   }, [captureIds, captureAction, updateCaptureState]);
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };

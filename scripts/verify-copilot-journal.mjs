@@ -12,7 +12,7 @@ await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vau
 await writeFile(path.join(vault,journal),'# Today\n\n사용자가 직접 작성한 기록\n');
 await writeFile(path.join(team,'Shared.md'),'# 팀 기록\n');
 await writeFile(path.join(source,'project/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(root,'Work')).href}));
-const put=async(id,title,question)=>writeFile(path.join(source,`project/chatSessions/${id}.json`),JSON.stringify({version:3,sessionId:id,customTitle:title,requests:[{requestId:'q',timestamp:Date.now(),message:{text:question},modelState:{value:1},response:[{kind:'thinking',value:'DO NOT IMPORT THINKING'},{value:'검증용 답변'}]}]}));
+const put=async(id,title,...questions)=>writeFile(path.join(source,`project/chatSessions/${id}.json`),JSON.stringify({version:3,sessionId:id,customTitle:title,requests:questions.map((text,index)=>({requestId:`q${index}`,timestamp:Date.now(),message:{text},modelState:{value:1},response:[{kind:'thinking',value:'DO NOT IMPORT THINKING'},{value:'검증용 답변'}]}))}));
 await put('first','검토 대화','첫 질문 원문');
 const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||path.join(process.cwd(),'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 let app=await launch(),page;const checks=[],errors=[];
@@ -39,11 +39,12 @@ const pauseCaptureScan=()=>app.evaluate((_electron,directory)=>{
  };
  syncBuiltinESMExports();
 },path.join(source,'project/chatSessions'));
-const waitForCaptureScan=()=>app.evaluate(async()=>{
- for(let attempt=0;attempt<200&&!globalThis.resumeCaptureScan;attempt++)
+const captureScanStarted=(attempts=200)=>app.evaluate(async(_electron,attempts)=>{
+ for(let attempt=0;attempt<attempts&&!globalThis.resumeCaptureScan;attempt++)
   await new Promise(resolve=>setTimeout(resolve,50));
- if(!globalThis.resumeCaptureScan)throw new Error('Automatic capture did not reach the test transcript folder');
-});
+ return Boolean(globalThis.resumeCaptureScan);
+},attempts);
+const waitForCaptureScan=async()=>assert.ok(await captureScanStarted(),'Automatic capture did not reach the test transcript folder');
 const resumeCaptureScan=()=>app.evaluate(()=>globalThis.resumeCaptureScan?.());
 try{
  await app.evaluate(({Tray})=>{
@@ -54,6 +55,10 @@ try{
   };
  });
  await setup();
+ const morning=new Date();morning.setHours(8,0,0,0);
+ await page.clock.install({time:morning});
+ await page.reload();
+ await page.getByRole('button',{name:'가져오기',exact:true}).waitFor();
  await check('journal offers an import button before any project is configured',async()=>assert.equal(await page.getByRole('button',{name:'가져오기',exact:true}).count(),1));
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  await page.getByRole('region',{name:'문서 Shared.md',exact:true}).waitFor();
@@ -86,7 +91,7 @@ try{
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
  await closeSettings();
- await check('idle Copilot scans leave the personal journal enabled with a sticky note open',async()=>{
+ await check('the first hourly scan leaves the journal enabled with a sticky note open',async()=>{
   const [sticky]=await Promise.all([
    app.waitForEvent('window'),
    app.evaluate(()=>globalThis.captureTestTray.getMenuItemById('sticky-new').click()),
@@ -97,6 +102,9 @@ try{
   assert.equal(await controls.count(),4);
   await pauseCaptureScan();
   try{
+   await page.clock.fastForward('59:00');
+   assert.equal(await captureScanStarted(20),false,'automatic capture must wait until the one-hour tick');
+   await page.clock.fastForward('01:00');
    await waitForCaptureScan();
    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
    assert.deepEqual(await controls.evaluateAll(buttons=>buttons.filter(button=>button.disabled).map(button=>button.textContent.trim())),[],
@@ -118,6 +126,7 @@ try{
  await pauseCaptureScan();
  await put('second','보존할 두 번째 대화','두 번째 질문');
  try {
+  await page.clock.fastForward('01:00:00');
   await waitForCaptureScan();
   const teamEditor=teamPane.getByRole('textbox',{name:'Markdown 편집기',exact:true});
   assert.equal(await teamEditor.evaluate(el=>el.cmTile.root.view.state.readOnly),false,'the personal scan must not lock the team editor');
@@ -155,8 +164,18 @@ try{
   state=await captureState();assert.equal(state.records[0].sessions.length,1);const content=await readFile(path.join(vault,record.path),'utf8');assert.match(content,/두 번째 질문/);assert.doesNotMatch(content,/첫 질문 원문/);
   assert.doesNotMatch(await readFile(path.join(profile,'copilot-journal.json'),'utf8'),/첫 질문 원문/);
  });
+ await check('one toolbar click imports all new messages before the next automatic run',async()=>{
+  await put('second','보존할 두 번째 대화','두 번째 질문','즉시 가져올 첫 질문','즉시 가져올 두 번째 질문');
+  await page.getByRole('button',{name:'가져오기',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.capture-toolbar button')?.disabled);
+  const content=await readFile(path.join(vault,record.path),'utf8');
+  assert.match(content,/즉시 가져올 첫 질문/);
+  assert.match(content,/즉시 가져올 두 번째 질문/);
+ });
  const editor=page.getByRole('region',{name:'저널 피드',exact:true}).getByRole('textbox',{name:'Markdown 편집기',exact:true});
  await check('Live Preview hides capture control markers',async()=>assert.doesNotMatch(await editor.textContent(),/dynote:copilot/));await editor.click();await page.keyboard.press(`${mod}+End`);await put('third','세 번째 대화','자동 수집 중 질문');await page.keyboard.type('입력 중인 내용도 보존합니다'.repeat(20),{delay:15});await page.keyboard.press(`${mod}+s`);
+ await page.locator('.save-status.saved').waitFor();
+ await page.clock.fastForward('01:00:00');
  await check('automatic refresh keeps the user journal text and the editor mode',async()=>{await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('2건'));assert.match(await readFile(path.join(vault,journal),'utf8'),/입력 중인 내용도 보존합니다/);assert.equal(await page.locator('.journal-feed .cm-live-preview').count(),1);});
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:`Work ${localDate()} 기록 삭제`,exact:true}).click();

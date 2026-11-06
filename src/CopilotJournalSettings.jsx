@@ -18,7 +18,7 @@ export default function CopilotJournalSettings({state,destination,onRefresh,onSo
    {state?.projects.map(project=><label className="capture-project" key={project.id}><input type="checkbox" checked={selected.includes(project.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,project.id]:old.filter(id=>id!==project.id))}/><span>{project.label}<small>{project.path}</small></span></label>)}
   </fieldset>
   <label className="capture-toggle"><input type="checkbox" checked={enabled} disabled={busy||!personal} onChange={e=>setEnabled(e.target.checked)}/>자동 기록</label>
-  <p className="muted">자동 기록은 활성화 이후 대화부터 앱 실행 중에 반영합니다. ‘가져오기’는 자동 기록을 꺼도 오늘 대화를 가져옵니다. 삭제한 항목은 다시 가져오지 않습니다.</p>
+  <p className="muted">자동 기록은 앱 실행 중 1시간마다 활성화 이후의 대화를 확인합니다. 저널의 ‘가져오기’는 자동 기록을 꺼도 선택한 프로젝트의 오늘 대화를 바로 가져옵니다. 삭제한 항목은 다시 가져오지 않습니다.</p>
   <p className="muted">수집 문서는 이 개인 보관함의 Git 백업 설정을 따릅니다. 내부 추론·도구 출력·첨부파일은 가져오지 않습니다. WSL·SSH·Cloud 대화는 이 로컬 수집 대상이 아닙니다.</p>
   <div className="settings-actions"><button className="primary-button" disabled={busy||!personal||(enabled&&!selected.length)} onClick={()=>run(()=>onSave({enabled,projects:selected}))}>설정 적용</button>
    <button disabled={busy||!personal||!selected.length} onClick={()=>run(async()=>{await onSave({enabled,projects:selected});await onImport();})}>오늘 대화 가져오기</button></div>
