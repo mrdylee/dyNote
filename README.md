@@ -2,7 +2,7 @@
 
 REA로 설치된 Obsidian 1.12.7의 구조를 분석하고, 기능 명세를 바탕으로 독립 구현한 로컬 Markdown 데스크톱 앱입니다. 이전 이름은 Open Notes입니다. v0.2.0의 검색 색인은 MIT 라이선스의 `JingHao-Leon/open-obsidian` 코드를 재사용했습니다. [출처·라이선스](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
-v0.18.0 베타에서는 Ctrl+Shift+M으로 포스트잇을 열고 개인 보관함에 Markdown으로 자동 저장할 수 있습니다. 앱 아이콘과 상단 DyNote 글자는 저널의 라벤더 색상에 맞췄습니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.18.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증은 없습니다.
+v0.19.0 베타에서는 Live Preview와 저널 피드에서 Mermaid를 볼 수 있습니다. 포스트잇 첫 줄은 제목으로 편집할 수 있고, 왼쪽 파일 목록에서 문서를 폴더로 끌어 이동하거나 복사할 수 있습니다. [변경사항과 설치 안내](docs/RELEASE-NOTES-0.19.0.md)를 확인하세요. Mac 앱은 ad-hoc 서명이며 Apple 공증은 없습니다.
 
 설정 메뉴·보관함 관리·하루 한 번 Git 백업·날짜별 백업 복원·오른쪽 Copilot 채팅과 변경 검토 기능도 포함되어 있습니다.
 
@@ -18,15 +18,15 @@ v0.18.0 베타에서는 Ctrl+Shift+M으로 포스트잇을 열고 개인 보관�
 
 ## 실행
 
-Apple Silicon Mac에서는 `Dynote-0.18.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
+Apple Silicon Mac에서는 `Dynote-0.19.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.18.0/Dynote-darwin-arm64/Dynote.app`
+`release/v0.19.0/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
-Windows 64비트용 실행 폴더는 `release/v0.18.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/RELEASE-NOTES-0.18.0.md#설치)
+Windows 64비트용 실행 폴더는 `release/v0.19.0/Dynote-win32-x64/`입니다. 배포 ZIP의 **압축을 모두 푼 뒤**, 폴더 안의 `Dynote.exe`를 실행하세요. EXE 옆의 `resources`, DLL 등은 함께 있어야 합니다. 플랫폼별 검증 범위는 릴리스 노트를 확인하세요. [Windows 실행 안내](docs/RELEASE-NOTES-0.19.0.md#설치)
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.18.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.19.0)에서 Mac arm64 DMG·ZIP, Windows x64 ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. 앱을 켤 때와 실행 중 날짜가 바뀔 때, 기기의 오늘 날짜로 일간 저널을 만듭니다. 이미 있으면 그대로 열며, 개인과 팀 보관함이 모두 연결돼 있으면 개인 보관함에 만듭니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 
