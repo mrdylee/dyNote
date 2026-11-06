@@ -8,6 +8,8 @@ export async function renderMermaid(source) {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
+      // Keep labels in SVG text so they survive sanitization.
+      secure: [...mermaid.mermaidAPI.defaultConfig.secure, "htmlLabels"],
       suppressErrorRendering: true,
       theme: "neutral",
       htmlLabels: false,

@@ -119,6 +119,17 @@ test("completed Mermaid fences become block widgets outside the selection", () =
   assert.equal(s.doc.toString(), doc);
 });
 
+test("Mermaid widgets use Markdown's normalized body for indented fences", () => {
+  const doc = "  ```mermaid\n  ---\n  title: Indented chart\n---\nflowchart LR\nA --> B\n  ```\n";
+  const nested = "# Journal\n\n- Example\n\n" + doc.trimEnd().split("\n").map((line) => "  " + line).join("\n") + "\n";
+  for (const source of [doc, nested]) {
+    const s = state(source);
+    const diagram = hidden(s).find((r) => r.spec.block);
+    assert.equal(diagram.spec.widget.source, "---\ntitle: Indented chart\n---\nflowchart LR\nA --> B\n");
+    assert.equal(s.doc.toString(), source);
+  }
+});
+
 test("BOM frontmatter stays literal and empty wiki aliases display their target", () => {
   const s = state('\uFEFF---\ntitle: "**raw**"\n---\n\n[[Guide| ]]\n\nend');
   assert.equal(hidden(s).some((r) => r.text === "**"), false);

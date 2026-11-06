@@ -8,15 +8,17 @@ await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursi
 const original='- Parent\n  - Child\n- Sibling\n';
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/List.md`,original);
 await mkdir(`${vault}/Journal`);
-const journalDiagram='```mermaid\nflowchart LR\nA[시작] --> B[완료]\n```';
+const journalDiagram='```mermaid\n---\nconfig:\n  htmlLabels: true\n  flowchart:\n    htmlLabels: true\n---\nflowchart LR\nA[시작] --> B[완료]\n```';
 for(const date of [localDate(),'2020-01-01'])await writeFile(`${vault}/Journal/${date}.md`,journalDiagram);
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 const errors=[];
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  const feed=page.getByRole('region',{name:'저널 피드'});
- await feed.locator('.cm-live-mermaid svg').waitFor();
- await feed.locator('.markdown-preview .mermaid-diagram svg').waitFor();
+ for(const selector of ['.cm-live-mermaid svg','.markdown-preview .mermaid-diagram svg']){
+  const svg=feed.locator(selector);await svg.waitFor();
+  assert.equal(await svg.getByText('완료',{exact:true}).count(),1,'per-diagram HTML label settings preserve the node label as SVG text');
+ }
  await page.locator('.titlebar').getByRole('button',{name:/문서로 이동/}).click();
  await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill('path:List.md');
  await page.locator('.switch-results').getByRole('button',{name:/List\.md/}).click();
@@ -41,6 +43,10 @@ try {
  const diagram=page.locator('.cm-live-mermaid svg');
  await diagram.click();
  assert.match(await content(),/```mermaid/);
+ assert.equal(await editor.evaluate(dom=>{
+  const state=dom.cmTile.root.view.state;
+  return state.doc.lineAt(state.selection.main.head).text;
+ }), 'flowchart LR', 'click-to-edit places the caret in the body');
  await page.evaluate(()=>{
   const view=document.querySelector('.cm-content').cmTile.root.view;
   const from=view.state.doc.toString().indexOf('종료');

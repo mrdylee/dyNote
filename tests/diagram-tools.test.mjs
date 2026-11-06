@@ -14,3 +14,12 @@ test('DIAGRAM-01 insertion distinguishes an existing Mermaid block from plain Ma
  assert.equal(tools.diagramInsertion('```mermaid\nflowchart LR\n\n```',23,' A-->B'),' A-->B');
  assert.equal(tools.diagramInsertion('~~~mermaid\nflowchart LR\n',23,' A-->B'),' A-->B');
 });
+test('insertion accepts the same Mermaid fence names as Live Preview',()=>{
+ const fragment='B --> C\n';
+ for(const opener of ['```Mermaid','~~~ MERMAID','```mermaid info']){
+  const newline='\r\n',body='flowchart LR'+newline;
+  const note=opener+newline+body+opener.slice(0,3);
+  assert.equal(tools.diagramInsertion(note,opener.length+newline.length,fragment),fragment);
+  assert.equal(tools.diagramInsertion(note,note.length,fragment),'\n```mermaid\n'+fragment+'\n```\n');
+ }
+});
