@@ -25,7 +25,34 @@ const closeSettings=async()=>{
  await settings().waitFor({state:'hidden'});
 };
 const captureState=()=>page.evaluate(async()=>{const {value}=await window.notes.snapshot();return (await window.notes.captureStatus({vaultId:value.id})).value;});
+const pauseCaptureScan=()=>app.evaluate((_electron,directory)=>{
+ const fs=process.getBuiltinModule('node:fs/promises');
+ const {syncBuiltinESMExports}=process.getBuiltinModule('node:module');
+ const readdir=fs.readdir;
+ fs.readdir=async(target,options)=>{
+  if(target===directory){
+   fs.readdir=readdir;
+   syncBuiltinESMExports();
+   await new Promise(resolve=>{globalThis.resumeCaptureScan=()=>{delete globalThis.resumeCaptureScan;resolve();};});
+  }
+  return readdir(target,options);
+ };
+ syncBuiltinESMExports();
+},path.join(source,'project/chatSessions'));
+const waitForCaptureScan=()=>app.evaluate(async()=>{
+ for(let attempt=0;attempt<200&&!globalThis.resumeCaptureScan;attempt++)
+  await new Promise(resolve=>setTimeout(resolve,50));
+ if(!globalThis.resumeCaptureScan)throw new Error('Automatic capture did not reach the test transcript folder');
+});
+const resumeCaptureScan=()=>app.evaluate(()=>globalThis.resumeCaptureScan?.());
 try{
+ await app.evaluate(({Tray})=>{
+  const setMenu=Tray.prototype.setContextMenu;
+  Tray.prototype.setContextMenu=function(menu){
+   globalThis.captureTestTray=menu;
+   return setMenu.call(this,menu);
+  };
+ });
  await setup();
  await check('journal offers an import button before any project is configured',async()=>assert.equal(await page.getByRole('button',{name:'가져오기',exact:true}).count(),1));
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
@@ -59,31 +86,39 @@ try{
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
  await closeSettings();
+ await check('idle Copilot scans leave the personal journal enabled with a sticky note open',async()=>{
+  const [sticky]=await Promise.all([
+   app.waitForEvent('window'),
+   app.evaluate(()=>globalThis.captureTestTray.getMenuItemById('sticky-new').click()),
+  ]);
+  await sticky.getByRole('textbox',{name:'포스트잇 메모'}).waitFor();
+  const feed=page.getByRole('region',{name:'저널 피드',exact:true});
+  const controls=feed.getByRole('button',{name:/^(저널 블록 추가|하위 블록 접기|하위 블록 펼치기|가져오기)$/});
+  assert.equal(await controls.count(),4);
+  await pauseCaptureScan();
+  try{
+   await waitForCaptureScan();
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   assert.deepEqual(await controls.evaluateAll(buttons=>buttons.filter(button=>button.disabled).map(button=>button.textContent.trim())),[],
+    'checking for new chats must leave all four journal buttons enabled');
+   await feed.getByRole('textbox',{name:'Markdown 편집기',exact:true}).click();
+   await page.keyboard.press(`${mod}+End`);
+   await page.keyboard.insertText('\n\n스캔 중 저장');
+   await page.keyboard.press(`${mod}+s`);
+   await page.locator('.save-status.saved').waitFor();
+   assert.match(await readFile(path.join(vault,journal),'utf8'),/스캔 중 저장/);
+  }finally{
+   await resumeCaptureScan();
+  }
+ });
  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  const teamPane=page.getByRole('region',{name:'문서 Shared.md',exact:true});
  await teamPane.waitFor();
- await app.evaluate((_electron, directory) => {
-  const fs = process.getBuiltinModule('node:fs/promises');
-  const { syncBuiltinESMExports } = process.getBuiltinModule('node:module');
-  const readdir = fs.readdir;
-  fs.readdir = async (target, options) => {
-   if (target === directory) {
-    fs.readdir = readdir;
-    syncBuiltinESMExports();
-    await new Promise(resolve => { globalThis.resumeCaptureScan = resolve; });
-   }
-   return readdir(target, options);
-  };
-  syncBuiltinESMExports();
- }, path.join(source,'project/chatSessions'));
+ await pauseCaptureScan();
  await put('second','보존할 두 번째 대화','두 번째 질문');
  try {
-  await app.evaluate(async () => {
-   for (let attempt=0; attempt<150 && !globalThis.resumeCaptureScan; attempt++)
-    await new Promise(resolve => setTimeout(resolve,50));
-   if (!globalThis.resumeCaptureScan) throw new Error('Automatic capture did not reach the test transcript folder');
-  });
+  await waitForCaptureScan();
   const teamEditor=teamPane.getByRole('textbox',{name:'Markdown 편집기',exact:true});
   assert.equal(await teamEditor.evaluate(el=>el.cmTile.root.view.state.readOnly),false,'the personal scan must not lock the team editor');
   await teamEditor.click();await page.keyboard.press(`${mod}+End`);
@@ -93,7 +128,7 @@ try{
   assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\nTeam can save');
   checks.push('team editing and saving complete while the personal capture scan is in progress');
  } finally {
-  await app.evaluate(() => globalThis.resumeCaptureScan?.());
+  await resumeCaptureScan();
  }
  await check('a new session is added to the personal journal while the team document remains focused',async()=>{
   await page.waitForFunction(async()=>{

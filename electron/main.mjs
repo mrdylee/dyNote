@@ -488,6 +488,7 @@ app
       },
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
+        if (args.checkOnly === true) return copilotJournal.sync(vault,args.dailyOptions,false,{checkOnly:true});
         return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true);});
       },
       "capture-trash": (args, vault, gitBackup) => {
@@ -685,8 +686,9 @@ app
       external: (url) => shell.openExternal(safeExternalUrl(url)),
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
-        const exclusive = ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
+        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

@@ -388,6 +388,7 @@ export default function App() {
   const captureLocked = !!vault?.id && automaticCaptureId === vault.id;
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
+  const captureScanning = useRef(false);
   const [fileTarget, setFileTarget] = useState(null);
   const treeDrag = useRef(null);
   const macCopyDrag = useRef(null);
@@ -655,31 +656,51 @@ export default function App() {
     setCaptureStates(old => ({ ...old, [id]: transform(old[id]) }));
   }, []);
   const captureAction = useCallback(async (action, manual, args, id) => {
-    const context = captureContext.current;
-    const scope = vaultsRef.current[id];
-    const state = context.states[id];
-    if (!scope?.id || captureWorking.current || context.busy) return;
     const automatic = action === "sync" && !manual;
-    if (automatic && (context.modal || scope.purpose !== "personal" || !state?.enabled || !state.personal || queue.dirtyIn(id) || editsRef.current.blocked(id))) return;
-    captureWorking.current = true;
-    if (automatic) setAutomaticCaptureId(id);
-    else setBusy(true);
+    const state = captureContext.current.states[id];
+    const canStart = () => {
+      const { busy, modal, states } = captureContext.current;
+      const scope = vaultsRef.current[id];
+      return scope?.id && !captureWorking.current && !busy && (!automatic || (
+        !modal && scope.purpose === "personal" && states[id] === state && state?.enabled && state.personal
+        && !queue.dirtyIn(id) && !editsRef.current.blocked(id)
+      ));
+    };
+    if ((automatic && captureScanning.current) || !canStart()) return;
+    const request = { vaultId: id, ...args };
+    const preferences = vaultsRef.current[id].journalPreferences;
+    const dailyOptions = { ...preferences.daily, locale: preferences.locale };
+    let writing = false;
     try {
+      if (automatic) {
+        captureScanning.current = true;
+        const { pending, status } = await invoke(api.syncCapture({ ...request, dailyOptions, checkOnly: true }));
+        // A user edit or settings change can arrive while the scan is running.
+        if (!canStart()) return;
+        if (!pending) {
+          updateCaptureState(id, old => old === state ? status : old);
+          return;
+        }
+      }
+      writing = captureWorking.current = true;
+      if (automatic) setAutomaticCaptureId(id);
+      else setBusy(true);
       if (!automatic) await flush();
-      const request = { vaultId: id, ...args };
-      const dailyOptions = { ...scope.journalPreferences.daily, locale: scope.journalPreferences.locale };
       const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
         ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
       if (!vaultsRef.current[id]) return;
       updateCaptureState(id, () => result.status);
       if (result.snapshot) acceptSnapshot(result.snapshot);
     } catch (error) {
-      updateCaptureState(id, old => ({ ...old, error: error.message }));
+      if (writing || canStart()) updateCaptureState(id, old => ({ ...old, error: error.message }));
       if (manual) throw error;
     } finally {
-      captureWorking.current = false;
-      if (automatic) setAutomaticCaptureId(null);
-      else setBusy(false);
+      if (automatic) captureScanning.current = false;
+      if (writing) {
+        captureWorking.current = false;
+        if (automatic) setAutomaticCaptureId(null);
+        else setBusy(false);
+      }
     }
   }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef]);
   const captureIds = Object.values(vaults).filter(scope => scope.id).map(scope => `${scope.id}:${scope.purpose ?? ""}`).sort().join(",");

@@ -112,7 +112,7 @@ export class CopilotJournal{
   await this.persist(vault,next);
   return {changed:changes.length>0,...result,status:await this.status(vault)};
  }
- async sync(vault,daily={},manual=false){
+ async sync(vault,daily={},manual=false,{checkOnly=false}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
   if(!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 저널 자동기록에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
   const next=clone(previous),today=localDate(this.now());
@@ -131,6 +131,7 @@ export class CopilotJournal{
    }
   }
   if(JSON.stringify(previous)===JSON.stringify(next))return {changed:false,status:await this.status(vault)};
+  if(checkOnly)return {pending:true};
   return this.commit(vault,previous,next);
  }
  async trash(vault,{id,sessionId}){
