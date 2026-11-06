@@ -702,7 +702,8 @@ export default function App() {
           const period = from === to ? from : `${from} ~ ${to}`;
           scope = `${period} ·`;
         }
-        const notice = result.changed ? `${scope} 대화를 개인 노트에 가져왔습니다.` : `${scope} 새로 가져올 대화가 없습니다.`;
+        const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
+          ? `${scope} 대화를 개인 노트에 가져왔습니다.` : `${scope} 새로 가져올 대화가 없습니다.`;
         setCaptureImportResult({ vaultId: id, notice });
       }
       updateCaptureState(id, () => result.status);
@@ -729,19 +730,18 @@ export default function App() {
     }).catch(error => {
       if (alive) updateCaptureState(id, () => ({ enabled: false, projects: [], records: [], error: error.message }));
     });
-    let next = 0;
-    const timer = setInterval(() => {
-      const enabled = ids.filter(id => {
-        const state = captureContext.current.states[id];
-        return state?.personal && state.enabled;
-      });
-      if (enabled.length) captureAction("sync", false, {}, enabled[next++ % enabled.length]);
-    }, 5000);
+    const timer = setInterval(async () => {
+      for (const id of ids) {
+        if (!alive) return;
+        await captureAction("sync", false, {}, id);
+      }
+    }, 60 * 60 * 1000);
     return () => { alive = false; clearInterval(timer); };
   }, [captureIds, captureAction, updateCaptureState]);
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
   const importCapture = async () => {
-    if (!captureTargetState?.personal || !captureTargetState.projects.some(project => project.selected)) { captureSettings(); return; }
+    if (!captureTargetState?.personal || (!captureTargetState.needsMigration && !captureTargetState.pendingCapture
+        && !captureTargetState.projects.some(project => project.selected))) { captureSettings(); return; }
     await captureAction("sync", true, {}, captureVaultId);
   };
   const captureControls = { state: captureState, importNotice: captureImportNotice,
@@ -1867,7 +1867,7 @@ export default function App() {
             <CopilotJournalToolbar {...captureControls} disabled={busy||captureLocked||edits.blocked()}/>
             <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
           </>}
-          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&captureState?.records?.some(record=>record.path===note.path)&&<CopilotJournalEntries records={captureState.records.filter(record=>record.path===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
+          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
               currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}

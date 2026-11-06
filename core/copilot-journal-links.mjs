@@ -16,7 +16,7 @@ export function captureLinkRanges(source){
   if(!match)continue;
   if(!match[1]){opening=opening?null:{id:match[2],line,index:token.map[0]};continue;}
   if(opening?.id!==match[2]){opening=null;continue;}
-  const links=lines.slice(opening.index+1,token.map[0]).filter((item,index)=>!literalRanges.some(([from,to])=>opening.index+1+index>=from&&opening.index+1+index<to)&&/^- \[\[AI Conversations\/[a-f0-9]{20}\/\d{4}-\d{2}-\d{2}\.md\|[^\]\r\n]+\]\]$/.test(item.text));
+  const links=lines.slice(opening.index+1,token.map[0]).filter((item,index)=>!literalRanges.some(([from,to])=>opening.index+1+index>=from&&opening.index+1+index<to)&&/^- \[\[AI Conversations\/[a-f0-9]{20}\/(?:\d{4}-\d{2}-\d{2}|[a-f0-9]{20})\.md\|[^\]\r\n]+\]\]$/.test(item.text));
   if(links.length===1)groups.push({id:opening.id,markers:[opening.line,line],link:links[0]});
   opening=null;
  }

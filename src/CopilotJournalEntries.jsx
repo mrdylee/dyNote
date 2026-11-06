@@ -14,12 +14,12 @@ const newestFirst=(a,b)=>b.lastActivity-a.lastActivity;
 export function CopilotJournalHistory({state,onOpen}){
  const projectPaths=new Map(state?.projects?.map(project=>[project.key,project.path]));
  const groups=new Map();
- for(const {projectKey,label,path,date,sessions} of state?.records??[]){
+ for(const {projectKey,label,date,sessions} of state?.records??[]){
   const group=groups.get(projectKey)??{label,sessions:new Map()};
   groups.set(projectKey,group);
   for(const session of sessions){
    const parts=group.sessions.get(session.id)??[];
-   parts.push({...session,path,date});
+   parts.push({...session,date});
    group.sessions.set(session.id,parts);
   }
  }
@@ -38,7 +38,7 @@ export function CopilotJournalHistory({state,onOpen}){
      <time dateTime={new Date(latest.lastActivity).toISOString()}>{latest.date} {activityTime.format(latest.lastActivity)}</time>
     </button>
     {earlier.length>0&&<details className="capture-history-dates"><summary>이전 날짜 기록</summary>
-     {earlier.map(part=><button key={part.path} onClick={()=>onOpen(part)}>{part.date}</button>)}
+     {earlier.map(part=><button key={part.date} onClick={()=>onOpen(part)}>{part.date}</button>)}
     </details>}
    </li>)}</ul>
   </details>;
@@ -46,12 +46,16 @@ export function CopilotJournalHistory({state,onOpen}){
 }
 export default function CopilotJournalEntries({records=[],disabled,onOpen,onTrash}){
  if(!records.length)return null;
- return <section className="capture-records" aria-label="AI 자동 기록">{records.map(record=><article className="capture-record" key={record.id}>
-  <header><button className="capture-record-title" onClick={()=>onOpen(record.path)} disabled={disabled}>{record.label} AI 대화 <small>{record.sessions.length}건</small></button>
-   <button className="capture-delete" disabled={disabled} aria-label={`${record.label} ${record.date} 기록 삭제`} title={`${record.date} 대화 ${record.sessions.length}건과 저널 링크를 함께 휴지통으로 이동`} onClick={()=>onTrash(record.id)}><Trash2 size={15}/></button></header>
-  <details><summary>대화 제목 보기</summary>{record.sessions.map(session=><div className="capture-session" key={session.id}>
-   <button disabled={disabled} onClick={()=>onOpen(record.path)}>{session.title}</button>
-   <button className="capture-delete" disabled={disabled} aria-label={`${session.title} 대화 삭제`} title="이 대화만 휴지통으로 이동하고 자동 기록에서 제외" onClick={()=>onTrash(record.id,session.id)}><Trash2 size={14}/></button>
-  </div>)}</details>
- </article>)}</section>;
+ return <section className="capture-records" aria-label="AI 자동 기록">{records.map(record=>{
+  const path=record.sessions[0].path,shared=record.sessions.every(session=>session.path===path);
+  const title=<>{record.label} AI 대화 <small>{record.sessions.length}건</small></>;
+  return <article className="capture-record" key={record.id}>
+   <header>{shared?<button className="capture-record-title" onClick={()=>onOpen(path)} disabled={disabled}>{title}</button>:<span className="capture-record-title">{title}</span>}
+    <button className="capture-delete" disabled={disabled} aria-label={`${record.label} ${record.date} 기록 삭제`} title={`${record.date} 대화 ${record.sessions.length}건과 저널 링크를 함께 휴지통으로 이동`} onClick={()=>onTrash(record.id)}><Trash2 size={15}/></button></header>
+   <details><summary>대화 제목 보기</summary>{record.sessions.map(session=><div className="capture-session" key={session.id}>
+    <button disabled={disabled} onClick={()=>onOpen(session.path)}>{session.title}</button>
+    <button className="capture-delete" disabled={disabled} aria-label={`${session.title} 대화 삭제`} title="이 날짜의 대화를 휴지통으로 이동하고 이 세션을 다시 가져오지 않습니다." onClick={()=>onTrash(record.id,session.id)}><Trash2 size={14}/></button>
+   </div>)}</details>
+  </article>;
+ })}</section>;
 }

@@ -50,7 +50,7 @@ function fromSnapshot(value,sessionId){
   if(question)messages.push({id:`${id}:user`,role:'user',text:question,at});
   if(answer)messages.push({id:`${id}:assistant`,role:'assistant',text:answer,at});
  }
- return {sessionId:text(value.sessionId)||sessionId,title:title(value.customTitle)||title(messages.find(m=>m.role==='user')?.text),messages};
+ return {sessionId:text(value.sessionId)||sessionId,title:title(value.customTitle)||title(messages.find(m=>m.role==='user')?.text),messages,format:'snapshot'};
 }
 export function parseChatSource(source,sessionId){
  let value;
@@ -73,7 +73,7 @@ export function parseChatSource(source,sessionId){
   if(event.type==='assistant.turn_end'){messages.push(...pending);pending=[];}
  }
  if(!known&&entries.length)throw problem();
- return {sessionId,title:name,messages};
+ return {sessionId,title:name,messages,format:'events'};
 }
 const heading=value=>title(value).replace(/[#[\]|<>`]/g,'');
 export const captureSessionHeading=value=>heading(value)||'대화';
@@ -83,6 +83,15 @@ export function renderCapture(record){
  for(const session of Object.values(record.sessions)){
   parts.push(`## ${captureSessionHeading(session.title)}`,'');
   for(const message of session.messages)parts.push(`### ${message.role==='user'?'질문':'답변'}`,'',quote(message.text),'');
+ }
+ return parts.join('\n');
+}
+export function renderSessionCapture(session){
+ const parts=[`# ${captureSessionHeading(session.title)}`,'',`${heading(session.label)} · VS Code Copilot 대화 기록`,''];
+ let date;
+ for(const message of session.messages.values()){
+  if(date!==message.date){date=message.date;parts.push(`## ${date}`,'');}
+  parts.push(`### ${message.role==='user'?'질문':'답변'}`,'',quote(message.text),'');
  }
  return parts.join('\n');
 }
