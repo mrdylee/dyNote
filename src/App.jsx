@@ -803,9 +803,9 @@ export default function App() {
     invoke(api.pluginContext({ vaultId: vault.id, notes: raw.map(note => ({ ...note, cache: { frontmatter: parseMetadata(note.content).properties } })), active, dailyOptions: journalPreferences.daily || {} })).catch(error => setError(error.message));
   }, [vault?.id, raw, active, journalPreferences, hasOriginalPlugins]);
 
-  const updateJournalPreferences = value => {
-    updateVault(vault.id, old => ({ ...old, journalPreferences: value }));
-    persist(`dynote.journal.${vault.id}`, value);
+  const updateJournalPreferences = (value, vaultId = vault.id) => {
+    updateVault(vaultId, old => ({ ...old, journalPreferences: value }));
+    persist(`dynote.journal.${vaultId}`, value);
   };
   const createPeriodic = async (target) => {
     const vaultId = vault.id;
@@ -990,6 +990,13 @@ export default function App() {
     setTabs(old => [...new Set(old.map(key => key === oldKey ? newKey : key))]);
     updateNavigation({ type: "rename", from, to }, vaultId);
     acceptSnapshot(snapshot);
+    const preferences = vaultsRef.current[vaultId].journalPreferences;
+    const templatePeriods = Object.keys(periods).filter(period => preferences[period]?.template === from);
+    if (templatePeriods.length) {
+      const next = { ...preferences };
+      for (const period of templatePeriods) next[period] = { ...preferences[period], template: to };
+      updateJournalPreferences(next, vaultId);
+    }
     setError(snapshot.warnings.join(" · "));
   };
   const transferTreeFile = async ({ source, vaultId, folder, operation, confirmedRevision }) => {
@@ -2250,7 +2257,7 @@ export default function App() {
         <Modal title="다른 보관함에 복사" onClose={() => !busy && setModal(null)}>
           <p>원본 · {spaceLabel(vaults[crossCopy.source.vaultId])} / {crossCopy.source.path}</p>
           <p>대상 · {spaceLabel(vaults[crossCopy.vaultId])}{crossCopy.folder && ` / ${crossCopy.folder}`}</p>
-          <p className="muted">선택한 문서 파일 1개를 복사합니다. 연결된 문서와 첨부파일은 개별 파일입니다.</p>
+          <p className="muted">선택한 문서만 복사합니다. 연결된 문서와 첨부파일은 대상 보관함에 같은 내용으로 있어야 합니다.</p>
           <div className="modal-actions">
             <button type="button" disabled={busy} onClick={() => setModal(null)}>취소</button>
             <button type="button" className="primary-button" disabled={busy} onClick={() => transferTreeFile(crossCopy)}>복사</button>

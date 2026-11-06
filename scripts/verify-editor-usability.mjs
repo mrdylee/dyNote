@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const fixture = await mkdtemp(`${tmpdir()}/dynote-editor-usability-`), profile = `${fixture}/profile`, vault = `${fixture}/vault`;
 await mkdir(profile); await mkdir(vault); await mkdir("output/playwright", { recursive: true });
-const original = "서식 테스트\n\n한글 본문\n";
+const original = "서식 테스트\n\n[x] 한글 본문\n";
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault }));
 await writeFile(`${vault}/Home.md`, original);
 const launch = () => electron.launch({executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE ? [] : ["."],env:{...process.env,OPEN_NOTES_DATA:profile}});
@@ -36,12 +36,12 @@ const menuClick = async id => app.evaluate((_,id)=>{const menu=globalThis.__edit
 try {
   await setup(); await page.getByRole("button",{name:"편집 보기",exact:true}).click();
   await select(0,2); await page.getByRole("toolbar",{name:"Markdown 서식"}).getByRole("button",{name:"굵게",exact:true}).click();
-  assert.equal(await content(),"**서식** 테스트\n\n한글 본문\n");
+  assert.equal(await content(),original.replace("서식","**서식**"));
   await page.getByRole("button",{name:"분할 보기",exact:true}).click();
   assert.equal(await page.locator(".markdown-preview strong").innerText(),"서식");
   await select(2,4);await page.keyboard.press("Meta+z"); assert.equal(await content(),original);
   await page.getByRole("button",{name:"편집 보기",exact:true}).click();
-  await select(0,2); await page.keyboard.press("Meta+i"); assert.equal(await content(),"*서식* 테스트\n\n한글 본문\n");
+  await select(0,2); await page.keyboard.press("Meta+i"); assert.equal(await content(),original.replace("서식","*서식*"));
   await page.keyboard.press("Meta+z");
   report.checks.push("toolbar and keyboard format selected Korean text with one-step undo");
   await select(0,2); await openMenu();
@@ -58,7 +58,7 @@ try {
   await select(0,2);
   await openMenu(original.indexOf("본문"));
   await menuClick("format-bullet-list");
-  const bullet = "서식 테스트\n\n- 한글 본문\n";
+  const bullet = original.replace("[x]", "- \\[x]");
   const waitForContent = value => page.waitForFunction(value => document.querySelector(".cm-content")?.cmTile.root.view.state.doc.toString() === value, value);
   await waitForContent(bullet);
   const save = async () => {
@@ -67,6 +67,9 @@ try {
   };
   await save();
   assert.equal(await readFile(`${vault}/Home.md`,"utf8"),bullet);
+  await select(0,0);
+  assert.equal(await page.locator(".cm-live-checkbox").count(),0);
+  assert.doesNotMatch(await page.locator(".cm-line").filter({ hasText: "한글 본문" }).innerText(),/\\/);
   await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.2));
   const dot = await page.locator(".cm-live-bullet").boundingBox();
   assert.ok(dot);
@@ -77,7 +80,7 @@ try {
   await select(0,original.length);
   await openMenu(original.indexOf("본문"));
   await menuClick("format-bullet-list");
-  const bothBullets = "- 서식 테스트\n\n- 한글 본문\n";
+  const bothBullets = "- " + bullet;
   await waitForContent(bothBullets);
   await openMenu();
   await menuClick("editor-undo");
@@ -87,7 +90,7 @@ try {
   await waitForContent(bothBullets);
   await save();
   assert.equal(await readFile(`${vault}/Home.md`,"utf8"),bothBullets);
-  report.checks.push("native bullet commands convert the clicked paragraph or selected paragraphs in Live Preview, including the bullet dot when zoomed, and support save, undo and redo");
+  report.checks.push("native bullet commands preserve task-like text as an ordinary bullet, convert via the dot when zoomed, and support save, undo and redo");
   await page.getByRole("button",{name:"글꼴·크기",exact:true}).click();
   await page.getByLabel(/^본문 글꼴 · /).click();
   const fontSearch = page.getByRole("searchbox",{name:"본문 글꼴 검색",exact:true});

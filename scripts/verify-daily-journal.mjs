@@ -16,7 +16,7 @@ const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const errors = [];
 let app;
 try {
-  await Promise.all([profile, team, path.join(personal, 'Records')].map(directory => mkdir(directory, { recursive: true })));
+  await Promise.all([profile, team, path.join(personal, 'Records'), path.join(personal, 'Templates')].map(directory => mkdir(directory, { recursive: true })));
   await writeFile(path.join(profile, 'settings.json'), JSON.stringify({
     vaultRoot: team, vaults: [team, personal], vaultPurposes: { [team]: 'team', [personal]: 'personal' },
   }));
@@ -64,6 +64,10 @@ try {
   await page.getByRole('combobox', { name: '문서 공간 범위' }).focus();
   await entry(next).getByRole('textbox', { name: 'Markdown 편집기' }).waitFor();
 
+  await personalTree.getByTitle('Template.md', { exact: true }).dragTo(personalTree.getByTitle('Templates', { exact: true }));
+  await personalTree.getByTitle('Templates/Template.md', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(id => JSON.parse(localStorage.getItem(`dynote.journal.${id}`)).daily.template, personalId), 'Templates/Template.md');
+
   await page.evaluate(() => localStorage.setItem('dynote.startup', '"last"'));
   await page.clock.setSystemTime(new Date(2032, 0, 3, 12));
   await page.reload();
@@ -71,7 +75,7 @@ try {
   assert.equal(await feed.count(), 0);
   assert.equal(await readFile(path.join(personal, after), 'utf8'), '# 2032_01_03\n\n- Template for 2032-01-03');
   assert.deepEqual(errors, []);
-  console.log('Daily journal: startup, personal routing, local midnight, existing bytes, and last-document startup passed.');
+  console.log('Daily journal: startup, personal routing, local midnight, template move, existing bytes, and last-document startup passed.');
 } finally {
   await app?.close();
   await rm(root, { recursive: true, force: true });

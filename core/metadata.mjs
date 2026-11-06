@@ -24,6 +24,11 @@ export function parseMetadata(source) {
   }
 }
 
+export function noteAliases({ aliases }) {
+  if (typeof aliases === "string") return [aliases];
+  return Array.isArray(aliases) ? aliases.filter(alias => typeof alias === "string") : [];
+}
+
 export function updateMetadata(source, yaml) {
   const parsed = parseMetadata(`---\n${yaml}\n---\n`);
   if (parsed.error) throw new Error(parsed.error);

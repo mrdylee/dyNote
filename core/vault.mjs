@@ -1,5 +1,4 @@
 import {
-  copyFile,
   open,
   realpath,
   lstat,
@@ -13,12 +12,16 @@ import {
 import { constants } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { rewriteLinks } from "./links.mjs";
+import { createLinkIndex, resolvePath, rewriteLinks, scanLinks } from "./links.mjs";
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
-import { rewriteCanvas } from "./canvas.mjs";
+import { parseCanvas, rewriteCanvas } from "./canvas.mjs";
+import { noteAliases, parseMetadata } from "./metadata.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const MAX_BYTES = 8 * 1024 * 1024;
+const sameEntry = (a, b) => a.dev === b.dev && a.ino === b.ino;
+// macOS O_NOFOLLOW_ANY from sys/fcntl.h rejects symlinks in ancestor directories too.
+const noFollow = process.platform === "darwin" ? 0x20000000 : (constants.O_NOFOLLOW ?? 0);
 const documentRevision = (snapshot) => digest(JSON.stringify({
   documents: [...snapshot.notes, ...snapshot.documents].map(file => [file.path, file.revision]).sort((a, b) => a[0].localeCompare(b[0])),
   attachments: snapshot.attachments.map(file => file.path).sort(),
@@ -568,6 +571,86 @@ export class Vault {
     });
   }
 
+  async #checkCrossVaultLinks(file, to, source) {
+    if (file.kind === "base") return;
+    let links;
+    if (file.kind === "canvas") {
+      let data;
+      try { ({ data } = parseCanvas(file.content)); }
+      catch { return; } // The app cannot resolve cards in an invalid canvas.
+      links = (data.nodes ?? []).flatMap(node => {
+        if (node.type === "text") return scanLinks(node.text);
+        const target = node.type === "file" ? node.file : node.type === "group" ? node.background : null;
+        return target ? [{ target, kind: "canvas" }] : [];
+      });
+    } else {
+      links = scanLinks(parseMetadata(file.content).body);
+    }
+    if (!links.length) return;
+
+    const [before, after] = await Promise.all([source.#snapshot(), this.#snapshot()]);
+    (file.kind ? after.documents : after.notes).push({ ...file, path: to });
+    const resolver = ({ notes, documents, attachments }) => {
+      const entries = [...notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...documents];
+      const byPath = new Map([...entries, ...attachments].map(entry => [entry.path, entry]));
+      const docIndex = createLinkIndex(entries), assetIndex = createLinkIndex(attachments);
+      return ({ target, kind }, from) => {
+        if (kind === "canvas") return byPath.get(target);
+        const asset = resolvePath(target, from, attachments, { kind, index: assetIndex });
+        if (asset.path && attachmentMime(asset.path)) return byPath.get(asset.path);
+        return byPath.get(resolvePath(target, from, entries, { kind, index: docIndex }).path);
+      };
+    };
+    const resolveSource = resolver(before), resolveDestination = resolver(after);
+    for (const link of links) {
+      const original = resolveSource(link, file.path), copied = resolveDestination(link, to);
+      if (!original && !copied) continue;
+      if (original && copied) {
+        if (original.path === file.path && copied.path === to) continue;
+        if (original.path !== file.path && copied.path !== to) {
+          const left = original.revision ?? (await source.#binary(original.path)).revision;
+          const right = copied.revision ?? (await this.#binary(copied.path)).revision;
+          if (left === right) continue;
+        }
+      }
+      throw new Error(`링크 “${link.target}”의 대상이 복사 후 달라집니다. 대상 보관함에서 연결 파일을 확인해 주세요.`);
+    }
+  }
+
+  async #writeCopy(file, to, content, parent) {
+    if (file.kind && Buffer.byteLength(content) > MAX_BYTES)
+      throw new Error("8MB보다 큰 문서는 이 버전에서 열 수 없습니다.");
+    const changed = () => new Error("복사 중 대상 폴더가 변경되었습니다. 다시 시도해 주세요.");
+    const destination = await this.#file(to);
+    if (!sameEntry(await lstat(path.dirname(destination), { bigint: true }), parent)) throw changed();
+    const handle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600)
+      .catch(error => {
+        if (error.code === "EEXIST") throw new Error("대상 폴더에 같은 이름의 문서가 있습니다.");
+        if (error.code === "ELOOP") throw changed();
+        throw error;
+      });
+    let actual, opened;
+    try {
+      opened = await handle.stat({ bigint: true });
+      actual = await realpath(destination);
+      // Verify the file descriptor before writing private bytes, then write through that descriptor.
+      if (!actual.startsWith(path.join(this.root, path.sep)) ||
+          !sameEntry(await lstat(path.dirname(actual), { bigint: true }), parent) ||
+          !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
+      await handle.writeFile(content);
+      if (await realpath(destination) !== actual || !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
+      const stat = await handle.stat();
+      return { ...file, path: to, content, revision: digest(content), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs } };
+    } catch (error) {
+      const candidate = actual ?? destination;
+      const created = await lstat(candidate, { bigint: true }).catch(() => null);
+      if (created && opened && sameEntry(created, opened)) await unlink(candidate).catch(() => {});
+      throw error;
+    } finally {
+      await handle.close();
+    }
+  }
+
   async copyDocument(from, folder, expectedRevision, source = this) {
     if (!validFilePath(from) || (!validNotePath(from) && !documentKind(from)) || typeof folder !== "string")
       throw new Error("복사할 수 없는 문서 또는 폴더입니다.");
@@ -587,13 +670,15 @@ export class Vault {
       const inFolder = name => folder ? folder + "/" + name : name;
       const filename = path.basename(from);
       const directory = path.dirname(await this.#file(inFolder(filename)));
+      const parent = await lstat(directory, { bigint: true });
+      if (!parent.isDirectory()) throw new Error("복사할 수 없는 폴더입니다.");
       const key = name => name.normalize("NFC").toLowerCase();
       const taken = new Set((await readdir(directory)).map(key));
       const ext = path.extname(filename), stem = filename.slice(0, -ext.length);
       let name = filename;
       for (let index = 1; taken.has(key(name)); index++)
         name = `${stem} (복사본${index === 1 ? "" : " " + index})${ext}`;
-      const to = inFolder(name), destination = await this.#file(to);
+      const to = inFolder(name);
       let content = file.content;
       if (source === this && file.kind !== "base") {
         const { notes, documents, attachments } = await this.#snapshot();
@@ -601,17 +686,8 @@ export class Vault {
         content = file.kind === "canvas" ? rewriteCanvas(content, from, from, to, files)
           : rewriteLinks(content, from, from, to, files);
       }
-      const temporary = path.join(directory, `.dynote-copy-${randomUUID()}`);
-      try {
-        await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
-        await copyFile(temporary, destination, constants.COPYFILE_EXCL);
-      } catch (error) {
-        if (error.code === "EEXIST") throw new Error("대상 폴더에 같은 이름의 문서가 있습니다.");
-        throw error;
-      } finally {
-        await unlink(temporary).catch(() => {});
-      }
-      return this.#read(to);
+      if (source !== this) await this.#checkCrossVaultLinks(file, to, source);
+      return this.#writeCopy(file, to, content, parent);
     });
   }
 

@@ -6,7 +6,7 @@ import { katex } from "@mdit/plugin-katex";
 import { createLinkIndex, resolvePath, scanLinks } from "./links.mjs";
 import { SearchIndex } from "./searchIndex.mjs";
 import { documentKey } from "./document-workspace.mjs";
-import { parseMetadata } from "./metadata.mjs";
+import { noteAliases, parseMetadata } from "./metadata.mjs";
 import { installMarkdownExtensions } from "./markdown-extensions.mjs";
 import { headingText, headingId } from "./headings.mjs";
 export { parseMetadata, updateMetadata, toggleTask } from "./metadata.mjs";
@@ -131,12 +131,7 @@ export function buildKnowledge(raw) {
     const parsed = {
       ...meta,
       properties: meta.properties,
-      aliases:
-        typeof meta.properties.aliases === "string"
-          ? [meta.properties.aliases]
-          : Array.isArray(meta.properties.aliases)
-            ? meta.properties.aliases.filter((a) => typeof a === "string")
-            : [],
+      aliases: noteAliases(meta.properties),
       title:
         headings.find((h) => h.level === 1)?.text ||
         note.path.split("/").at(-1).replace(/\.md$/i, ""),

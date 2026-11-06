@@ -21,6 +21,8 @@ try {
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
   await writeFile(path.join(personal, "Deliver.md"), "# Hand-off\n");
+  await writeFile(path.join(personal, "Linked.md"), "[Reference](Reference.md)\n");
+  await writeFile(path.join(team, "Shared/Reference.md"), "# Another reference\n");
   app = await electron.launch({
     executablePath: process.env.DYNOTE_EXECUTABLE || path.resolve("node_modules/electron/dist", process.platform === "darwin"
       ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron"),
@@ -86,8 +88,13 @@ try {
   await row(teamTree, "Shared/Deliver.md").waitFor();
   assert.equal(await readFile(path.join(team, "Shared/Deliver.md"), "utf8"), "# Hand-off\n");
   assert.equal(await readFile(path.join(personal, "Deliver.md"), "utf8"), "# Hand-off\n");
+  await drag(row(personalTree, "Linked.md"), row(teamTree, "Shared"));
+  await confirm.getByRole("button", { name: "복사", exact: true }).click();
+  await page.getByText(/링크 “Reference\.md”의 대상이 복사 후 달라집니다/).waitFor();
+  await assert.rejects(readFile(path.join(team, "Shared/Linked.md")), { code: "ENOENT" });
+  assert.equal(await readFile(path.join(personal, "Linked.md"), "utf8"), "[Reference](Reference.md)\n");
   assert.deepEqual(errors, []);
-  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, and preserve the cross-vault original.");
+  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, and block cross-vault link changes.");
 } finally {
   await app?.close();
   await rm(root, { recursive: true, force: true });

@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import {
   mkdtemp,
   mkdir,
@@ -157,6 +159,80 @@ test("copying documents keeps relative links, isolates concurrent names, and che
   assert.equal(await readFile(join(root, source.path), "utf8"), source.content);
   await assert.rejects(store.copyDocument(source.path, "Archive/2026", "stale"), /외부에서 파일이 변경/);
   await assert.rejects(store.copyDocument(source.path, "../outside", source.revision), /경로/);
+});
+
+for (const method of ["readdir", "open"]) {
+  test(`copy leaves no file outside the vault if its destination is replaced during ${method}`, async (t) => {
+    const { store, dir } = await fixture(t);
+    const destination = join(store.root, "Destination");
+    const outside = join(dir, "outside");
+    await mkdir(destination);
+    await mkdir(outside);
+    const source = await store.create("Plan.md", "[ref](한글.md)\n");
+    const original = fs[method];
+    const trigger = method === "readdir" ? store.root : join(destination, "Plan.md");
+    let replaced = false;
+    fs[method] = async (filename, ...args) => {
+      if (filename === trigger && !replaced) {
+        replaced = true;
+        await fs.rename(destination, join(store.root, "Moved"));
+        await symlink(outside, destination, process.platform === "win32" ? "junction" : "dir");
+      }
+      return original(filename, ...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(store.copyDocument(source.path, "Destination", source.revision));
+    } finally {
+      fs[method] = original;
+      syncBuiltinESMExports();
+    }
+    assert.equal(replaced, true);
+    assert.deepEqual(await readdir(outside), []);
+    assert.equal(await readFile(join(store.root, source.path), "utf8"), source.content);
+  });
+}
+
+test("a copy across vaults requires local links to keep resolving to the same content", async (t) => {
+  const { store: personal, dir, recovery } = await fixture(t);
+  const teamRoot = join(dir, "team");
+  await mkdir(join(teamRoot, "Shared"), { recursive: true });
+  const team = await Vault.open(teamRoot, recovery);
+  const brief = await personal.create("Drafts/Brief.md", "[spec](Spec.md#summary) · [self](#brief) · [web](https://example.com)\n");
+  const spec = await personal.create("Drafts/Spec.md", "# Summary\nApproved design\n");
+  const copy = () => team.copyDocument(brief.path, "Shared", brief.revision, personal);
+  await assert.rejects(copy(), /링크.*Spec\.md/);
+  const other = await team.create("Shared/Spec.md", "# Summary\nUnrelated draft\n");
+  await assert.rejects(copy(), /링크.*Spec\.md/);
+  assert.deepEqual(await readdir(join(teamRoot, "Shared")), ["Spec.md"]);
+  await team.save(other.path, spec.content, other.revision);
+  const copied = await copy();
+  assert.equal(copied.path, "Shared/Brief.md");
+  assert.equal(copied.content, brief.content);
+  assert.equal((await personal.readNote(brief.path)).revision, brief.revision);
+});
+
+test("cross-vault copies validate wiki aliases, attachments and canvas file cards", async (t) => {
+  const { store: personal, dir, recovery } = await fixture(t);
+  const teamRoot = join(dir, "team");
+  await mkdir(teamRoot);
+  const team = await Vault.open(teamRoot, recovery);
+  const aliased = "---\naliases: [Guide]\n---\n# Instructions\n";
+  await personal.create("Instructions.md", aliased);
+  await team.create("Shared Instructions.md", aliased);
+  const note = await personal.create("Brief.md", "[[Guide]] and [[Sheet.pdf]]\n");
+  const blank = await personal.createDocument("Board.canvas");
+  const canvas = await personal.saveDocument(blank.path, JSON.stringify({ nodes: [
+    { id: "sheet", type: "file", file: "Sheet.pdf", x: 0, y: 0, width: 240, height: 160 },
+  ] }), blank.revision);
+  const sheet = "%PDF-1.5\nOriginal\n";
+  await writeFile(join(personal.root, "Sheet.pdf"), sheet);
+  await writeFile(join(team.root, "Sheet.pdf"), "%PDF-1.5\nUnrelated\n");
+  for (const file of [note, canvas])
+    await assert.rejects(team.copyDocument(file.path, "", file.revision, personal), /링크.*Sheet\.pdf/, file.path);
+  await writeFile(join(team.root, "Sheet.pdf"), sheet);
+  for (const file of [note, canvas])
+    assert.equal((await team.copyDocument(file.path, "", file.revision, personal)).revision, file.revision);
 });
 
 test('JOURNAL-01 concurrent open-or-create returns one file without overwriting existing content', async (t) => {

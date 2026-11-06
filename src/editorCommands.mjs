@@ -74,6 +74,8 @@ export function runMarkdownFormat(view, format) {
   view.focus(); return true;
 }
 
+const taskLikeText = /^\[[xX ]\](?:[ \t]|$)/;
+
 export function runBulletFormat(view, format, position) {
   if (!view || view.state.readOnly || view.composing || view.state.selection.ranges.length !== 1) return false;
   const { state } = view, { doc } = state;
@@ -97,7 +99,8 @@ export function runBulletFormat(view, format, position) {
       const nestedProse = node.parent?.name === "ListItem" && node.prevSibling?.name !== "ListMark";
       if (node.parent?.name !== "Document" && !nestedProse) return;
       const startLine = doc.lineAt(start), endLine = doc.lineAt(ref.to + bom - 1);
-      edits.push({ from: start, insert: "- " });
+      const escapeTask = taskLikeText.test(doc.sliceString(start, startLine.to));
+      edits.push({ from: start, insert: escapeTask ? "- \\" : "- " });
       for (let number = startLine.number + 1; number <= endLine.number; number++)
         edits.push({ from: doc.line(number).from, insert: "  " });
     }
@@ -110,7 +113,9 @@ export function runBulletFormat(view, format, position) {
     const indent = doc.sliceString(Math.max(startLine.from, bom), start);
     if (!/^[\t ]*$/.test(indent)) return;
     const bodyStart = body ? body.from + bom : startLine.to;
-    edits.push({ from: start, to: Math.min(bodyStart, startLine.to) });
+    const unescapeTask = bodyStart < startLine.to && doc.sliceString(bodyStart, bodyStart + 1) === "\\"
+      && taskLikeText.test(doc.sliceString(bodyStart + 1, startLine.to));
+    edits.push({ from: start, to: Math.min(bodyStart + Number(unescapeTask), startLine.to) });
     const baseColumn = countColumn(indent, markdownTabSize);
     const bodyColumn = bodyStart > startLine.to ? baseColumn + 2
       : countColumn(doc.sliceString(Math.max(startLine.from, bom), bodyStart), markdownTabSize);

@@ -66,6 +66,16 @@ test("bullet conversion preserves soft lines, frontmatter, headings and code", (
   assert.equal(view.state.doc.toString(), bullets);
 });
 
+test("task-like plain text becomes an ordinary bullet and returns to the original paragraph", () => {
+  for (const text of ["[x] 확인 사항", "[ ] 초안 메모", "[X] 완료 표기"]) {
+    const view = editor(text, text.length);
+    assert.equal(runBulletFormat(view, "bullet-list"), true);
+    assert.equal(view.state.doc.toString(), "- \\" + text);
+    assert.equal(runBulletFormat(view, "paragraph"), true);
+    assert.equal(view.state.doc.toString(), text);
+  }
+});
+
 test("removing a parent bullet promotes its child list without changing task or numbered markers", () => {
   const text = "- Root\n  - Parent\n    - Child\n      - [x] Task\n  - Sibling\n\n1. Numbered\n";
   const view = editor(text, text.indexOf("Parent"));

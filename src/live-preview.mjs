@@ -162,6 +162,10 @@ function decorate(state) {
       if (closing) hide(closing.from, closing.to);
     } else if (name === "ListMark" && /^[-+*]$/.test(state.sliceDoc(from, to))) {
       hide(from, to, node.parent.getChild("Task") ? undefined : new Bullet());
+    } else if (name === "Escape" && node.parent?.name === "Paragraph" && node.parent.from === from
+      && node.parent.prevSibling?.name === "ListMark"
+      && /^\\\[[xX ]\](?:[ \t]|$)/.test(state.sliceDoc(from, state.doc.lineAt(from).to))) {
+      hide(from, from + 1);
     } else if (name === "TaskMarker") {
       hide(from, to, new Checkbox(/x/i.test(state.sliceDoc(from, to)), state.readOnly));
     } else if (["Link", "Image", "WikiLink", "WikiEmbed"].includes(name)) {
