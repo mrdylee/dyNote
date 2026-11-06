@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { localDate } from "../core/periodic-notes.mjs";
 
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-tree-transfers-")));
@@ -35,22 +36,27 @@ try {
   const personalTree = page.getByRole("region", { name: "개인 노트 · Personal", exact: true });
   const teamTree = page.getByRole("region", { name: "팀 공유 노트 · Team", exact: true });
   const row = (tree, title) => tree.getByTitle(title, { exact: true });
+  const pane = file => page.getByRole("region", { name: `문서 ${file}`, exact: true });
   const drag = async (from, to, copy = false) => {
     await to.waitFor();
     if (copy) await page.keyboard.down("Control");
-    try { await from.dragTo(to); }
+    try { await from.dragTo(to, { steps: 10 }); }
     finally { if (copy) await page.keyboard.up("Control"); }
   };
+  await page.getByRole("region", { name: "저널 피드", exact: true }).locator(".cm-focused").waitFor();
+  await row(personalTree, `Journal/${localDate()}.md`).waitFor();
+  await row(teamTree, "Shared").waitFor();
   await row(personalTree, "Archive").click();
   assert.equal(await row(personalTree, "Archive").getAttribute("aria-expanded"), "false");
   await row(personalTree, "Inbox/Plan.md").click();
-  const editor = page.getByRole("textbox", { name: "Markdown 편집기", exact: true });
+  const editor = pane("Inbox/Plan.md").getByRole("textbox", { name: "Markdown 편집기", exact: true });
   await editor.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
   await page.keyboard.insertText("Draft before drag");
+  assert.match(await editor.evaluate(element => element.cmTile.root.view.state.doc.toString()), /Draft before drag/);
   await drag(row(personalTree, "Inbox/Plan.md"), row(personalTree, "Archive"));
   await row(personalTree, "Archive/Plan.md").waitFor();
   assert.equal(await row(personalTree, "Archive").getAttribute("aria-expanded"), "true");
-  await page.getByRole("region", { name: "문서 Archive/Plan.md", exact: true }).waitFor();
+  await pane("Archive/Plan.md").waitFor();
   const moved = await readFile(path.join(personal, "Archive/Plan.md"), "utf8");
   assert.match(moved, /Draft before drag/);
   assert.equal(await readFile(path.join(personal, "Reference.md"), "utf8"), "[Plan](Archive/Plan.md)\n");
