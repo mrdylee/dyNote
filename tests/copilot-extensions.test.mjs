@@ -110,13 +110,19 @@ test("Copilot reports extension tool progress without forwarding tool arguments"
 });
 
 test("Copilot cancellation during extension loading does not start a session", async () => {
-  let finish;
-  const f = fixture({ getExtensions: () => new Promise(resolve => { finish = resolve; }) });
+  const loading = Promise.withResolvers();
+  const extensionsReady = Promise.withResolvers();
+  const f = fixture({ getExtensions: () => {
+    loading.resolve(true);
+    return extensionsReady.promise;
+  } });
   try {
     f.controller.send(request());
-    for (let i = 0; i < 20 && !finish; i++) await new Promise(setImmediate);
-    assert.ok(finish, "Agent must load selected extensions");
-    await f.controller.cancel("extension-probe"); finish(extensions); await f.controller.settled();
+    const entered = await Promise.race([loading.promise, f.controller.settled().then(() => false)]);
+    assert.ok(entered, "Agent must load selected extensions");
+    await f.controller.cancel("extension-probe");
+    extensionsReady.resolve(extensions);
+    await f.controller.settled();
     assert.equal(f.options.length, 0); assert.equal(f.events.at(-1).type, "canceled");
-  } finally { await f.controller.close(); }
+  } finally { extensionsReady.resolve(extensions); await f.controller.close(); }
 });
