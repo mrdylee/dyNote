@@ -17,10 +17,10 @@ const atEnd=page=>page.waitForFunction(()=>{const el=document.activeElement,sele
 try {
  let page=await attach();
  const feed=page.getByRole('region',{name:'저널 피드'});await feed.waitFor();
- await assert.rejects(readFile(`${vault}/${journalPath}`),{code:'ENOENT'});
  assert.equal(await feed.getByRole('button',{name:'오늘 기록 시작',exact:true}).count(),0);
  await feed.locator('.cm-live-preview').waitFor();
  await atEnd(page);
+ assert.equal(await readFile(`${vault}/${journalPath}`,'utf8'),`# ${localDate()}\n\n- `);
  await page.keyboard.type('First journal entry');await page.keyboard.press('Meta+s');await saved(page);
  const initial=`# ${localDate()}\n\n- First journal entry`;
  assert.equal(await readFile(`${vault}/${journalPath}`,'utf8'),initial);

@@ -17,11 +17,10 @@ const editor=()=>page.getByRole('textbox',{name:'Markdown 편집기',exact:true}
 const content=()=>editor().evaluate(el=>el.cmTile.root.view.state.doc.toString());
 const select=pos=>editor().evaluate((el,anchor)=>{const view=el.cmTile.root.view;view.dispatch({selection:{anchor}});view.focus();},pos);
 const save=async()=>{await page.keyboard.press(`${mod}+s`);await page.getByText('모든 변경사항 저장됨',{exact:true}).waitFor();};
-const open=async name=>{await page.keyboard.press(`${mod}+k`);await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill(`path:${name}`);await page.locator('.switch-results button').filter({hasText:name}).first().click();await page.getByRole('button',{name:'편집 보기',exact:true}).click();await editor().waitFor();};
+const open=async name=>{await page.locator('.titlebar').getByRole('button',{name:/문서로 이동/}).click();await page.getByRole('textbox',{name:'빠른 문서 검색'}).fill(`path:${name}`);await page.locator('.switch-results button').filter({hasText:name}).first().click();await page.getByRole('button',{name:'편집 보기',exact:true}).click();await editor().waitFor();};
 try{
- await setup();await page.getByRole('region',{name:'저널 피드'}).waitFor();
- await assert.rejects(readFile(`${vault}/${path}`),{code:'ENOENT'});
- await editor().waitFor();
+ await setup();await page.getByRole('region',{name:'저널 피드'}).locator('.cm-focused').waitFor();
+ assert.equal(await readFile(`${vault}/${path}`,'utf8'),`# ${localDate()}\n\n- `);
  assert.equal(await content(),`# ${localDate()}\n\n- `);
  assert.equal(await editor().evaluate(el=>document.activeElement===el),true);
  await page.keyboard.type('Project A');await page.keyboard.press('Enter');await page.keyboard.type('Decision A');await page.keyboard.press('Tab');await page.keyboard.press('Enter');await page.keyboard.type('Action A');await page.keyboard.press('Shift+Tab');
