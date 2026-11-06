@@ -19,6 +19,11 @@ let app=await launch(),page;const checks=[],errors=[];
 const setup=async()=>{page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1280,1000));await page.getByRole('button',{name:'명령 팔레트',exact:true}).waitFor();};
 const check=async(name,action)=>{console.error(name);await action();checks.push(name);};
 const settings=()=>page.getByRole('dialog',{name:'설정',exact:true});
+const closeSettings=async()=>{
+ await settings().getByRole('button',{name:'프로젝트 새로고침',exact:true,disabled:false}).waitFor();
+ await settings().getByRole('button',{name:'닫기',exact:true}).click();
+ await settings().waitFor({state:'hidden'});
+};
 const captureState=()=>page.evaluate(async()=>{const {value}=await window.notes.snapshot();return (await window.notes.captureStatus({vaultId:value.id})).value;});
 try{
  await setup();
@@ -37,7 +42,7 @@ try{
   const {value}=await window.notes.snapshot();
   return (await window.notes.captureStatus({vaultId:value.id})).value?.records.length===1;
  });
- await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});
+ await closeSettings();
  let state=await captureState(),record=state.records[0];
  await check('manual import from the team journal writes only to the personal vault',async()=>{
   assert.equal(state.enabled,false);assert.equal(state.records.length,1);assert.equal(record.sessions.length,1);
@@ -53,7 +58,7 @@ try{
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();await settings().getByRole('checkbox',{name:'자동 기록',exact:true}).check();await settings().getByRole('button',{name:'설정 적용',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('.capture-toolbar')?.textContent.includes('켜짐'));
- await settings().getByRole('button',{name:'닫기',exact:true}).click();await settings().waitFor({state:'hidden'});
+ await closeSettings();
  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
  await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByRole('button',{name:'Shared',exact:true}).click();
  const teamPane=page.getByRole('region',{name:'문서 Shared.md',exact:true});

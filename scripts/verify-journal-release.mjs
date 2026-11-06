@@ -1,4 +1,4 @@
-import {execFileSync} from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 import {access,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -10,6 +10,15 @@ const playwright=process.env.DYNOTE_PLAYWRIGHT_MODULE||pathToFileURL(path.join(p
 await access(executable);
 const env={...process.env,DYNOTE_EXECUTABLE:executable,DYNOTE_PLAYWRIGHT_MODULE:playwright};
 const scripts=['verify-copilot-journal.mjs','verify-journal-logseq-editing.mjs','verify-journal-review.mjs','verify-journal-ergonomics.mjs','verify-outline-regions.mjs','verify-journal-threading.mjs','verify-journal-outline.mjs','verify-vault-together.mjs','verify-vault-spaces.mjs','verify-vault-space-fixes.mjs','verify-vault-history-runtime.mjs','verify-git-workspace.mjs','verify-ai-providers.mjs','verify-settings-runtime.mjs','verify-daily-journal.mjs','verify-tree-transfers.mjs','verify-editor-tools.mjs',...(process.platform==='darwin'?['verify-journal-workspace.mjs','verify-editor-usability.mjs','verify-journal-write-large-markdown.mjs','verify-planner-review.mjs']:[])];
-for(const script of scripts)execFileSync(process.execPath,[`scripts/${script}`],{env,stdio:'inherit',timeout:180000});
-execFileSync(process.execPath,['--test','scripts/verify-sticky-review.mjs'],{env,stdio:'inherit',timeout:180000});
-console.log(`Verified ${scripts.length} native ${process.platform} package scenarios.`);
+const failures=[];
+for(const args of [...scripts.map(script=>[`scripts/${script}`]),['--test','scripts/verify-sticky-review.mjs']]){
+ const {status,signal,error}=spawnSync(process.execPath,args,{env,stdio:'inherit',timeout:180000});
+ if(status!==0){
+  const failure=`${args.at(-1)}: ${error?.message||signal||`exit ${status}`}`;
+  failures.push(failure);console.error(failure);
+ }
+}
+if(failures.length){
+ console.error(`Native ${process.platform} package verification failed:\n${failures.join('\n')}`);
+ process.exitCode=1;
+}else console.log(`Verified ${scripts.length} native ${process.platform} package scenarios and sticky note regressions.`);
