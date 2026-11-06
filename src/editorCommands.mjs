@@ -1,8 +1,9 @@
 import { validTextColor, colorOpening, readColorSpan, rewriteTextColors } from "../core/text-color.mjs";
-import { EditorSelection, Transaction } from '@codemirror/state';
+import { EditorSelection, Transaction, countColumn, findColumn } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
-import { foldEffect, unfoldEffect, foldService, ensureSyntaxTree } from '@codemirror/language';
+import { foldEffect, unfoldEffect, foldService, ensureSyntaxTree, language } from '@codemirror/language';
 import { outlineEdit, outlineRange } from '../core/outliner.mjs';
+import { parseMetadata } from '../core/metadata.mjs';
 
 export const outlineFolding = foldService.of((state, lineStart) => {
   const range=outlineRange(state.doc.toString(),lineStart);
@@ -71,6 +72,80 @@ export function runMarkdownFormat(view, format) {
   });
   view.dispatch({ ...changes, annotations: [Transaction.userEvent.of("input.format"), isolateHistory.of("full")], scrollIntoView: true });
   view.focus(); return true;
+}
+
+export function runBulletFormat(view, format, position) {
+  if (!view || view.state.readOnly || view.composing || view.state.selection.ranges.length !== 1) return false;
+  const { state } = view, { doc } = state;
+  const selection = state.selection.main;
+  const range = position == null || (selection.from <= position && position <= selection.to)
+    ? selection : EditorSelection.cursor(position);
+  const first = doc.lineAt(range.from), last = doc.lineAt(range.empty ? range.to : range.to - 1);
+  const source = doc.toString();
+  const metadataEnd = source.length - parseMetadata(source).body.length;
+  const bom = source.startsWith("\uFEFF") ? 1 : 0;
+  const tree = bom ? state.facet(language)?.parser.parse(source.slice(1)) : ensureSyntaxTree(state, last.to, 100);
+  if (!tree) return false;
+
+  const edits = [], breaks = new Set(), dedent = new Map();
+  const markdownTabSize = 4;
+  tree.iterate({ from: Math.max(0, first.from - bom), to: Math.max(0, last.to - bom), enter(ref) {
+    const start = ref.from + bom;
+    if (start < metadataEnd) return;
+    const node = ref.node;
+    if (format === "bullet-list" && ref.name === "Paragraph") {
+      const nestedProse = node.parent?.name === "ListItem" && node.prevSibling?.name !== "ListMark";
+      if (node.parent?.name !== "Document" && !nestedProse) return;
+      const startLine = doc.lineAt(start), endLine = doc.lineAt(ref.to + bom - 1);
+      edits.push({ from: start, insert: "- " });
+      for (let number = startLine.number + 1; number <= endLine.number; number++)
+        edits.push({ from: doc.line(number).from, insert: "  " });
+    }
+    if (format !== "paragraph" || ref.name !== "ListItem" || node.parent?.name !== "BulletList") return;
+    const mark = node.getChild("ListMark"), body = mark?.nextSibling;
+    if (!mark || (body && body.name !== "Paragraph")) return;
+    const startLine = doc.lineAt(start), endLine = doc.lineAt(ref.to + bom - 1);
+    const bodyEnd = body ? doc.lineAt(body.to + bom - 1) : startLine;
+    if (first.number > bodyEnd.number || last.number < startLine.number) return;
+    const indent = doc.sliceString(Math.max(startLine.from, bom), start);
+    if (!/^[\t ]*$/.test(indent)) return;
+    const bodyStart = body ? body.from + bom : startLine.to;
+    edits.push({ from: start, to: Math.min(bodyStart, startLine.to) });
+    const baseColumn = countColumn(indent, markdownTabSize);
+    const bodyColumn = bodyStart > startLine.to ? baseColumn + 2
+      : countColumn(doc.sliceString(Math.max(startLine.from, bom), bodyStart), markdownTabSize);
+    for (let number = startLine.number + 1; number <= endLine.number; number++) {
+      const line = doc.line(number), prefix = /^[\t ]*/.exec(line.text)[0];
+      if (countColumn(prefix, markdownTabSize) < bodyColumn) continue;
+      const previous = dedent.get(number);
+      // Ancestor and child edits share continuation lines, so remove their indentation together.
+      dedent.set(number, {
+        line, prefix,
+        width: (previous?.width ?? 0) + bodyColumn - baseColumn,
+        through: Math.max(previous?.through ?? 0, bodyColumn),
+      });
+    }
+    if (startLine.number > 1 && doc.line(startLine.number - 1).text.trim()) breaks.add(startLine.from - 1);
+    if (bodyEnd.number < doc.lines && doc.line(bodyEnd.number + 1).text.trim()) breaks.add(bodyEnd.to);
+  } });
+  for (const { line, prefix, width, through } of dedent.values()) {
+    const cut = findColumn(prefix, through, markdownTabSize);
+    const remaining = countColumn(prefix, markdownTabSize, cut) - width;
+    edits.push({ from: line.from, to: line.from + cut, insert: " ".repeat(remaining) });
+  }
+  for (const from of breaks) edits.push({ from, insert: "\n" });
+
+  if (!edits.length && format === "bullet-list" && range.empty && !first.text.trim()
+    && range.head >= metadataEnd && tree.resolveInner(Math.max(0, range.head - bom)).name === "Document") {
+    const separator = first.number > 1 && doc.line(first.number - 1).text.trim() ? "\n" : "";
+    edits.push({ from: Math.max(first.from, bom), to: first.to, insert: separator + "- " });
+  }
+  if (!edits.length) return false;
+  const changes = state.changes(edits);
+  view.dispatch({ changes, selection: EditorSelection.create([range.map(changes, 1)]),
+    annotations: [Transaction.userEvent.of("input.format"), isolateHistory.of("full")], scrollIntoView: true });
+  view.focus();
+  return true;
 }
 
 export function runTextColor(view, color) {

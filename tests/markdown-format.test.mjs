@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { history, undo, redo } from "@codemirror/commands";
-import { runMarkdownFormat } from "../src/editorCommands.mjs";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { runBulletFormat, runMarkdownFormat } from "../src/editorCommands.mjs";
 
 function editor(doc, anchor, head = anchor, readOnly = false) {
-  const view = { state: EditorState.create({doc, selection: {anchor, head}, extensions: [history(), EditorState.readOnly.of(readOnly)]}),
+  const view = { state: EditorState.create({doc, selection: {anchor, head}, extensions: [history(), markdown({base: markdownLanguage}), EditorState.readOnly.of(readOnly)]}),
     dispatch: spec => { view.state = view.state.update(spec).state; }, focus() {} };
   return view;
 }
@@ -51,4 +52,28 @@ test("word selection with boundary whitespace produces valid Markdown formatting
   const view=editor(" 한글 ",0,4);runMarkdownFormat(view,"bold");
   assert.equal(view.state.doc.toString()," **한글** ");
   assert.equal(view.state.sliceDoc(view.state.selection.main.from,view.state.selection.main.to),"한글");
+});
+
+test("bullet conversion preserves soft lines, frontmatter, headings and code", () => {
+  const text = "\uFEFF---\ntitle: Example\n---\n\n# Heading\n\nFirst line\nsoft line\n\n```md\n- Code\n```\n";
+  const bullets = text.replace("First line\nsoft line", "- First line\n  soft line");
+  const view = editor(text, 0, text.length);
+  assert.equal(runBulletFormat(view, "bullet-list"), true);
+  assert.equal(view.state.doc.toString(), bullets);
+  assert.equal(runBulletFormat(view, "paragraph"), true);
+  assert.equal(view.state.doc.toString(), text);
+  assert.equal(undo(view), true);
+  assert.equal(view.state.doc.toString(), bullets);
+});
+
+test("removing a parent bullet promotes its child list without changing task or numbered markers", () => {
+  const text = "- Root\n  - Parent\n    - Child\n      - [x] Task\n  - Sibling\n\n1. Numbered\n";
+  const view = editor(text, text.indexOf("Parent"));
+  assert.equal(runBulletFormat(view, "paragraph"), true);
+  assert.equal(view.state.doc.toString(), "- Root\n\n  Parent\n\n  - Child\n    - [x] Task\n  - Sibling\n\n1. Numbered\n");
+  assert.equal(undo(view), true);
+  assert.equal(view.state.doc.toString(), text);
+  const selected = editor(text, text.indexOf("Parent"), text.indexOf("Task") + 4);
+  assert.equal(runBulletFormat(selected, "paragraph"), true);
+  assert.equal(selected.state.doc.toString(), "- Root\n\n  Parent\n\n  Child\n\n  - [x] Task\n  - Sibling\n\n1. Numbered\n");
 });

@@ -9,8 +9,12 @@ test("contenteditable menu uses editor history and formatting; form fields retai
   assert.deepEqual(actions,["bold"]);
   const undo=menu.find(item=>item.id==="editor-undo");assert.equal(undo.enabled,true);undo.click();
   assert.deepEqual(actions,["bold","undo"]);
+  menu.find(item=>item.id==="format-bullet-list").click();
+  menu.find(item=>item.id==="format-paragraph").click();
+  assert.deepEqual(actions,["bold","undo","bullet-list","paragraph"]);
   const field=contextMenuTemplate({isEditable:true,formControlType:"input-text",editFlags:{canUndo:true}},()=>{},()=>{});
   assert.equal(field.find(item=>item.role==="undo").enabled,true);assert.ok(!field.some(item=>item.label==="서식"));
+  assert.ok(!field.some(item=>item.id==="format-bullet-list"||item.id==="format-paragraph"));
 });
 test("reading menu cannot cut or paste and offers copy only when available", () => {
   const menu=contextMenuTemplate({isEditable:false,formControlType:"none",editFlags:{canCut:true,canPaste:true,canCopy:true}},()=>{},()=>{});

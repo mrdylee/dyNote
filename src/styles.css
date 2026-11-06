@@ -751,6 +751,7 @@ kbd {
 .cm-live-code-block { font-family: var(--code-font, "SFMono-Regular", Consolas, monospace); font-size: var(--code-size, 12px); }
 .cm-live-link { color: #7955a8; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .cm-live-bullet { color: #947bb1; }
+.cm-outline-regions .cm-line:not(.cm-outline-enabled) .cm-live-bullet { pointer-events: none; }
 .cm-live-image { display: inline-block; max-width: 100%; max-height: 420px; vertical-align: middle; object-fit: contain; border-radius: 7px; cursor: text; }
 .split .markdown-preview {
   width: 50%;

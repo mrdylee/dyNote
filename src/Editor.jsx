@@ -29,7 +29,7 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
-import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor } from "./editorCommands.mjs";
+import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runBulletFormat } from "./editorCommands.mjs";
 import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
 
@@ -216,9 +216,20 @@ export default function Editor({
       if (editorRef?.current === view) editorRef.current = null;
     };
   }, []);
-  useEffect(() => window.notes?.onFormatEditor?.(format => {
+  useEffect(() => window.notes?.onFormatEditor?.((format, point) => {
     const view = editor.current;
-    if (!view?.hasFocus || view.state.readOnly) return;
+    if (!view || view.state.readOnly) return;
+    if (format === "bullet-list" || format === "paragraph") {
+      if (!point) {
+        if (view.hasFocus) runBulletFormat(view, format);
+        return;
+      }
+      if (!view.contentDOM.contains(view.dom.ownerDocument.elementFromPoint(point.x, point.y))) return;
+      const position = view.posAtCoords(point, false);
+      if (position != null) runBulletFormat(view, format, position);
+      return;
+    }
+    if (!view.hasFocus) return;
     if (format === "undo") undo(view);
     else if (format === "redo") redo(view);
     else runMarkdownFormat(view, format);

@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld(
       return () => ipcRenderer.removeListener("notes:open-settings", listener);
     },
     onFormatEditor: callback => {
-      const listener = (_event, format) => callback(format);
+      const listener = (_event, format, point) => callback(format, point);
       ipcRenderer.on("notes:format-editor", listener);
       return () => ipcRenderer.removeListener("notes:format-editor", listener);
     },

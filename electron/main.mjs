@@ -402,8 +402,10 @@ app
       ]),
     );
     window.webContents.on("context-menu", (_event, params) => {
+      const zoom = window.webContents.getZoomFactor();
+      const point = params.menuSourceType === "keyboard" ? null : { x: params.x / zoom, y: params.y / zoom };
       const menu = Menu.buildFromTemplate(contextMenuTemplate(params,
-        format => window.webContents.send("notes:format-editor", format),
+        format => window.webContents.send("notes:format-editor", format, point),
         () => window.webContents.send("notes:open-settings", "fonts")));
       menu.popup({ window });
     });

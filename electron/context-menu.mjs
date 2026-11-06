@@ -13,6 +13,8 @@ export function contextMenuTemplate(params, onFormat, onFonts) {
   ];
   if (editor) template.push(
     { type: "separator" },
+    { id: "format-bullet-list", label: "불릿으로 전환", click: () => onFormat("bullet-list") },
+    { id: "format-paragraph", label: "일반 문단으로 전환", click: () => onFormat("paragraph") },
     { label: "서식", submenu: [["bold", "굵게"], ["italic", "기울임"], ["strike", "취소선"], ["code", "인라인 코드"]]
       .map(([id, label]) => ({ id: `format-${id}`, label, click: () => onFormat(id) })) },
   );

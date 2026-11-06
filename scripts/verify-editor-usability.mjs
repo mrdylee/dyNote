@@ -23,9 +23,9 @@ const setup = async () => {
 };
 const content = () => page.locator(".cm-content").evaluate(el => el.cmTile.root.view.state.doc.toString());
 const select = async (from,to) => page.locator(".cm-content").evaluate((el,[anchor,head]) => {const v=el.cmTile.root.view;v.dispatch({selection:{anchor,head}});v.focus();},[from,to]);
-const openMenu = async () => {
-  const point=await page.locator(".cm-content").evaluate(el=>{const v=el.cmTile.root.view,r=v.coordsAtPos(v.state.selection.main.empty?v.state.selection.main.head:v.state.selection.main.from+1);return {x:r.left+1,y:r.top+3};});
-  await page.mouse.click(point.x,point.y,{button:"right"});
+const openMenu = async (offset, point) => {
+  const target=point??await page.locator(".cm-content").evaluate((el,offset)=>{const v=el.cmTile.root.view,r=v.coordsAtPos(offset??(v.state.selection.main.empty?v.state.selection.main.head:v.state.selection.main.from+1));return {x:r.left+1,y:r.top+3};},offset);
+  await page.mouse.click(target.x,target.y,{button:"right"});
   await app.evaluate(async () => {
     const deadline = Date.now() + 3000;
     while (!globalThis.__editorMenu && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
@@ -54,6 +54,40 @@ try {
   await page.waitForFunction(original=>document.querySelector(".cm-content").cmTile.root.view.state.doc.toString()===original,original);
   assert.equal(await content(),original);
   report.checks.push("actual right-click opens native menu; formatting IPC and native undo preserve Korean content");
+  await page.getByRole("button",{name:"Live Preview",exact:true}).click();
+  await select(0,2);
+  await openMenu(original.indexOf("본문"));
+  await menuClick("format-bullet-list");
+  const bullet = "서식 테스트\n\n- 한글 본문\n";
+  const waitForContent = value => page.waitForFunction(value => document.querySelector(".cm-content")?.cmTile.root.view.state.doc.toString() === value, value);
+  await waitForContent(bullet);
+  const save = async () => {
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+    await page.getByText("모든 변경사항 저장됨",{exact:true}).waitFor();
+  };
+  await save();
+  assert.equal(await readFile(`${vault}/Home.md`,"utf8"),bullet);
+  await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.2));
+  const dot = await page.locator(".cm-live-bullet").boundingBox();
+  assert.ok(dot);
+  await openMenu(undefined, { x: dot.x + dot.width / 2, y: dot.y + dot.height / 2 });
+  await menuClick("format-paragraph");
+  await waitForContent(original);
+  await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+  await select(0,original.length);
+  await openMenu(original.indexOf("본문"));
+  await menuClick("format-bullet-list");
+  const bothBullets = "- 서식 테스트\n\n- 한글 본문\n";
+  await waitForContent(bothBullets);
+  await openMenu();
+  await menuClick("editor-undo");
+  await waitForContent(original);
+  await openMenu();
+  await menuClick("editor-redo");
+  await waitForContent(bothBullets);
+  await save();
+  assert.equal(await readFile(`${vault}/Home.md`,"utf8"),bothBullets);
+  report.checks.push("native bullet commands convert the clicked paragraph or selected paragraphs in Live Preview, including the bullet dot when zoomed, and support save, undo and redo");
   await page.getByRole("button",{name:"글꼴·크기",exact:true}).click();
   await page.getByLabel(/^본문 글꼴 · /).click();
   const fontSearch = page.getByRole("searchbox",{name:"본문 글꼴 검색",exact:true});
@@ -63,7 +97,7 @@ try {
   await page.getByRole("button",{name:"Live Preview",exact:true}).click();
   assert.equal(await page.locator(".cm-scroller").evaluate(el=>getComputedStyle(el).fontSize),"19px");
   assert.match(await page.locator(".cm-scroller").evaluate(el=>getComputedStyle(el).fontFamily),/Georgia/);
-  assert.equal(await readFile(`${vault}/Home.md`,"utf8"),original);
+  assert.equal(await readFile(`${vault}/Home.md`,"utf8"),bothBullets);
   report.checks.push("direct font settings update Live Preview without modifying Markdown; font preferences survive restart");
   const drag = async (side,dx) => {
     const handle=page.getByRole("separator",{name:`${side} 패널 너비`}), before=Number(await handle.getAttribute("aria-valuenow"));
@@ -85,10 +119,12 @@ try {
   await page.getByRole("tab",{name:"문서 정보",exact:true}).click();
   assert.equal(Number(await page.getByRole("separator",{name:"오른쪽 패널 너비"}).getAttribute("aria-valuenow")),right);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1050,800));
+  await page.waitForFunction(() => innerWidth <= 1050 && document.querySelector(".workspace").getBoundingClientRect().width >= 360);
   const widths=await page.locator(".workspace").evaluate(el=>({center:el.getBoundingClientRect().width,total:document.documentElement.scrollWidth,window:innerWidth}));
   assert.ok(widths.center>=360); assert.ok(widths.total<=widths.window);
   report.checks.push("both panel boundaries drag; keyboard and cancellation work; hide/reopen and tabs keep width; narrow window reserves center");
   await app.close();app=await launch();await setup();
+  assert.equal(await content(),bothBullets);
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem("dynote.panelWidths"))),saved);
   assert.equal(await page.locator(".navigator").evaluate(el=>el.getBoundingClientRect().width),saved.left);
   assert.equal(await page.locator(".context-panel").evaluate(el=>el.getBoundingClientRect().width),saved.right);
