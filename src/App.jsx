@@ -52,6 +52,7 @@ import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder } from "../core/fi
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
+import WordPreview from "./WordPreview.jsx";
 import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
@@ -159,6 +160,7 @@ function FileTree({ notes, folders, active, reveal, onOpen, onContext, onDragDoc
       )
       .map(([name, item]) => {
         const path = prefix + name;
+        const word = item.note?.kind === "word";
         if (item.note)
           return (
             <button
@@ -166,13 +168,13 @@ function FileTree({ notes, folders, active, reveal, onOpen, onContext, onDragDoc
               className={`file-row ${active === path ? "selected" : ""}`}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
-              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
-              onPointerDown={event => onCopyPointer(event, path)}
+              onContextMenu={word ? undefined : event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
+              onPointerDown={word ? undefined : event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
-              draggable={!disabled}
-              onDragStart={event => onDragDocument(event, path)}
-              onDragEnd={onDragEnd}
+              draggable={!disabled && !word}
+              onDragStart={word ? undefined : event => onDragDocument(event, path)}
+              onDragEnd={word ? undefined : onDragEnd}
             >
               <FileText size={14} />
               <span>{name.replace(/\.md$/i, "")}</span>
@@ -268,6 +270,8 @@ export default function App() {
   const journalScope = section === "journal" ? vaults[journalScopeId ?? dailyVaultId] : null;
   const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
   const active = vault?.id === focusedVaultId ? focusedPath : null;
+  const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph", "ess"].includes(section);
+  const displayedPath = showingWord ? attachment.path : active;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
   const { mode, setMode } = workspace;
@@ -489,9 +493,11 @@ export default function App() {
   const visibleSpaces = connectedSpaces.filter(scope => together
     ? (filter === "all" || scope.id === filter || (filter === "personal" && scope.purpose === "personal"))
     : scope.id === vault?.id);
-  const searchAcross = query => searchNotes(visibleSpaces.flatMap(scope => models.get(scope.id).notes.map(note => ({
-    ...note, vaultId: scope.id, key: documentKey(scope.id, note.path), scopeLabel: spaceLabel(scope),
-  }))), query);
+  const searchAcross = query => searchNotes(visibleSpaces.flatMap(scope =>
+    [...models.get(scope.id).notes, ...(scope.wordDocuments ?? emptyFiles)].map(file => ({
+      ...file, vaultId: scope.id, key: documentKey(scope.id, file.path), scopeLabel: spaceLabel(scope),
+    }))
+  ), query);
   const results = section === "search" ? searchAcross(query) : emptyFiles;
   const switchResults = modal === "switch" ? searchAcross(switchQuery).slice(0, 9) : emptyFiles;
 
@@ -1014,9 +1020,46 @@ export default function App() {
       if (request === attachmentRequest.current) setError(err.message);
     }
   };
+  const loadWordDocument = async (path, vaultId, revision) => {
+    const request = ++attachmentRequest.current;
+    const isCurrent = () => request === attachmentRequest.current && vaultsRef.current[vaultId];
+    const updatePreview = data => setAttachment(old =>
+      old?.kind === "word" && old.vaultId === vaultId && old.path === path ? { path, vaultId, kind: "word", ...data } : old
+    );
+    const updateIndex = data => updateVault(vaultId, old => ({
+      ...old, wordDocuments: (old.wordDocuments ?? emptyFiles).map(file => file.path === path ? { ...file, ...data } : file),
+    }));
+    try {
+      const word = await invoke(api.readWordDocument({ vaultId, path, revision }));
+      if (!word || !isCurrent()) return;
+      const { html, ...indexed } = word;
+      updateIndex(indexed);
+      updatePreview({ html, revision: indexed.revision });
+    } catch (error) {
+      if (!isCurrent()) return;
+      updateIndex({ content: "" });
+      updatePreview({ error: error.message });
+    }
+  };
+  const openWordDocument = (path, vaultId) => {
+    setAttachment({ path, vaultId, kind: "word" });
+    setSection(old => old === "search" ? old : "files");
+    setModal(null);
+    void loadWordDocument(path, vaultId);
+  };
+  const refreshWordOnFocus = useEffectEvent(() => {
+    if (attachment?.kind === "word" && (attachment.html !== undefined || attachment.error))
+      void loadWordDocument(attachment.path, attachment.vaultId, attachment.revision);
+  });
+  useEffect(() => {
+    const refresh = () => refreshWordOnFocus();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
   const openFile = (path, vaultId = vault.id) => {
     const scope = vaultsRef.current[vaultId];
     if (scope && [...models.get(vaultId).notes, ...scope.documents].some(n => n.path === path)) openNote(path, vaultId);
+    else if (scope?.wordDocuments?.some(file => file.path === path)) openWordDocument(path, vaultId);
     else if (scope?.attachments.some(file => file.path === path)) openAttachment(path, "", vaultId);
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
@@ -1435,8 +1478,10 @@ export default function App() {
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
   };
-  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents]} folders={scope.folders ?? emptyFiles}
-    active={vault.id === scope.id ? active : null} disabled={busy} onOpen={path => openNote(path, scope.id)}
+  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles)]}
+    folders={scope.folders ?? emptyFiles}
+    active={vault.id === scope.id ? displayedPath : null}
+    disabled={busy} onOpen={path => openFile(path, scope.id)}
     reveal={treeReveal?.vaultId === scope.id ? treeReveal : null}
     onDragDocument={(event, path) => startTreeDrag(event, scope.id, path)} onDragEnd={endTreeDrag}
     onCopyPointer={(event, path) => startMacCopy(event, scope.id, path)}
@@ -1609,7 +1654,7 @@ export default function App() {
                   className={`search-result ${n.key === workspace.active ? "selected" : ""}`}
                   key={n.key}
                   disabled={busy}
-                  onClick={() => openNote(n.path, n.vaultId)}
+                  onClick={() => openFile(n.path, n.vaultId)}
                 >
                   <strong>
                     <FileText size={14} />
@@ -1740,7 +1785,7 @@ export default function App() {
               <span>
                 {section === "journal" ? "저널" : section === "ess" ? "ESS LINK 3D" : section === "graph"
                   ? "문서 그래프"
-                  : (active?.replace(/\.md$/i, "") ?? "문서 선택")}
+                  : (displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
@@ -1910,11 +1955,22 @@ export default function App() {
               <div className="attachment-view">
                 <div className="attachment-heading">
                   <strong>{attachment.path}</strong>
+                  {attachment.kind === "word" && <div className="word-preview-actions">
+                    <button onClick={() => invoke(api.openWordDocument({ vaultId: attachment.vaultId, path: attachment.path })).catch(error => setError(error.message))}>
+                      기본 앱에서 열기
+                    </button>
+                    <button onClick={() => loadWordDocument(attachment.path, attachment.vaultId, attachment.revision)}>
+                      Word 미리보기 새로고침
+                    </button>
+                  </div>}
                   <button onClick={() => { attachmentRequest.current++; setAttachment(null); }}>
                     문서로 돌아가기
                   </button>
                 </div>
-                {attachment.mime === "application/pdf" ? (
+                {attachment.kind === "word" ? <>
+                  <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>
+                  <WordPreview html={attachment.html} error={attachment.error} />
+                </> : attachment.mime === "application/pdf" ? (
                   <PdfViewer key={documentKey(attachment.vaultId, attachment.path)} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
                     onCopy={text => invoke(api.copyText({ vaultId: attachment.vaultId, text }))}
                     onOpenNote={path => openNote(path, attachment.vaultId)}
@@ -1978,7 +2034,7 @@ export default function App() {
               className={`save-status ${status}`}
               onClick={() => flush(true).catch(() => {})}
             >
-              {status === "saving" ? (
+              {showingWord ? <BookOpen size={13} /> : status === "saving" ? (
                 <LoaderCircle size={13} className="spin" />
               ) : status === "saved" ? (
                 <CheckCheck size={13} />
@@ -1986,7 +2042,7 @@ export default function App() {
                 <span className="status-dot" />
               )}
               <span>
-                {pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
+                {showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
                   ? "모든 변경사항 저장됨"
                   : status === "saving"
                     ? "저장 중…"
@@ -1997,10 +2053,12 @@ export default function App() {
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
-              {note && <span>{statistics.words.toLocaleString()}단어</span>}
-              <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
-              <span>{structured?.kind ?? "Markdown"}</span>
-              <span>UTF-8</span>
+              {showingWord ? <span>DOCX</span> : <>
+                {note && <span>{statistics.words.toLocaleString()}단어</span>}
+                <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
+                <span>{structured?.kind ?? "Markdown"}</span>
+                <span>UTF-8</span>
+              </>}
             </div>
           </footer>
         </main>
@@ -2462,7 +2520,7 @@ export default function App() {
               placeholder="이름이나 내용으로 찾아보세요…"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && switchResults[0])
-                  openNote(switchResults[0].path, switchResults[0].vaultId);
+                  openFile(switchResults[0].path, switchResults[0].vaultId);
               }}
             />
             <kbd>ESC</kbd>
@@ -2470,7 +2528,7 @@ export default function App() {
           {spaceSelector("빠른 검색 공간 범위")}
           <div className="switch-results">
             {switchResults.map((n) => (
-              <button key={n.key} onClick={() => openNote(n.path, n.vaultId)}>
+              <button key={n.key} onClick={() => openFile(n.path, n.vaultId)}>
                 <FileText size={17} />
                 <span>
                   <strong>{n.title}</strong>

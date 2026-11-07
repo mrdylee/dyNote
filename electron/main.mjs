@@ -433,6 +433,7 @@ app
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
+      "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
       "plugins-list": args => { checkVault(args); return plugins.status(); },
@@ -594,6 +595,17 @@ app
         checkVault(args, vault);
         return vault.readAttachment(args.path);
       },
+      "read-word-document": (args, vault) => {
+        checkVault(args, vault);
+        return vault.readWordDocument(args.path, args.revision);
+      },
+      "open-word-document": async (args, vault) => {
+        checkVault(args, vault);
+        const file = await vault.wordFilePath(args.path);
+        if (await shell.openPath(file))
+          throw new Error("Word 문서를 열 수 없습니다. .docx 파일의 기본 앱을 확인해 주세요.");
+        return true;
+      },
       "copy-text": (args, vault) => {
         checkVault(args, vault);
         if (typeof args.text !== "string" || args.text.length > 1024 * 1024) throw new Error("복사할 텍스트가 올바르지 않습니다.");
@@ -690,7 +702,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
