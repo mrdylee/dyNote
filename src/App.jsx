@@ -1066,10 +1066,12 @@ export default function App() {
   });
   useEffect(() => {
     const refresh = () => refreshWordOnFocus();
-    window.addEventListener("focus", refresh);
+    const unsubscribe = api?.onWindowFocus?.(refresh);
+    if (!unsubscribe) window.addEventListener("focus", refresh);
     return () => {
       wordIndexRequest.current++;
-      window.removeEventListener("focus", refresh);
+      if (unsubscribe) unsubscribe();
+      else window.removeEventListener("focus", refresh);
     };
   }, []);
   const openFile = (path, vaultId = vault.id) => {

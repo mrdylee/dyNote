@@ -370,6 +370,12 @@ app
         spellcheck: false,
       },
     });
+    const notifyWindowFocus = () => {
+      if (!window.webContents.isDestroyed())
+        window.webContents.send("notes:window-focus");
+    };
+    window.on("focus", notifyWindowFocus);
+    app.on("did-become-active", notifyWindowFocus);
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         {

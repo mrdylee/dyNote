@@ -57,7 +57,7 @@ try {
 
   await copyFile(updated, file + ".tmp");
   await rename(file + ".tmp", file);
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].emit("focus"));
   await preview.getByText("SWRS-240 과전류차단 요구사항").waitFor();
   assert.equal(await result.count(), 0);
   await search.fill("과전류차단");
@@ -74,7 +74,10 @@ try {
   await page.getByRole("button", { name: "문서로 돌아가기", exact: true }).click();
   await copyFile(original, file + ".tmp");
   await rename(file + ".tmp", file);
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await app.evaluate(({ app, BrowserWindow }) => {
+    if (process.platform === "darwin") app.emit("did-become-active");
+    else BrowserWindow.getAllWindows()[0].emit("focus");
+  });
   await search.fill("절연감시");
   await result.waitFor();
   await search.fill("과전류차단");
