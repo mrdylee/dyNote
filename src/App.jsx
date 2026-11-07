@@ -267,6 +267,7 @@ export default function App() {
   const [openedAttachment, setAttachment] = useState(null);
   const attachment = vaults[openedAttachment?.vaultId] ? openedAttachment : null;
   const attachmentRequest = useRef(0);
+  const wordIndexRequest = useRef(0);
   const journalScope = section === "journal" ? vaults[journalScopeId ?? dailyVaultId] : null;
   const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
   const active = vault?.id === focusedVaultId ? focusedPath : null;
@@ -1020,25 +1021,28 @@ export default function App() {
       if (request === attachmentRequest.current) setError(err.message);
     }
   };
-  const loadWordDocument = async (path, vaultId, revision) => {
-    const request = ++attachmentRequest.current;
-    const isCurrent = () => request === attachmentRequest.current && vaultsRef.current[vaultId];
+  const loadWordDocument = async (path, vaultId, revision, preview = true) => {
+    const request = preview ? ++attachmentRequest.current : wordIndexRequest.current;
+    const isCurrent = () => vaultsRef.current[vaultId] &&
+      request === (preview ? attachmentRequest.current : wordIndexRequest.current);
     const updatePreview = data => setAttachment(old =>
       old?.kind === "word" && old.vaultId === vaultId && old.path === path ? { path, vaultId, kind: "word", ...data } : old
     );
     const updateIndex = data => updateVault(vaultId, old => ({
-      ...old, wordDocuments: (old.wordDocuments ?? emptyFiles).map(file => file.path === path ? { ...file, ...data } : file),
+      ...old, wordDocuments: (old.wordDocuments ?? emptyFiles).map(file =>
+        file.path === path && (preview || file.revision === revision) ? { ...file, ...data } : file
+      ),
     }));
     try {
-      const word = await invoke(api.readWordDocument({ vaultId, path, revision }));
+      const word = await invoke(api.readWordDocument({ vaultId, path, revision, preview }));
       if (!word || !isCurrent()) return;
       const { html, ...indexed } = word;
       updateIndex(indexed);
-      updatePreview({ html, revision: indexed.revision });
+      if (preview) updatePreview({ html, revision: indexed.revision });
     } catch (error) {
       if (!isCurrent()) return;
-      updateIndex({ content: "" });
-      updatePreview({ error: error.message });
+      updateIndex({ content: "", revision: undefined });
+      if (preview) updatePreview({ error: error.message });
     }
   };
   const openWordDocument = (path, vaultId) => {
@@ -1047,14 +1051,26 @@ export default function App() {
     setModal(null);
     void loadWordDocument(path, vaultId);
   };
-  const refreshWordOnFocus = useEffectEvent(() => {
-    if (attachment?.kind === "word" && (attachment.html !== undefined || attachment.error))
-      void loadWordDocument(attachment.path, attachment.vaultId, attachment.revision);
+  const refreshWordOnFocus = useEffectEvent(async () => {
+    const request = ++wordIndexRequest.current;
+    const opened = attachment?.kind === "word" ? attachment : null;
+    if (opened)
+      await loadWordDocument(opened.path, opened.vaultId, opened.revision);
+    for (const scope of Object.values(vaultsRef.current)) {
+      for (const file of scope.wordDocuments ?? emptyFiles) {
+        if (request !== wordIndexRequest.current) return;
+        if (opened?.vaultId === scope.id && opened.path === file.path) continue;
+        await loadWordDocument(file.path, scope.id, file.revision, false);
+      }
+    }
   });
   useEffect(() => {
     const refresh = () => refreshWordOnFocus();
     window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
+    return () => {
+      wordIndexRequest.current++;
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
   const openFile = (path, vaultId = vault.id) => {
     const scope = vaultsRef.current[vaultId];

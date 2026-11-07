@@ -71,6 +71,18 @@ try {
   await quickSearch.waitFor({ state: "hidden" });
   await preview.getByText("SWRS-240 과전류차단 요구사항").waitFor();
   assert.deepEqual(await readFile(file), await readFile(updated));
+  await page.getByRole("button", { name: "문서로 돌아가기", exact: true }).click();
+  await copyFile(original, file + ".tmp");
+  await rename(file + ".tmp", file);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await search.fill("절연감시");
+  await result.waitFor();
+  await search.fill("과전류차단");
+  await page.waitForFunction(() => document.querySelectorAll(".search-result").length === 0);
+  await search.fill("절연감시");
+  await result.click();
+  await preview.getByText("SWRS-240 절연감시 요구사항").waitFor();
+  assert.deepEqual(await readFile(file), await readFile(original));
   assert.deepEqual(errors, []);
   console.log("Word list, preview, search, original path handoff, and refresh after an external save passed.");
 } catch (error) {

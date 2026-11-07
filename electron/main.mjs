@@ -597,7 +597,7 @@ app
       },
       "read-word-document": (args, vault) => {
         checkVault(args, vault);
-        return vault.readWordDocument(args.path, args.revision);
+        return vault.readWordDocument(args.path, args.revision, args.preview !== false);
       },
       "open-word-document": async (args, vault) => {
         checkVault(args, vault);

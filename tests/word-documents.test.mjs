@@ -5,10 +5,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { searchNotes } from "../core/knowledge.mjs";
 import { Vault, validFilePath } from "../core/vault.mjs";
+import { readWordContent } from "../core/word-documents.mjs";
 
 const original = new URL("./fixtures/word-roundtrip.docx", import.meta.url);
 const updated = new URL("./fixtures/word-roundtrip-updated.docx", import.meta.url);
 const documentPath = "내려받은 문서/SWRS 초안.DOCX";
+
+function combineDirectories(first, second) {
+  const split = bytes => {
+    const end = bytes.lastIndexOf(Buffer.from("504b0506", "hex"));
+    const offset = bytes.readUInt32LE(end + 16);
+    return { data: bytes.subarray(0, offset), directory: bytes.subarray(offset, end), footer: bytes.subarray(end) };
+  };
+  const left = split(first), right = split(second);
+  assert.equal(left.directory.length, right.directory.length);
+  const width = Math.max(left.data.length, right.data.length);
+  const footer = Buffer.from(left.footer);
+  footer.writeUInt32LE(width, 16);
+  return Buffer.concat([
+    left.data, Buffer.alloc(width - left.data.length), left.directory,
+    right.data, Buffer.alloc(width - right.data.length), right.directory, footer,
+  ]);
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "dynote-word-test-"));
@@ -68,4 +86,30 @@ test("excludes Word lock files and refuses paths outside the vault", async (t) =
     await assert.rejects(vault.readWordDocument(path));
   }
   await assert.rejects(vault.readWordDocument("손상.docx"), /Word/);
+});
+
+test("converts the ZIP directory that was actually validated", async () => {
+  const first = await readFile(original), second = await readFile(updated);
+  const expected = await readWordContent(first, false);
+  const actual = await readWordContent(combineDirectories(first, second), true);
+  assert.equal(actual.content, expected.content);
+  assert.match(actual.html, /절연감시/);
+  assert.doesNotMatch(actual.html, /과전류차단/);
+});
+
+test("indexes manual Word line breaks as whitespace between requirement terms", async () => {
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(await readFile(original));
+  const xml = await zip.file("word/document.xml").async("string");
+  zip.file("word/document.xml", xml.replace(
+    "<w:t>240</w:t>",
+    "<w:t>240</w:t><w:br/><w:t>VoltageGuard</w:t><w:br/>",
+  ));
+  const bytes = await zip.generateAsync({ type: "nodebuffer" });
+  const { content, html } = await readWordContent(bytes, true);
+  const file = { path: "SWRS.docx", title: "SWRS.docx", content };
+  assert.match(html, /SWRS-240<br \/>VoltageGuard<br \/>/);
+  for (const query of ["SWRS-240", "VoltageGuard", "절연감시"]) {
+    assert.equal(searchNotes([file], query)[0]?.path, file.path, query);
+  }
 });

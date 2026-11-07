@@ -418,9 +418,9 @@ export class Vault {
     return preview ? { ...file, html } : file;
   }
 
-  async readWordDocument(relative, previousRevision) {
+  async readWordDocument(relative, previousRevision, preview = true) {
     await this.#tail;
-    return this.#readWordDocument(relative, true, previousRevision);
+    return this.#readWordDocument(relative, preview, previousRevision);
   }
 
   async readNote(relative) {
