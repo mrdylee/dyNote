@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import TextColorPicker from "./TextColorPicker.jsx";
 import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
@@ -322,8 +323,7 @@ export default function Editor({
       {[["bold", "굵게", "B"], ["italic", "기울임", "I"], ["strike", "취소선", "S"], ["code", "인라인 코드", "</>"]].map(([format, label, text]) =>
         <button key={format} className={`format-${format}`} type="button" aria-label={label} title={label} disabled={readOnly}
           onMouseDown={event => event.preventDefault()} onClick={() => runMarkdownFormat(editor.current, format)}>{text}</button>)}
-      <label className="text-color-picker">글자 색상<input aria-label="글자 색상" type="color" value={textColor} disabled={readOnly}
-        onInput={event => setTextColor(event.currentTarget.value)} /></label>
+      <TextColorPicker value={textColor} onChange={setTextColor} disabled={readOnly} />
       <button type="button" aria-label="글자 색상 적용" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, textColor)}>색상 적용</button>
       <button type="button" aria-label="글자 색상 지우기" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, null)}>기본색</button>
       <button type="button" onClick={onFontSettings}>글꼴·크기</button>

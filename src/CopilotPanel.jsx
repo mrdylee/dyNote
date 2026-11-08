@@ -4,7 +4,6 @@ import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import DiagramPreview from "./DiagramPreview.jsx";
-import AiExtensions from "./AiExtensions.jsx";
 import { captureContext, applyProposal, prepareRequest } from "../core/copilot.mjs";
 
 const invoke = async (promise) => {
@@ -37,7 +36,6 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const [proposals, setProposals] = useState([]);
   const [review, setReview] = useState(null);
   const [applying, setApplying] = useState(false);
-  const [extensionsBusy, setExtensionsBusy] = useState(false);
   const [progress, setProgress] = useState([]);
   const [references, setReferences] = useState([]);
   const [attachmentSearch, setAttachmentSearch] = useState("");
@@ -106,9 +104,9 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   }, [messages, progress, proposals, visible]);
   const authBusy = auth && ["starting", "waiting"].includes(auth.phase);
   useEffect(() => {
-    session.setActivity("chat", !!(running || authBusy || extensionsBusy), vaultId);
+    session.setActivity("chat", !!(running || authBusy), vaultId);
     return () => session.setActivity("chat", false, vaultId);
-  }, [running, authBusy, extensionsBusy, vaultId, session.setActivity]);
+  }, [running, authBusy, vaultId, session.setActivity]);
   const newConversation = () => {
     setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
@@ -119,7 +117,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
   const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || extensionsBusy || session.activity.planner || otherChatRunning, applying, running, label,
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || session.activity.planner || otherChatRunning, applying, running, label,
     vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
@@ -171,7 +169,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-chat-heading">
       <select className="ai-provider-select" aria-label="AI 제공자" value={provider}
-        disabled={running || applying || extensionsBusy || authBusy || checking || session.activity.planner || proposals.length > 0 || liveEdits.blocked()} onChange={event => onProvider(event.target.value)}>
+        disabled={running || applying || authBusy || checking || session.activity.planner || proposals.length > 0 || liveEdits.blocked()} onChange={event => onProvider(event.target.value)}>
         <option value="copilot">Copilot</option><option value="codex">Codex</option><option value="claude">Claude</option>
       </select>
       <div className="copilot-heading-actions">
@@ -261,7 +259,6 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         {blockedSend?.code === "vault" && <button type="button" className="text-action" aria-label="AI용 노트 폴더 열기" onClick={onOpenVault}>노트 폴더 열기</button>}
         {blockedSend?.code === "drafts" && <button type="button" className="text-action" onClick={() => { newConversation(); setMode("chat"); }}>Ask로 대화</button>}
       </div>
-      {provider === "codex" && <AiExtensions api={api} disabled={running || applying || authBusy || checking || busy || session.activity.planner} onBusy={setExtensionsBusy} />}
       <small className="copilot-shortcuts">Enter 전송 · Shift+Enter 줄바꿈</small>
       <small className="copilot-allowance">선택한 내용과 대화가 전송되며 {label} 사용량이 적용됩니다.{provider === "claude" && " Ask·Edit 지원"}</small>
     </form>

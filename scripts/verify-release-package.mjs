@@ -66,8 +66,8 @@ for (const [platform, relative] of packages.filter(([platform]) => !selected || 
   const source = JSON.parse(await readFile("package.json", "utf8"));
   assert.deepEqual(metadata.dependencies, source.dependencies);
   assert.equal(JSON.parse(extract(archive, "node_modules/zod/package.json")).version, source.overrides["@github/copilot-sdk"].zod);
-  assert.ok(contents.includes('/dist/ess.html'));
-  assert.deepEqual(extract(archive, 'dist/ess/ess-container.glb'), await readFile('public/ess/ess-container.glb'));
+  assert.ok(!contents.includes('/dist/ess.html'), 'The removed ESS viewer must not ship');
+  assert.ok(!contents.some(name => name.startsWith('/dist/ess/')), 'Unused ESS model assets must not ship');
   assert.ok(contents.includes('/licenses/three.txt'));
   const wasm = contents.find((name) => /^\/dist\/assets\/graph-.*\.wasm$/.test(name));
   assert.ok(wasm);
