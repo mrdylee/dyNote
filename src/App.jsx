@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
-  Box,
   Bookmark,
   CalendarDays,
   History,
@@ -92,8 +91,6 @@ import { convertMindmap } from "../core/mindmap.mjs";
 import { pdfBacklinks } from "../core/pdf-links.mjs";
 import Planner from "./Planner.jsx";
 import { BOARD_PATH } from "../core/planner.mjs";
-import EssViewer from "./EssViewer.jsx";
-import { noteEssLinks, setEssLink, validEssTarget } from "../core/ess-links.mjs";
 
 const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(([name, method]) => [
   name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
@@ -271,7 +268,7 @@ export default function App() {
   const journalScope = section === "journal" ? vaults[journalScopeId ?? dailyVaultId] : null;
   const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
   const active = vault?.id === focusedVaultId ? focusedPath : null;
-  const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph", "ess"].includes(section);
+  const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
   const displayedPath = showingWord ? attachment.path : active;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
@@ -310,8 +307,6 @@ export default function App() {
   const [checkedJournal, setCheckedJournal] = useState(null);
   const completedJournal = useRef(null);
   const dailyKey = dailyVaultId && documentKey(dailyVaultId, today);
-  const [essOpened, setEssOpened] = useState(false);
-  const [essTarget, setEssTarget] = useState(null);
   const [editorJump, updateEditorJump] = useState(null);
   const setEditorJump = (jump, id = vault?.id) => updateEditorJump(jump && { ...jump, vaultId: id });
   const [query, setQuery] = useState("");
@@ -324,7 +319,7 @@ export default function App() {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
-  const rightVisible = right && section !== "ess";
+  const rightVisible = right;
   const panelLayout = fitPanelWidths(panelWidths, viewportWidth, rightVisible);
   const panelBudget = Math.max(1000, viewportWidth) - 64 - 360 - (rightVisible ? 10 : 5);
   const resizePanel = side => width => setPanelWidths(old => normalizePanelWidths({ ...old, [side]: width }));
@@ -528,8 +523,6 @@ export default function App() {
       setSelectedVaultId(snapshot.id);
     }
     if (changedVault) {
-      setEssOpened(false);
-      setEssTarget(null);
       setJournalScopeId(null);
       const startPath = navigation.recent[0] ?? snapshot.notes.find(n => n.path === "시작하기.md")?.path
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
@@ -773,7 +766,7 @@ export default function App() {
     attachmentRequest.current++;
     setAttachment(null);
     setTabs(old => old.includes(key) ? old : [...old, key]);
-    setSection(old => (["graph", "planner", "ess", "journal"].includes(old) ? "files" : old));
+    setSection(old => (["graph", "planner", "journal"].includes(old) ? "files" : old));
     setModal(null);
   }, [vault?.id, vaultsRef, updateNavigation, workspace.setActive]);
   const openWorkspaceKey = key => {
@@ -792,27 +785,6 @@ export default function App() {
     setEditorJump(null);
     attachmentRequest.current++;
     setSection("files"); setAttachment(null);
-  };
-
-  const openEss = (target) => {
-    if (validEssTarget(target)) setEssTarget(target);
-    setEssOpened(true); setSection("ess"); setModal(null);
-  };
-  const linkEssNote = async (path, target, linked, expectedRevision) => {
-    const vaultId=vault.id;
-    setBusy(true);
-    try {
-      await flush();
-      if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다.");
-      if(revisions.current.get(path)!==expectedRevision)throw new Error("문서가 변경되었습니다. 다시 연결해 주세요.");
-      const current=raw.find(n=>n.path===path);
-      if(!current)throw new Error("연결할 문서를 찾을 수 없습니다.");
-      const content=setEssLink(current.content,target,linked);
-      const saved=await invoke(api.saveNote({vaultId,path,content,revision:expectedRevision}));
-      if(currentVault.current!==vaultId)return;
-      revisions.current.set(path,saved.revision);
-      setRaw(old=>old.map(n=>n.path===path?{...saved,content}:n));
-    } finally {setBusy(false);}
   };
 
   useEffect(() => {
@@ -1440,7 +1412,6 @@ export default function App() {
     });
   }), [modal === "commands", model.notes, journalPreferences, active, openNote]);
   const commands = [
-    { id: "ess", label: "ESS LINK 3D 보기", run: () => openEss() },
     ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
@@ -1570,7 +1541,6 @@ export default function App() {
             <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
             <IconButton label="달력과 일지" active={showCalendar} onClick={() => { setJournalScopeId(vault.id); setSection("journal"); }}><CalendarDays size={20}/></IconButton>
             <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><Sparkles size={20}/></IconButton>
-            <IconButton label="ESS LINK 3D 보기" active={section === "ess"} onClick={() => openEss()}><Box size={20}/></IconButton>
             <IconButton
               label="파일 목록"
               active={section === "files" || (section === "journal" && !showCalendar)}
@@ -1756,7 +1726,7 @@ export default function App() {
                 const scope = vaults[vaultId];
                 if (!scope) return null;
                 const label = together ? spaceLabel(scope) : null;
-                return <div className={`tab ${key === workspace.active && !["graph", "ess"].includes(section) ? "active" : ""}`} key={key}>
+                return <div className={`tab ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}>
                   <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
                     draggable={!busy && /\.md$/i.test(path)}
                     onDragStart={event => { event.dataTransfer.setData(DOCUMENT_DRAG, key); event.dataTransfer.effectAllowed = "copy"; }}
@@ -1775,10 +1745,6 @@ export default function App() {
                   }}><X size={12} /></button>
                 </div>;
               })}
-              {essOpened && <div className={`tab ${section === "ess" ? "active" : ""}`}>
-                <button className="tab-label" onClick={() => openEss()}><Box size={13}/>ESS LINK 3D</button>
-                <button className="tab-close" aria-label="ESS LINK 3D 탭 닫기" onClick={() => {setEssOpened(false);setEssTarget(null);if(section==="ess")setSection("files");}}><X size={12}/></button>
-              </div>}
               {section === "graph" && (
                 <div className="tab active">
                   <Network size={14} />
@@ -1802,15 +1768,14 @@ export default function App() {
               <span>{vault.name}</span>
               <ChevronRight size={12} />
               <span>
-                {section === "journal" ? "저널" : section === "ess" ? "ESS LINK 3D" : section === "graph"
+                {section === "journal" ? "저널" : section === "graph"
                   ? "문서 그래프"
                   : (displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
               {note && <button className="text-action" disabled={busy} onClick={()=>{setModal("compare");}}>문서 나란히 보기</button>}
-              {note && !["graph", "ess", "planner"].includes(section) && <button className="text-action" onClick={() => openEss(noteEssLinks(note.content)[0])}><Box size={14}/> ESS LINK 보기</button>}
-              {!["graph", "ess"].includes(section) && (note || structured) && (
+              {!["graph"].includes(section) && (note || structured) && (
                 <>
                   <IconButton label="현재 문서 북마크" active={navigation.bookmarks.includes(active)} disabled={busy} onClick={() => updateNavigation({ type: "bookmark", path: active }, vault.id)}><Bookmark size={15}/></IconButton>
                   <button
@@ -1850,7 +1815,7 @@ export default function App() {
                   </button>
                 </>
               )}
-              {note && !["graph", "ess"].includes(section) && !structured && (
+              {note && !["graph"].includes(section) && !structured && (
                 <div className="view-segments">
                   <IconButton label="마인드맵 보기" active={mode === "mindmap"} disabled={!note || busy || edits.blocked()} onClick={() => setMode("mindmap")}><Network size={15}/></IconButton>
                   <IconButton
@@ -1913,7 +1878,7 @@ export default function App() {
             </div>
           )}
           {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료 · 직접 설치할 수 있습니다.</span><button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
-          {journalNote && !["journal", "planner", "graph", "ess"].includes(section) && !attachment && <div className="classification-notice classification-controls">
+          {journalNote && !["journal", "planner", "graph"].includes(section) && !attachment && <div className="classification-notice classification-controls">
             <span>이 기록을 폴더별로 정리할 수 있습니다.</span>
             <div ref={classificationHelpRef} className={`classification-action${classificationHelpDismissed ? " help-dismissed" : ""}`} onMouseEnter={()=>setClassificationHelpDismissed(false)} onFocusCapture={()=>setClassificationHelpDismissed(false)} tabIndex={busy||edits.blocked()||!classification.length ? 0 : undefined} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
               <button aria-describedby="classification-help" disabled={busy||edits.blocked()||!classification.length} onClick={()=>setModal("classify")}>분류 제안 검토 ({classification.length})</button>
@@ -1926,11 +1891,11 @@ export default function App() {
             </div>
           </div>}
           {compositionRecovery && <div className="composition-notice" role="status">문서를 정리했습니다. 이전 내용은 복구 사본에 남아 있습니다.<button onClick={() => invoke(api.showRecovery({ vaultId: vault.id })).catch(err => setError(err.message))}>복구 폴더 열기</button><button aria-label="문서 정리 안내 닫기" onClick={() => setCompositionRecovery(null)}>×</button></div>}
-          {section!=="journal"&&journalNote&&!attachment&&!["planner","graph","ess"].includes(section)&&<>
+          {section!=="journal"&&journalNote&&!attachment&&!["planner","graph"].includes(section)&&<>
             <CopilotJournalToolbar {...captureControls} disabled={busy||captureLocked||edits.blocked()}/>
             <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
           </>}
-          {section!=="journal"&&!attachment&&!["planner","graph","ess"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
+          {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
               currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}
@@ -1939,7 +1904,6 @@ export default function App() {
               jump={editorJump?.vaultId === vault.id ? editorJump : null}
               fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
               disabled={!registryReady || (!journalScopeId && !dailyVaultId) || busy || captureLocked || edits.blocked()} capture={captureControls}/>
-            : section === "ess" ? <EssViewer key={vault.id} notes={raw} target={essTarget} onTarget={setEssTarget} onOpen={openNote} onLink={linkEssNote} disabled={busy||edits.blocked()}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
