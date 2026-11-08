@@ -41,6 +41,8 @@ try {
   const selector = page.getByLabel("AI 제공자", { exact: true });
   await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 제공자"]').disabled);
+  assert.equal(await page.locator('.ai-extensions').count(), 0);
+  await selector.selectOption("codex");
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async (_window, options) => ({ canceled: false, filePaths: [options.properties.includes('openDirectory') ? `${root}/public-skills` : `${root}/mcp.json`] }); }, root);
   await page.getByText("MCP·스킬", { exact: true }).click();
   await page.getByRole("button", { name: "MCP 설정 연결", exact: true }).click();
@@ -55,7 +57,7 @@ try {
   await page.getByRole("button", { name: "mcp.json 연결 해제", exact: true }).click();
   await page.getByRole("button", { name: "public-skills 연결 해제", exact: true }).click();
   await page.getByText("MCP·스킬", { exact: true }).click();
-  report.checks.push("Native MCP/skill pickers persist selected sources across reload, omit secret contents, and disconnect from the right panel");
+  report.checks.push("Copilot omits the MCP/skill controls; Codex pickers persist selected sources across reload, omit secret contents, and disconnect");
   const image = Buffer.from(await page.evaluate(() => {
     const canvas = document.createElement("canvas"); canvas.width = 500; canvas.height = 200;
     const context = canvas.getContext("2d"); context.fillStyle = "white"; context.fillRect(0, 0, 500, 200);
@@ -66,6 +68,7 @@ try {
   for (const [provider, label] of [["codex", "Codex"], ["claude", "Claude"], ["copilot", "Copilot"]]) {
     await page.getByRole("button", { name: "파일 목록", exact: true }).click();
     await selector.selectOption(provider);
+    assert.equal(await page.locator('.ai-extensions').count(), provider === "codex" ? 1 : 0);
     if (provider !== "claude") assert.equal(await page.getByLabel(`${label} 작업`, { exact: true }).inputValue(), "agent");
     const models = page.getByLabel(`${label} 모델`, { exact: true });
     await models.selectOption("vision-2");

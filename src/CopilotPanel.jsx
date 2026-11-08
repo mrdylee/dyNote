@@ -261,7 +261,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         {blockedSend?.code === "vault" && <button type="button" className="text-action" aria-label="AI용 노트 폴더 열기" onClick={onOpenVault}>노트 폴더 열기</button>}
         {blockedSend?.code === "drafts" && <button type="button" className="text-action" onClick={() => { newConversation(); setMode("chat"); }}>Ask로 대화</button>}
       </div>
-      {provider !== "claude" && <AiExtensions api={api} disabled={running || applying || authBusy || checking || busy || session.activity.planner} onBusy={setExtensionsBusy} />}
+      {provider === "codex" && <AiExtensions api={api} disabled={running || applying || authBusy || checking || busy || session.activity.planner} onBusy={setExtensionsBusy} />}
       <small className="copilot-shortcuts">Enter 전송 · Shift+Enter 줄바꿈</small>
       <small className="copilot-allowance">선택한 내용과 대화가 전송되며 {label} 사용량이 적용됩니다.{provider === "claude" && " Ask·Edit 지원"}</small>
     </form>
