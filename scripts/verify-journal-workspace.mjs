@@ -99,6 +99,7 @@ try {
   await page.getByRole('checkbox',{name:'매주 업데이트 자동 확인'}).uncheck();
   await page.getByRole('checkbox',{name:'백그라운드 다운로드'}).uncheck();
   await page.getByRole('checkbox',{name:'시험 버전 포함'}).check();
+  await page.waitForFunction(()=>{const checkbox=document.querySelector('input[aria-label="시험 버전 포함"]');return checkbox?.checked&&!checkbox.disabled;});
   const prefs=JSON.parse(await readFile(`${profile}/updates/settings.json`,'utf8')).preferences;
   assert.equal(prefs.enabled,false);assert.equal(prefs.backgroundDownload,false);assert.equal(prefs.includePrerelease,true);
   await page.getByRole('button',{name:'지금 업데이트 확인',exact:true}).waitFor();
