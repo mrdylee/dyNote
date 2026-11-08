@@ -1,3 +1,5 @@
+> Historical local handoff from 2026-10-26, preserved during the 2026-11-09 branch audit. Paths, versions and instructions below describe that snapshot, not the current workspace.
+
 # Dynote 세션 인계
 
 작성일: 2026-10-26 (Asia/Seoul)
