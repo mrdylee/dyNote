@@ -79,6 +79,10 @@ npm start
 
 ## 파일과 복구
 
+보관함 폴더에 Word `.docx` 파일을 저장한 뒤 **파일 목록 → 문서 새로고침**을 누르면 파일 트리에 표시됩니다. **모든 문서 검색**에서 파일명과 본문을 검색하고, 선택하면 제목·표·이미지를 읽기 전용으로 볼 수 있습니다. 본문 검색과 미리보기는 25MB 이하를 지원합니다.
+
+Polarion의 LiveDoc에 수정 내용을 반영할 때는 **Word Round-trip**으로 내보낸 파일을 사용합니다. 수정 가능 범위는 내보낼 때 선택한 설정을 따릅니다. 운영체제의 `.docx` 기본 앱을 Microsoft Word로 지정하고 Dynote의 **기본 앱에서 열기**를 누르면 보관함의 같은 파일이 열립니다. Word에서 저장하고 Dynote로 돌아오면 열린 문서의 미리보기와 검색 본문이 갱신됩니다. 저장한 파일은 Polarion의 Round-trip 가져오기에 사용합니다. [Siemens Word Round-trip 안내](https://blogs.sw.siemens.com/polarion/new-tutorial-video-word-round-trip/)
+
 원본 형식은 일반 UTF-8 Markdown입니다. 다른 앱의 숨김 설정 디렉터리는 읽거나 수정하지 않습니다. UTF-8 이외 인코딩은 경고와 함께 제외합니다. Markdown 문서에는 고정 파일 크기 제한이 없습니다. Canvas·Bases 문서는 8MB 이하를 지원합니다. 첨부파일은 25MB 이하의 PNG·JPEG·GIF·WebP·PDF를 지원하며 `_attachments/`로 바이트 그대로 복사합니다. SVG·HTML·실행 파일은 가져오지 않습니다.
 
 상단 **이름·이동**에서 확장자를 유지한 새 경로를 입력합니다. 대상 파일이 있거나 문서가 외부에서 바뀌었다면 덮어쓰지 않습니다. 파일 이동·삭제 전에 저장 대기 중인 초안을 먼저 저장합니다. 이동에 실패하면 자체 변경을 복구하며 외부 변경은 덮어쓰지 않습니다. 휴지통 사본은 앱 데이터 `recovery/<vault-id>/trash/<item-id>/`에 보존합니다. 현재 실행 중에는 **되돌리기**, 재시작 후에는 복구 사본 폴더의 `entry.json` 경로와 `content` 파일로 복구할 수 있습니다.

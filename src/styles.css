@@ -1534,6 +1534,15 @@ kbd {
   display: block;
   margin: auto;
 }
+.word-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.word-preview img {
+  max-width: 100%;
+  height: auto;
+}
 .pdf-viewer {
   text-align: center;
 }

@@ -16,6 +16,7 @@ import { createLinkIndex, resolvePath, rewriteLinks, scanLinks } from "./links.m
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
 import { parseCanvas, rewriteCanvas } from "./canvas.mjs";
 import { noteAliases, parseMetadata } from "./metadata.mjs";
+import { readWordContent } from "./word-documents.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -28,7 +29,7 @@ const documentRevision = (snapshot) => digest(JSON.stringify({
   warnings: [...snapshot.warnings].sort(),
 }));
 
-export function validFilePath(value) {
+function validRelativePath(value) {
   return (
     typeof value === "string" &&
     value.length > 0 &&
@@ -45,10 +46,16 @@ export function validFilePath(value) {
           !/[<>:"|?*]/.test(part) &&
           !/[. ]$/.test(part) &&
           !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part),
-      ) &&
-    /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value)
+      )
   );
 }
+
+export const validFilePath = (value) =>
+  validRelativePath(value) && /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
+const validWordPath = (value) =>
+  validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
+const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
+  `${dev}:${ino}:${size}:${mtimeNs}:${ctimeNs}`;
 
 export const validNotePath = (value) =>
   validFilePath(value) && /\.md$/i.test(value);
@@ -69,6 +76,7 @@ export const attachmentMime = (name) =>
 
 export class Vault {
   #tail = Promise.resolve();
+  #wordIndex = new Map();
 
   static async open(root, recoveryRoot) {
     const canonical = await realpath(root);
@@ -90,9 +98,9 @@ export class Vault {
     return result;
   }
 
-  async #file(relative, createParents = false) {
-    if (!validFilePath(relative))
-      throw new Error("허용되지 않는 Markdown 경로입니다.");
+  async #file(relative, createParents = false, validPath = validFilePath) {
+    if (!validPath(relative))
+      throw new Error(validPath === validWordPath ? "허용되지 않는 Word 문서 경로입니다." : "허용되지 않는 Markdown 경로입니다.");
     const parts = relative.split("/");
     let parent = this.root;
     for (const part of parts.slice(0, -1)) {
@@ -333,6 +341,7 @@ export class Vault {
     const warnings = [];
     const attachments = [];
     const documents = [];
+    const wordDocuments = [];
     const folders = [];
     const walk = async (directory, prefix = "") => {
       const items = await readdir(directory, { withFileTypes: true });
@@ -348,6 +357,12 @@ export class Vault {
           }
         } else if (item.isFile() && attachmentMime(item.name)) {
           if (validFilePath(relative)) attachments.push({ path: relative });
+        } else if (item.isFile() && validWordPath(relative)) {
+          try {
+            wordDocuments.push(await this.#readWordDocument(relative, false));
+          } catch {
+            wordDocuments.push({ path: relative, title: item.name, kind: "word", content: "" });
+          }
         } else if (item.isFile() && /\.(?:md|canvas|base)$/i.test(item.name)) {
           try {
             (documentKind(relative) ? documents : notes).push(await this.#read(relative));
@@ -360,7 +375,52 @@ export class Vault {
     await walk(this.root);
     notes.sort((a, b) => a.path.localeCompare(b.path, "ko"));
     documents.sort((a, b) => a.path.localeCompare(b.path, "ko"));
-    return { id: this.id, name: this.name, notes, documents, attachments, folders, warnings };
+    wordDocuments.sort((a, b) => a.path.localeCompare(b.path, "ko"));
+    const indexedPaths = new Set(wordDocuments.map(file => file.path));
+    for (const relative of this.#wordIndex.keys()) {
+      if (!indexedPaths.has(relative)) this.#wordIndex.delete(relative);
+    }
+    return { id: this.id, name: this.name, notes, documents, wordDocuments, attachments, folders, warnings };
+  }
+
+  async wordFilePath(relative) {
+    await this.#tail;
+    const target = await this.#file(relative, false, validWordPath);
+    if (await realpath(target) !== target || !(await lstat(target)).isFile())
+      throw new Error("보관함 안의 Word 문서를 선택해 주세요.");
+    return target;
+  }
+
+  async #readWordDocument(relative, preview, previousRevision) {
+    const target = await this.#file(relative, false, validWordPath);
+    const handle = await open(target, constants.O_RDONLY | noFollow);
+    let bytes, revision, cached;
+    try {
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile()) throw new Error("일반 Word 문서만 열 수 있습니다.");
+      if (stat.size > 25n * 1024n * 1024n) throw new Error("Word 미리보기와 본문 검색은 25MB 이하를 지원합니다.");
+      revision = wordRevision(stat);
+      if (revision === previousRevision) return null;
+      const indexed = this.#wordIndex.get(relative);
+      if (indexed?.revision === revision) {
+        if (!preview) return indexed;
+        cached = indexed.content;
+      }
+      bytes = await handle.readFile();
+      if (revision !== wordRevision(await handle.stat({ bigint: true })))
+        throw new Error("읽는 중 Word 문서가 변경되었습니다. 다시 열어 주세요.");
+    } finally {
+      await handle.close();
+    }
+    const { content, html } = await readWordContent(bytes, preview, cached);
+    const file = { path: relative, title: path.posix.basename(relative), kind: "word", content, revision };
+    this.#wordIndex.set(relative, file);
+    return preview ? { ...file, html } : file;
+  }
+
+  async readWordDocument(relative, previousRevision, preview = true) {
+    await this.#tail;
+    return this.#readWordDocument(relative, preview, previousRevision);
   }
 
   async readNote(relative) {

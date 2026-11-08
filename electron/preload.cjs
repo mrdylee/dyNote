@@ -103,6 +103,13 @@ contextBridge.exposeInMainWorld(
     importAttachment: (args) => call("import-attachment", args),
     chooseAttachments: (args) => call("choose-attachments", args),
     readAttachment: (args) => call("read-attachment", args),
+    readWordDocument: (args) => call("read-word-document", args),
+    openWordDocument: (args) => call("open-word-document", args),
+    onWindowFocus: callback => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:window-focus", listener);
+      return () => ipcRenderer.removeListener("notes:window-focus", listener);
+    },
     copyText: (args) => call("copy-text", args),
     moveFile: (args) => call("move-file", args),
     copyFile: (args) => call("copy-file", args),
