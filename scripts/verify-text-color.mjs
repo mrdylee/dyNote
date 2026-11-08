@@ -11,6 +11,7 @@ const original = `# 색상
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault }));
 await writeFile(`${vault}/Home.md`, original);
 const modifier = process.platform === "darwin" ? "Meta" : "Control";
+const redoShortcut = process.platform === "darwin" ? "Meta+Shift+z" : "Control+y";
 const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
 let app = await launch(), page;
 const report = { checks: [], errors: [] };
@@ -46,7 +47,7 @@ try {
   const blue = original.replace("한글", '<span style="color:#1565c0">한글</span>');
   assert.equal(await content(), blue);
   await page.keyboard.press(`${modifier}+z`); assert.equal(await content(), original);
-  await page.keyboard.press(`${modifier}+Shift+z`); assert.equal(await content(), blue);
+  await page.keyboard.press(redoShortcut); assert.equal(await content(), blue);
   report.checks.push("selected Korean text receives chosen color; selection survives picker; one-step undo and redo");
   await page.getByRole("button", { name: "분할 보기", exact: true }).click();
   const readingColor = () => page.locator('.markdown-preview span[style*="color:"]');
