@@ -1,7 +1,7 @@
 import { packager } from "@electron/packager";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, access, mkdtemp, cp, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, access, mkdtemp, cp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -30,9 +30,16 @@ const installTargetRuntime = async (buildPath) => {
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
   await access(path.join(runtimeRoot, "prebuilds", `${platform}-${arch}`, platform === "win32" ? "copilot-runtime.exe" : "copilot-runtime"));
+  const sdkScope = path.join(buildPath, "node_modules", "@github");
+  for (const name of await readdir(sdkScope)) {
+    if (name.startsWith("copilot-sdk-") && `@github/${name}` !== runtimePackage) {
+      await rm(path.join(sdkScope, name), { recursive: true, force: true });
+    }
+  }
 };
 const outputs = await packager({
   dir: ".", name: "Dynote", platform, arch,
+  icon: platform === "linux" ? undefined : "branding/dynote",
   out: process.env.DYNOTE_PACKAGE_OUT || `release/v${metadata.version}`,
   overwrite: true,
   // Seal the renamed bundle and nested binaries; Electron's linker signature
@@ -44,7 +51,7 @@ const outputs = await packager({
   } : undefined,
   extendInfo: platform === "darwin" ? { NSMicrophoneUsageDescription: "선택한 보관함에 음성을 녹음하려면 마이크 사용을 허용해 주세요." } : undefined,
   asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi}/**" },
-  ignore: /^\/(?:(src|public|tests|docs|release|assembly|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
+  ignore: /^\/(?:(src|public|branding|tests|docs|release|assembly|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
   afterPrune: [async ({ buildPath }) => installTargetRuntime(buildPath)],
 });
 console.log(outputs.join("\n"));

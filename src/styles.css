@@ -87,11 +87,14 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px 0 102px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
   color: #a5a3ae;
   background: #fdfcfe;
+}
+.titlebar-mac {
+  padding-left: 102px;
 }
 .titlebar > span {
   font-weight: 600;
@@ -1937,8 +1940,27 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .text-color-picker { display: inline-flex; align-items: center; gap: 5px; margin-left: 5px; font-size: 12px; }
 .text-color-picker input { width: 30px; height: 25px; padding: 1px; border: 1px solid var(--border); border-radius: 4px; background: white; cursor: pointer; }
 
-.titlebar > .app-version { color: #686370; font-weight: 600; padding: 4px; margin: 0; }
-.app-version small { color: #9698a5; font-size: 10px; font-weight: 400; }
+.titlebar > .app-version {
+  gap: 6px;
+  padding: 2px 6px 2px 2px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.titlebar > .app-version:hover { background: var(--soft); }
+.app-wordmark {
+  color: #4e3a64;
+  font: 750 17px/1 "Avenir Next", "Segoe UI", sans-serif;
+  letter-spacing: -0.04em;
+}
+.app-wordmark span { color: #71539d; }
+.app-version small {
+  padding: 2px 6px;
+  border-radius: 9px;
+  background: #eee9f8;
+  color: #71539d;
+  font-size: 10px;
+  font-weight: 600;
+}
 .app-version-details { font-weight: 600; }
 .copilot-send-status { color: #78628d; font-size: 11px; line-height: 1.6; }
 .copilot-send-status:empty { display: none; }

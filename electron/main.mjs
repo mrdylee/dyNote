@@ -302,7 +302,7 @@ app
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
       ...(process.platform === "darwin"
         ? { trafficLightPosition: { x: 18, y: 19 } }
-        : {}),
+        : { icon: path.join(dist, "brand", "dynote.png") }),
       webPreferences: {
         preload: path.join(here, "preload.cjs"),
         contextIsolation: true,

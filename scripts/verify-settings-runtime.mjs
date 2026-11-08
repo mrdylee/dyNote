@@ -45,6 +45,16 @@ const selectFont = async (label, family) => {
 };
 try {
   await setup();
+  const brand = page.getByRole("button", { name: "앱 버전 정보", exact: true });
+  assert.equal(await brand.locator(".app-wordmark").textContent(), "DyNote");
+  await page.waitForFunction(() => document.querySelector(".app-version img")?.naturalWidth > 0);
+  if (process.platform === "win32") {
+    assert.ok((await brand.boundingBox()).x < 32, "Windows titlebar should align the brand near the left edge");
+  }
+  await brand.click();
+  await page.getByRole("heading", { name: "Dynote 정보", exact: true }).waitFor();
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  report.checks.push("The DyNote wordmark and app mark render, and the version button opens About");
   await page.getByRole("button", { name: "설정", exact: true }).click();
   await page.getByRole("button", { name: "백업·복원", exact: true }).click();
   assert.deepEqual(await page.locator(".settings-tabs button").allTextContents(), ["시작 화면", "보관함", "글꼴", "플러그인", "저널 자동기록", "백업·복원", "업데이트"]);

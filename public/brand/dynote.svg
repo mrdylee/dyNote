@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128" role="img"><title>DyNote 001 · 라벤더 스레드 D</title><desc>DyNote의 D 안에 상위 불릿과 들여쓴 하위 불릿을 연결했습니다.</desc><defs>
+  <path id="tile" d="M64 12C87 12 100 13 107 21C115 29 116 42 116 64S115 99 107 107C100 115 87 116 64 116S28 115 21 107C13 99 12 86 12 64S13 29 21 21C28 13 41 12 64 12Z"/>
+  <clipPath id="clip"><path d="M64 12C87 12 100 13 107 21C115 29 116 42 116 64S115 99 107 107C100 115 87 116 64 116S28 115 21 107C13 99 12 86 12 64S13 29 21 21C28 13 41 12 64 12Z"/></clipPath>
+  <linearGradient id="tileFill" x1="0" x2=".87" y1="0" y2="1">
+    <stop stop-color="#9275BC"/><stop offset="1" stop-color="#60478D"/>
+  </linearGradient>
+  <radialGradient id="glow" cx=".19" cy=".03" r=".88" gradientTransform="matrix(1 0 0 .79 0 0)">
+    <stop stop-color="#C5B4E1" stop-opacity="0.29"/><stop offset="1" stop-color="#C5B4E1" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="edge" x2=".75" y2="1"><stop stop-color="#fff" stop-opacity=".5"/><stop offset=".56" stop-color="#fff" stop-opacity=".09"/><stop offset="1" stop-color="#000" stop-opacity=".15"/></linearGradient>
+  <linearGradient id="light" x2=".72" y2="1"><stop stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <filter id="ambient" x="0" y="0" width="128" height="128" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="2.2"/></filter>
+  <filter id="glyph" x="14" y="14" width="100" height="102" filterUnits="userSpaceOnUse"><feGaussianBlur in="SourceAlpha" stdDeviation="1.6"/><feOffset dy="1.8"/><feComponentTransfer><feFuncA type="linear" slope=".24"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M0 0H10M0 0V10" stroke="#C5B4E1" stroke-opacity=".16" stroke-width=".6"/></pattern>
+  <pattern id="paper" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".25" fill="#60478D" opacity=".3"/><circle cx="4" cy="4" r=".25" fill="#fff" opacity=".56"/></pattern>
+  </defs>
+  <use href="#tile" fill="#302443" opacity=".27" transform="translate(0 2)" filter="url(#ambient)"/>
+  <use href="#tile" fill="url(#tileFill)"/>
+  <g clip-path="url(#clip)"><use href="#tile" fill="url(#glow)"/><use href="#tile" fill="none" stroke="url(#edge)" stroke-width="1.6"/></g>
+  <g filter="url(#glyph)"><path d="M39 33H61C82 33 95 45 95 64S82 95 61 95H39Q33 95 33 89V39Q33 33 39 33ZM48 46V82H61C74 82 82 75 82 64S74 46 61 46Z" fill="#F8F7FB" fill-rule="evenodd"/><path d="M54 55V68Q54 73 59 73H70" fill="none" stroke="#E2D5F3" stroke-width="3.9" stroke-linecap="round" stroke-linejoin="round" /><circle cx="54" cy="55" r="4.6" fill="#E2D5F3" /><circle cx="70" cy="73" r="4.6" fill="#E2D5F3" /></g>
+  </svg>
