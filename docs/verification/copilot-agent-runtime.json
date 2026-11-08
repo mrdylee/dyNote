@@ -9,7 +9,7 @@
   "modelTransport": "deterministic fixture; real note tools, renderer and vault",
   "liveModelVerified": false,
   "runtime": {
-    "packaged": false,
+    "packaged": true,
     "platform": "darwin",
     "electron": "44.9.0"
   }
