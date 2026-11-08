@@ -1,11 +1,11 @@
-name: Publish Dynote beta v0.20.0
+name: Publish Dynote beta v0.21.0
 on:
   push:
-    branches: [release/dynote-v0.20.0]
+    branches: [release/dynote-v0.21.0]
 permissions:
   contents: read
 concurrency:
-  group: release-dynote-v0.20.0
+  group: release-dynote-v0.21.0
   cancel-in-progress: true
 jobs:
   build:
@@ -33,16 +33,16 @@ jobs:
       - name: Verify release source
         shell: bash
         run: |
-          node -e "if(require('./package.json').version !== '0.20.0') process.exit(1)"
+          node -e "if(require('./package.json').version !== '0.21.0') process.exit(1)"
       - run: npm ci
       - run: npm test
       - run: npm audit --audit-level=moderate
       - run: npm run package:${{ matrix.platform }}
       - name: Verify packaged source and security dependency
         env:
-          DYNOTE_PACKAGE_REPORT: release/v0.20.0/package-verification-${{ matrix.platform }}.json
+          DYNOTE_PACKAGE_REPORT: release/v0.21.0/package-verification-${{ matrix.platform }}.json
         run: node scripts/verify-release-package.mjs ${{ matrix.package }}
-      - name: Native workspace, journal, font, Git and AI verification
+      - name: Native Word, workspace, journal, font, Git and AI verification
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
@@ -52,7 +52,7 @@ jobs:
           name: verification-${{ matrix.platform }}
           path: |
             output/playwright/**/*.json
-            release/v0.20.0/package-verification-*.json
+            release/v0.21.0/package-verification-*.json
           if-no-files-found: error
           retention-days: 7
       - name: Create Mac distribution
@@ -60,13 +60,13 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           node scripts/package-mac-distribution.mjs
-          hdiutil verify release/v0.20.0/Dynote-0.20.0-macos-arm64.dmg
+          hdiutil verify release/v0.21.0/Dynote-0.21.0-macos-arm64.dmg
       - name: Create Windows distribution
         if: matrix.platform == 'win'
         shell: pwsh
         run: |
-          $zip = Join-Path $PWD 'release/v0.20.0/Dynote-0.20.0-windows-x64.zip'
-          Compress-Archive -Path 'release/v0.20.0/Dynote-win32-x64' -DestinationPath $zip -CompressionLevel Optimal
+          $zip = Join-Path $PWD 'release/v0.21.0/Dynote-0.21.0-windows-x64.zip'
+          Compress-Archive -Path 'release/v0.21.0/Dynote-win32-x64' -DestinationPath $zip -CompressionLevel Optimal
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
@@ -77,15 +77,15 @@ jobs:
             }
           } finally { $archive.Dispose() }
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Dynote-0.20.0-windows-x64.zip" | Set-Content 'release/v0.20.0/SHA256SUMS-windows-x64.txt' -Encoding ascii
+          "$hash  Dynote-0.21.0-windows-x64.zip" | Set-Content 'release/v0.21.0/SHA256SUMS-windows-x64.txt' -Encoding ascii
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: runtime-${{ matrix.platform }}
           path: |
-            release/v0.20.0/*.dmg
-            release/v0.20.0/*.zip
-            release/v0.20.0/SHA256SUMS-*.txt
-            release/v0.20.0/package-verification-*.json
+            release/v0.21.0/*.dmg
+            release/v0.21.0/*.zip
+            release/v0.21.0/SHA256SUMS-*.txt
+            release/v0.21.0/package-verification-*.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -103,24 +103,24 @@ jobs:
         with:
           pattern: runtime-*
           merge-multiple: true
-          path: release/v0.20.0
+          path: release/v0.21.0
       - name: Verify and publish both platforms
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd release/v0.20.0
+          cd release/v0.21.0
           sha256sum --check SHA256SUMS-macos-arm64.txt
           sha256sum --check SHA256SUMS-windows-x64.txt
           cd ../..
-          if gh release view v0.20.0 --repo mrdylee/dyNote >/dev/null 2>&1; then
+          if gh release view v0.21.0 --repo mrdylee/dyNote >/dev/null 2>&1; then
             echo 'Release already exists; inspect it before retrying.' >&2
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin refs/tags/v0.20.0 >/dev/null 2>&1; then
-            git fetch origin tag v0.20.0
-            test "$(git rev-parse 'v0.20.0^{commit}')" = "$GITHUB_SHA"
+          if git ls-remote --exit-code --tags origin refs/tags/v0.21.0 >/dev/null 2>&1; then
+            git fetch origin tag v0.21.0
+            test "$(git rev-parse 'v0.21.0^{commit}')" = "$GITHUB_SHA"
           fi
-          gh release create v0.20.0 --repo mrdylee/dyNote --target "$GITHUB_SHA" --draft --prerelease --title 'Dynote v0.20.0 — Copilot 세션별 저널 기록' --notes-file docs/RELEASE-NOTES-0.20.0.md
-          gh release upload v0.20.0 --repo mrdylee/dyNote release/v0.20.0/Dynote-0.20.0-macos-arm64.dmg release/v0.20.0/Dynote-0.20.0-macos-arm64.zip release/v0.20.0/Dynote-0.20.0-windows-x64.zip release/v0.20.0/SHA256SUMS-macos-arm64.txt release/v0.20.0/SHA256SUMS-windows-x64.txt release/v0.20.0/package-verification-mac.json release/v0.20.0/package-verification-win.json
-          gh release edit v0.20.0 --repo mrdylee/dyNote --draft=false --prerelease
-          gh release view v0.20.0 --repo mrdylee/dyNote --json url,isDraft,isPrerelease,assets
+          gh release create v0.21.0 --repo mrdylee/dyNote --target "$GITHUB_SHA" --draft --prerelease --title 'Dynote v0.21.0 — Word 문서 미리보기와 본문 검색' --notes-file docs/RELEASE-NOTES-0.21.0.md
+          gh release upload v0.21.0 --repo mrdylee/dyNote release/v0.21.0/Dynote-0.21.0-macos-arm64.dmg release/v0.21.0/Dynote-0.21.0-macos-arm64.zip release/v0.21.0/Dynote-0.21.0-windows-x64.zip release/v0.21.0/SHA256SUMS-macos-arm64.txt release/v0.21.0/SHA256SUMS-windows-x64.txt release/v0.21.0/package-verification-mac.json release/v0.21.0/package-verification-win.json
+          gh release edit v0.21.0 --repo mrdylee/dyNote --draft=false --prerelease
+          gh release view v0.21.0 --repo mrdylee/dyNote --json url,isDraft,isPrerelease,assets
