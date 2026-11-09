@@ -88,12 +88,12 @@ try{
  await settings().getByText('오늘 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
  await closeSettings();
  let state=await captureState(),record=state.records[0];
- await check('manual import from the team journal writes only to the personal vault',async()=>{
+ await check('manual import opened from a team document shows and writes only the personal journal',async()=>{
   assert.equal(state.enabled,false);assert.equal(state.records.length,1);assert.equal(record.sessions.length,1);
   assert.deepEqual(await readdir(team),['Shared.md']);
-  assert.match(await page.getByRole('button',{name:'공간 전환·관리',exact:true}).innerText(),/팀 공유 노트/);
-  assert.equal(await page.locator('.capture-record-title').count(),0);
-  assert.equal(await page.getByRole('button',{name:'프로젝트별 기록',exact:true}).count(),0);
+  assert.match(await page.getByRole('button',{name:'공간 전환·관리',exact:true}).innerText(),/개인 노트/);
+  assert.equal(await page.locator('.capture-record-title').count(),1);
+  assert.equal(await page.getByRole('button',{name:'프로젝트별 기록',exact:true}).count(),1);
   const content=await readFile(path.join(vault,record.sessions[0].path),'utf8');assert.match(content,/첫 질문 원문/);assert.doesNotMatch(content,/DO NOT IMPORT/);
   assert.match(await readFile(path.join(vault,journal),'utf8'),/사용자가 직접 작성한 기록/);
   assert.match(await readFile(path.join(source,'project/chatSessions/first.json'),'utf8'),/첫 질문 원문/);

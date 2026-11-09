@@ -19,7 +19,7 @@ const setup = async () => {
   page = await app.firstWindow(); page.setDefaultTimeout(12000);
   page.on("pageerror", error => report.errors.push(error.message));
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1420, 940));
-  await page.getByRole("button", { name: "Home", exact: true }).click();
+  await page.locator(".navigator").getByTitle("Home.md", { exact: true }).click();
 };
 const editor = () => page.locator(".cm-content");
 const content = () => editor().evaluate(el => el.cmTile.root.view.state.doc.toString());
