@@ -32,13 +32,20 @@ try {
   await divider.waitFor();
   assert.equal(await divider.getAttribute('aria-orientation'), 'horizontal');
   const before = await personalTree.boundingBox();
+  const available = before.height + (await teamTree.boundingBox()).height;
+  const minimum = Math.min(available / 2, Math.max(84, available * 0.2));
+  const expectedIncrease = Math.min(95, available - minimum - before.height);
   const handle = await divider.boundingBox();
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
   await page.mouse.down();
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2 + 95, { steps: 8 });
   await page.mouse.up();
+  await page.waitForFunction(({ before, expectedIncrease }) => {
+    const height = document.querySelector('.space-tree-group').getBoundingClientRect().height;
+    return Math.abs(height - before - expectedIncrease) < 2;
+  }, { before: before.height, expectedIncrease });
   const after = await personalTree.boundingBox();
-  assert.ok(after.height > before.height + 65, 'drag expands personal tree');
+  assert.ok(after.height >= before.height + expectedIncrease - 2, 'drag expands personal tree up to the team minimum');
   assert.ok((await teamTree.boundingBox()).height > 60, 'team heading and rows remain available');
   for (const tree of [personalTree, teamTree]) {
     const size = await tree.locator('.file-tree').evaluate(element => ({ height: element.clientHeight, content: element.scrollHeight }));
