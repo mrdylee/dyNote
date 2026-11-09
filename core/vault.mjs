@@ -10,6 +10,7 @@ import {
   readFile,
 } from "node:fs/promises";
 import { constants } from "node:fs";
+import { attachmentMime, validateAttachment } from "./attachments.mjs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createLinkIndex, resolvePath, rewriteLinks, scanLinks } from "./links.mjs";
@@ -59,20 +60,7 @@ const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
 
 export const validNotePath = (value) =>
   validFilePath(value) && /\.md$/i.test(value);
-export const attachmentMime = (name) =>
-  ({
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    pdf: "application/pdf",
-    webm: "audio/webm",
-    wav: "audio/wav",
-    mp3: "audio/mpeg",
-    ogg: "audio/ogg",
-    m4a: "audio/mp4",
-  })[name.split(".").at(-1)?.toLowerCase()];
+export { attachmentMime } from "./attachments.mjs";
 
 export class Vault {
   #tail = Promise.resolve();
@@ -554,37 +542,13 @@ export class Vault {
     }
   }
 
-  #checkAttachment(name, bytes) {
-    const mime = attachmentMime(name);
-    if (!mime || bytes.length > 25 * 1024 * 1024)
-      throw new Error("25MB 이하의 이미지·PDF·오디오만 지원합니다.");
-    const signatures = {
-      "image/png": () =>
-        bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")),
-      "image/jpeg": () =>
-        bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255,
-      "image/gif": () => /^GIF8[79]a/.test(bytes.subarray(0, 6).toString()),
-      "image/webp": () =>
-        bytes.subarray(0, 4).toString() === "RIFF" &&
-        bytes.subarray(8, 12).toString() === "WEBP",
-      "application/pdf": () => bytes.subarray(0, 5).toString() === "%PDF-",
-      "audio/webm": () => bytes.subarray(0, 4).equals(Buffer.from("1a45dfa3", "hex")),
-      "audio/wav": () => bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WAVE",
-      "audio/mpeg": () => bytes.subarray(0, 3).toString() === "ID3" || (bytes[0] === 255 && (bytes[1] & 224) === 224),
-      "audio/ogg": () => bytes.subarray(0, 4).toString() === "OggS",
-      "audio/mp4": () => bytes.subarray(4, 8).toString() === "ftyp",
-    };
-    if (!signatures[mime]())
-      throw new Error("확장자와 파일 형식이 일치하지 않습니다.");
-    return mime;
-  }
 
   importAttachment(name, input) {
     return this.#enqueue(async () => {
       if (typeof name !== "string" || !(input instanceof Uint8Array))
         throw new Error("첨부파일 데이터가 필요합니다.");
       const bytes = Buffer.from(input);
-      this.#checkAttachment(name, bytes);
+      validateAttachment(name, bytes);
       const clean = path
         .basename(name)
         .replace(/[^\p{L}\p{N}._-]/gu, "_")
@@ -603,13 +567,13 @@ export class Vault {
   async readAttachment(relative) {
     await this.#tail;
     const value = await this.#binary(relative);
-    return { ...value, mime: this.#checkAttachment(relative, value.bytes) };
+    return { ...value, mime: validateAttachment(relative, value.bytes) };
   }
 
   replacePdf(relative, input, expectedRevision) {
     return this.#enqueue(async () => {
       if (attachmentMime(relative) !== "application/pdf" || !(input instanceof Uint8Array)) throw new Error("PDF 데이터가 필요합니다.");
-      const bytes = Buffer.from(input); this.#checkAttachment(relative, bytes);
+      const bytes = Buffer.from(input); validateAttachment(relative, bytes);
       const current = await this.#binary(relative);
       if (current.revision !== expectedRevision) throw new Error("외부에서 PDF가 변경되었습니다. 다시 확인해 주세요.");
       await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });

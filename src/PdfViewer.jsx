@@ -81,13 +81,13 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
         <span>{pdf?`/ ${pdf.numPages}`:'PDF 불러오는 중…'}</span>
         <button disabled={!pdf||page===pdf.numPages} onClick={()=>setPage(p=>p+1)}>다음 페이지</button>
         <button aria-label="PDF 축소" disabled={scale<=0.5} onClick={()=>setScale(s=>s-0.25)}>−</button><span>{Math.round(scale*100)}%</span><button aria-label="PDF 확대" disabled={scale>=3} onClick={()=>setScale(s=>s+0.25)}>+</button>
-        <button disabled={!ready} onClick={()=>copy(false)}>페이지 링크 복사</button><button disabled={!ready||!selection?.text} onClick={()=>copy(true)}>선택 영역 링크 복사</button>
+        {onCopy&&<><button disabled={!ready} onClick={()=>copy(false)}>페이지 링크 복사</button><button disabled={!ready||!selection?.text} onClick={()=>copy(true)}>선택 영역 링크 복사</button></>}
       </div>
       {message&&<p role="status" className="pdf-message">{message}</p>}
       {selection?.text&&<p className="pdf-selected-text">선택: {selection.text}</p>}
       {onPreviewEdit&&<PdfAnnotationTools path={path} page={page} selection={selection} annotations={annotations} onPreview={onPreviewEdit} onApply={onApplyEdit} onFollow={onFollow} onCopy={onCopy}/>}
       <div className="pdf-page" aria-busy={!ready}><canvas ref={canvas} aria-label={`PDF ${page}페이지`}/><div ref={textHost} className="native-pdf-text" onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="PDF 텍스트"/>{annotationRect&&<div className="pdf-annotation-target" aria-label="PDF 링크 주석" style={annotationRect}/>}</div>
-      <section className="pdf-backlinks" aria-label="PDF 백링크"><h3>이 PDF를 연결한 기록 · {backlinks.length}</h3>{backlinks.map((link,i)=><div key={`${link.notePath}:${i}`}><button onClick={()=>onOpenNote(link.notePath)}>{link.notePath}</button><button onClick={()=>onFollow(link.fragment)}>{link.fragment||'첫 페이지'}</button></div>)}</section>
+      {onOpenNote&&<section className="pdf-backlinks" aria-label="PDF 백링크"><h3>이 PDF를 연결한 기록 · {backlinks.length}</h3>{backlinks.map((link,i)=><div key={`${link.notePath}:${i}`}><button onClick={()=>onOpenNote(link.notePath)}>{link.notePath}</button><button onClick={()=>onFollow(link.fragment)}>{link.fragment||'첫 페이지'}</button></div>)}</section>}
     </>}
   </div>;
 }

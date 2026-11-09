@@ -105,14 +105,14 @@ contextBridge.exposeInMainWorld(
     readAttachment: (args) => call("read-attachment", args),
     readWordDocument: (args) => call("read-word-document", args),
     openWordDocument: (args) => call("open-word-document", args),
-    chooseExternalWord: () => call("choose-external-word"),
-    openDroppedWord: file => {
+    chooseExternalFile: () => call("choose-external-file"),
+    openDroppedFile: file => {
       const path = webUtils.getPathForFile(file);
-      if (!path) return Promise.resolve({ ok: false, error: "디스크에 저장된 Word 파일을 놓아 주세요." });
-      return call("open-external-word", { path });
+      if (!path) return Promise.resolve({ ok: false, error: "디스크에 저장된 파일을 놓아 주세요." });
+      return call("open-external-file", { path });
     },
-    readExternalWord: args => call("read-external-word", args),
-    openExternalWordSource: args => call("open-external-word-source", args),
+    readExternalFile: args => call("read-external-file", args),
+    openExternalFileSource: args => call("open-external-file-source", args),
     onOpenFile: callback => {
       const listener = () => callback();
       ipcRenderer.on("notes:open-file", listener);

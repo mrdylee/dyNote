@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ExternalWordDocuments } from "../core/external-word-documents.mjs";
+import { ExternalDocuments } from "../core/external-documents.mjs";
 
 const original = new URL("./fixtures/word-roundtrip.docx", import.meta.url);
 const updated = new URL("./fixtures/word-roundtrip-updated.docx", import.meta.url);
@@ -14,7 +14,7 @@ async function fixture(t) {
   await mkdir(cache);
   const file = path.join(root, "SWRS 검토 # % &.DOCX");
   await copyFile(original, file);
-  const documents = new ExternalWordDocuments(cache);
+  const documents = new ExternalDocuments(cache);
   t.after(async () => { await documents.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, cache, file, documents };
 }
@@ -59,8 +59,8 @@ test("keeps files with the same name separate and rejects unknown document IDs",
   assert.notEqual(first.id, second.id);
   assert.equal(await documents.sourcePath(first.id), file);
   assert.equal(await documents.sourcePath(second.id), other);
-  await assert.rejects(documents.read("../outside"), /임시 Word/);
-  await assert.rejects(documents.sourcePath(file), /임시 Word/);
+  await assert.rejects(documents.read("../outside"), /임시 문서/);
+  await assert.rejects(documents.sourcePath(file), /임시 문서/);
 });
 
 test("refuses unsupported, locked, missing, linked and oversized external files", async t => {

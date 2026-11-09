@@ -52,7 +52,8 @@ import { journalPreferences as defaultJournalPreferences } from "../core/journal
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import WordPreview from "./WordPreview.jsx";
-import useExternalWordDocuments from "./useExternalWordDocuments.jsx";
+import useExternalDocuments from "./useExternalDocuments.jsx";
+import ExternalFilePreview from "./ExternalFilePreview.jsx";
 import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
@@ -240,7 +241,7 @@ function Modal({ title, children, onClose, wide = false, className = "" }) {
 }
 
 export default function App() {
-  const externalWord = useExternalWordDocuments(api, invoke);
+  const externalFile = useExternalDocuments(api, invoke);
   const aiSession = useAiSession(api);
   const [fonts, setFonts] = useState(() => {
     try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
@@ -1447,14 +1448,14 @@ export default function App() {
     Promise.resolve().then(command.run).catch(err => setError(err.message));
   };
 
-  const externalWordDialog = externalWord.visible && (
-    <Modal title={externalWord.document?.name ?? "파일 열기"} wide className="external-word-dialog" onClose={externalWord.close}>
+  const externalFileDialog = externalFile.visible && (
+    <Modal title={externalFile.document?.name ?? "파일 열기"} wide className="external-file-dialog" onClose={externalFile.close}>
       <p className="muted">임시 미리보기 · 보관함에 추가하지 않습니다.</p>
-      {externalWord.document && <div className="word-preview-actions">
-        <button onClick={externalWord.openSource} disabled={externalWord.opening}>원본을 기본 앱에서 열기</button>
-        <button onClick={externalWord.refresh} disabled={externalWord.opening}>Word 미리보기 새로고침</button>
+      {externalFile.document && <div className="word-preview-actions">
+        {externalFile.document.canOpenSource && <button onClick={externalFile.openSource} disabled={externalFile.opening}>원본을 기본 앱에서 열기</button>}
+        <button onClick={externalFile.refresh} disabled={externalFile.opening}>미리보기 새로고침</button>
       </div>}
-      <WordPreview html={externalWord.document?.html} error={externalWord.error} />
+      <ExternalFilePreview key={externalFile.document?.id} document={externalFile.document} error={externalFile.error} onExternal={url => invoke(api.openExternal(url))} />
     </Modal>
   );
   if (!vault)
@@ -1465,8 +1466,8 @@ export default function App() {
         </div>
         <h1>Dynote</h1>
         <p>{error || "생각을 연결할 준비를 하고 있어요…"}</p>
-        <button onClick={externalWord.choose} disabled={!api || externalWord.opening}>파일 열기</button>
-        {externalWordDialog}
+        <button onClick={externalFile.choose} disabled={!api || externalFile.opening}>파일 열기</button>
+        {externalFileDialog}
       </div>
     );
   const resolveDocument = key => {
@@ -1599,7 +1600,7 @@ export default function App() {
             </span>
             <ChevronDown size={16} />
           </button>
-          <button className="search-shortcut file-open-shortcut" aria-label="파일 열기" onClick={externalWord.choose} disabled={!api || externalWord.opening}>
+          <button className="search-shortcut file-open-shortcut" aria-label="파일 열기" onClick={externalFile.choose} disabled={!api || externalFile.opening}>
             <FolderOpen size={15} /><span>파일 열기</span><kbd>{shortcut} O</kbd>
           </button>
           <button
@@ -2695,7 +2696,7 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {externalWordDialog}
+      {externalFileDialog}
     </div>
   );
 }

@@ -1263,19 +1263,22 @@ kbd {
   padding: 0;
   overflow: hidden;
 }
-.modal.external-word-dialog {
+.modal.external-file-dialog {
   width: min(900px, 90vw);
   max-height: 85vh;
   overflow: auto;
   padding: 0 22px 22px;
 }
-.modal.external-word-dialog .modal-heading { padding-left: 0; padding-right: 0; }
-.external-word-dialog .word-preview-actions button {
+.modal.external-file-dialog .modal-heading { padding-left: 0; padding-right: 0; }
+.external-file-dialog .word-preview-actions button {
   background: white;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 7px 10px;
 }
+.external-file-image { display: block; max-width: 100%; height: auto; margin: 16px auto; }
+.external-file-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.external-file-dialog .canvas-editor { height: 55vh; min-height: 350px; }
 .modal-heading {
   display: flex;
   align-items: center;

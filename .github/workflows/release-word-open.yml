@@ -42,7 +42,7 @@ jobs:
         env:
           DYNOTE_PACKAGE_REPORT: release/v0.22.1/package-verification-${{ matrix.platform }}.json
         run: node scripts/verify-release-package.mjs ${{ matrix.package }}
-      - name: Native Word file opening, color palette, workspace, journal, Git and AI verification
+      - name: Native readable file opening, color palette, workspace, journal, Git and AI verification
         shell: bash
         run: |
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
@@ -120,7 +120,7 @@ jobs:
             git fetch origin tag v0.22.1
             test "$(git rev-parse 'v0.22.1^{commit}')" = "$GITHUB_SHA"
           fi
-          gh release create v0.22.1 --repo mrdylee/dyNote --target "$GITHUB_SHA" --draft --prerelease --title 'Dynote v0.22.1 — Word 파일 열기와 탐색기 드롭' --notes-file docs/RELEASE-NOTES-0.22.1.md
+          gh release create v0.22.1 --repo mrdylee/dyNote --target "$GITHUB_SHA" --draft --prerelease --title 'Dynote v0.22.1 — 파일 열기와 탐색기 드롭' --notes-file docs/RELEASE-NOTES-0.22.1.md
           gh release upload v0.22.1 --repo mrdylee/dyNote release/v0.22.1/Dynote-0.22.1-macos-arm64.dmg release/v0.22.1/Dynote-0.22.1-macos-arm64.zip release/v0.22.1/Dynote-0.22.1-windows-x64.zip release/v0.22.1/SHA256SUMS-macos-arm64.txt release/v0.22.1/SHA256SUMS-windows-x64.txt release/v0.22.1/package-verification-mac.json release/v0.22.1/package-verification-win.json
           gh release edit v0.22.1 --repo mrdylee/dyNote --draft=false --prerelease
           gh release view v0.22.1 --repo mrdylee/dyNote --json url,isDraft,isPrerelease,assets

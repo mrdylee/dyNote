@@ -63,18 +63,18 @@ try {
     dataTransfer.items.add(new File(["control"], "control.md"));
     document.querySelector(".cm-content").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
   });
-  await page.getByRole("status").getByText("Word 파일은 한 번에 하나씩 놓아 주세요.").waitFor();
+  await page.getByRole("status").getByText("파일은 한 번에 하나씩 놓아 주세요.").waitFor();
   await page.keyboard.press("Escape");
   assert.equal(await page.getByRole("dialog").count(), 0);
-  const nonWordPassed = await page.evaluate(() => {
+  const internalPassed = await page.evaluate(() => {
     let passed = false;
     window.addEventListener("drop", () => { passed = true; }, { once: true });
     const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(new File(["control"], "control.txt"));
+    dataTransfer.setData("application/x-dynote-document", "Control.md");
     window.dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
     return passed;
   });
-  assert.equal(nonWordPassed, true, "Non-Word drops must reach existing handlers");
+  assert.equal(internalPassed, true, "Internal document drags must reach existing handlers");
   await page.evaluate(() => {
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(document.querySelector("#external-word-test-file").files[0]);
@@ -82,7 +82,7 @@ try {
   });
   await dialog.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
   const fake = await page.evaluate(async () => {
-    try { return await window.notes.openDroppedWord(new File(["fake"], "fake.docx")); }
+    try { return await window.notes.openDroppedFile(new File(["fake"], "fake.docx")); }
     catch (error) { return { ok: false, error: error.message }; }
   });
   assert.equal(fake.ok, false, "A JS-created File cannot authorize disk access");
@@ -90,7 +90,7 @@ try {
   await rename(source + ".tmp", source);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].emit("focus"));
   await dialog.getByText("SWRS-240 과전류차단 요구사항").waitFor();
-  await dialog.getByRole("button", { name: "Word 미리보기 새로고침", exact: true }).click();
+  await dialog.getByRole("button", { name: "미리보기 새로고침", exact: true }).click();
   await dialog.getByText("SWRS-240 과전류차단 요구사항").waitFor();
   assert.deepEqual(await readFile(source), await readFile(new URL("../tests/fixtures/word-roundtrip-updated.docx", import.meta.url)));
   assert.equal(await page.evaluate(async () => (await window.notes.snapshot()).value.id), initialVault);
@@ -100,7 +100,7 @@ try {
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
   await app.close(); app = null;
   assert.deepEqual(await readdir(cache), [], "Normal quit must remove temporary Word copies");
-  console.log("External Word menu, button, editor drop, multi-file rejection, non-Word pass-through, source handoff, refresh and temporary cleanup passed.");
+  console.log("External Word menu, button, editor drop, multi-file rejection, internal drag pass-through, source handoff, refresh and temporary cleanup passed.");
 } finally {
   if (app) { await app.evaluate(({ app }) => app.exit(0)).catch(() => {}); await app.close().catch(() => {}); }
   await rm(root, { recursive: true, force: true });

@@ -32,7 +32,7 @@ import { ClaudeController } from "./claude-controller.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
-import { ExternalWordDocuments } from "../core/external-word-documents.mjs";
+import { ExternalDocuments } from "../core/external-documents.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -73,10 +73,10 @@ let aiExtensions, aiExtensionsChanging = false;
 let plugins;
 let updates;
 let copilotJournal;
-let temporaryWord;
+let temporaryDocuments;
 
-function externalWordDocuments() {
-  return temporaryWord ??= new ExternalWordDocuments(app.getPath("temp"));
+function externalDocuments() {
+  return temporaryDocuments ??= new ExternalDocuments(app.getPath("temp"));
 }
 
 function validateSender(event) {
@@ -163,7 +163,7 @@ async function finishQuit() {
     if (stickyNotes && !await stickyNotes.flushForQuit()) return;
     await plugins?.close();
     if (stickyNotes && !await stickyNotes.flushForQuit()) return;
-    await temporaryWord?.dispose();
+    await temporaryDocuments?.dispose();
     quitReady = true;
     app.quit();
   } catch (error) {
@@ -617,19 +617,22 @@ app
         checkVault(args, vault);
         return vault.readWordDocument(args.path, args.revision, args.preview !== false);
       },
-      "choose-external-word": async () => {
+      "choose-external-file": async () => {
         const result = await dialog.showOpenDialog(window, {
-          title: "Word 파일 열기", properties: ["openFile"],
-          filters: [{ name: "Word 문서", extensions: ["docx"] }],
+          title: "파일 열기", properties: ["openFile"],
+          filters: [
+            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "docx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
+            { name: "모든 파일 · UTF-8 텍스트", extensions: ["*"] },
+          ],
         });
-        return result.canceled ? null : externalWordDocuments().open(result.filePaths[0]);
+        return result.canceled ? null : externalDocuments().open(result.filePaths[0]);
       },
-      "open-external-word": args => externalWordDocuments().open(args.path),
-      "read-external-word": args => externalWordDocuments().read(args.id, args.revision),
-      "open-external-word-source": async args => {
-        const file = await externalWordDocuments().sourcePath(args.id);
+      "open-external-file": args => externalDocuments().open(args.path),
+      "read-external-file": args => externalDocuments().read(args.id, args.revision),
+      "open-external-file-source": async args => {
+        const file = await externalDocuments().sourcePath(args.id);
         if (await shell.openPath(file))
-          throw new Error("Word 문서를 열 수 없습니다. .docx 파일의 기본 앱을 확인해 주세요.");
+          throw new Error("원본 파일을 열 수 없습니다. 이 확장자의 기본 앱을 확인해 주세요.");
         return true;
       },
       "open-word-document": async (args, vault) => {
@@ -735,7 +738,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-word", "open-external-word", "read-external-word", "open-external-word-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
