@@ -39,5 +39,13 @@ Files: `scripts/verify-external-word-open.mjs`, `scripts/verify-journal-release.
 - [x] Use `setInputFiles` on a test-only DOM input to obtain a disk-backed File; dispatch its drop and verify the preview through the real preload path resolver. A JS-created File must be rejected.
 - [x] Replace the source externally, emit window focus and assert updated preview text. Stub only `shell.openPath` and assert the original absolute path is handed off.
 - [x] Assert source bytes and the selected vault stay unchanged by opening/preview. Add the scenario to the native release runner.
-- [ ] Run the full unit suite, build, package verification, existing Word runtime test and new external-file runtime test. Review the final diff and record actual results.
+- [x] Run the full unit suite, build, package verification, existing Word runtime test and new external-file runtime test. Review the final diff and record actual results.
 - [x] Document menu/button/drop usage, the 25 MiB/single-DOCX scope, temporary lifetime and original default-app behavior.
+
+## Verified locally
+
+- Full unit suite: 460 passed, no failures or skips.
+- Production build and Apple Silicon package completed. Packaged source verification matched 291 source/bundle files. Dependency audit reported zero vulnerabilities.
+- Both source and packaged native tests passed menu/button opening, cancellation, editor drop, mixed-file rejection, non-Word event pass-through, original-path handoff, refresh and normal-exit cleanup.
+- Existing packaged Word list/body search and saved-color regression tests passed.
+- Actual Word editing and Polarion re-upload remain outside the completed tests. Cross-platform release CI runs the full native suite before publishing.
