@@ -64,7 +64,20 @@ try {
   await page.getByRole('combobox', { name: '문서 공간 범위' }).focus();
   await entry(next).getByRole('textbox', { name: 'Markdown 편집기' }).waitFor();
 
-  await personalTree.getByTitle('Template.md', { exact: true }).dragTo(personalTree.getByTitle('Templates', { exact: true }));
+  const template = personalTree.getByTitle('Template.md', { exact: true });
+  const folder = personalTree.getByTitle('Templates', { exact: true });
+  await template.scrollIntoViewIfNeeded();
+  const start = await template.boundingBox();
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  try {
+    // Capture the actual source row before scrolling can move a different row under the pointer.
+    await page.mouse.move(start.x + start.width / 2 + 12, start.y + start.height / 2);
+    await folder.scrollIntoViewIfNeeded();
+    const end = await folder.boundingBox();
+    await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 10 });
+    await folder.and(page.locator('[data-drop-label="이동"]')).waitFor();
+  } finally { await page.mouse.up(); }
   await personalTree.getByTitle('Templates/Template.md', { exact: true }).waitFor();
   assert.equal(await page.evaluate(id => JSON.parse(localStorage.getItem(`dynote.journal.${id}`)).daily.template, personalId), 'Templates/Template.md');
 
