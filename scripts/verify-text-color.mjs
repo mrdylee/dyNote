@@ -99,7 +99,7 @@ try {
   await page.screenshot({ path: "output/playwright/text-color.png" });
   report.checks.push("exact Markdown bytes and chosen color survive app restart in reading view and Live Preview");
   await page.reload();
-  await page.getByRole("button", { name: "Home", exact: true }).click();
+  await page.locator(".navigator").getByTitle("Home.md", { exact: true }).click();
   await page.locator(".text-color-menu summary").click();
   assert.equal(await page.getByRole("button", { name: "저장한 색 #c62828", exact: true }).count(), 0);
   report.checks.push("saved-color deletion persists after reload");
