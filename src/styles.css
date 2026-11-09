@@ -250,6 +250,7 @@ kbd {
   flex: 1;
   text-align: left;
 }
+.file-open-shortcut { margin-bottom: 8px; }
 .search-shortcut kbd {
   font-size: 9px;
   background: #faf9fc;
@@ -1261,6 +1262,19 @@ kbd {
   width: 560px;
   padding: 0;
   overflow: hidden;
+}
+.modal.external-word-dialog {
+  width: min(900px, 90vw);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 0 22px 22px;
+}
+.modal.external-word-dialog .modal-heading { padding-left: 0; padding-right: 0; }
+.external-word-dialog .word-preview-actions button {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
 }
 .modal-heading {
   display: flex;

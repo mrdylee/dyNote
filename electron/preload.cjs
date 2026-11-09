@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
 contextBridge.exposeInMainWorld(
   "notes",
@@ -105,6 +105,19 @@ contextBridge.exposeInMainWorld(
     readAttachment: (args) => call("read-attachment", args),
     readWordDocument: (args) => call("read-word-document", args),
     openWordDocument: (args) => call("open-word-document", args),
+    chooseExternalWord: () => call("choose-external-word"),
+    openDroppedWord: file => {
+      const path = webUtils.getPathForFile(file);
+      if (!path) return Promise.resolve({ ok: false, error: "디스크에 저장된 Word 파일을 놓아 주세요." });
+      return call("open-external-word", { path });
+    },
+    readExternalWord: args => call("read-external-word", args),
+    openExternalWordSource: args => call("open-external-word-source", args),
+    onOpenFile: callback => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:open-file", listener);
+      return () => ipcRenderer.removeListener("notes:open-file", listener);
+    },
     onWindowFocus: callback => {
       const listener = () => callback();
       ipcRenderer.on("notes:window-focus", listener);

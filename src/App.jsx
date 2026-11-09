@@ -52,6 +52,7 @@ import { journalPreferences as defaultJournalPreferences } from "../core/journal
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import WordPreview from "./WordPreview.jsx";
+import useExternalWordDocuments from "./useExternalWordDocuments.jsx";
 import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
@@ -239,6 +240,7 @@ function Modal({ title, children, onClose, wide = false, className = "" }) {
 }
 
 export default function App() {
+  const externalWord = useExternalWordDocuments(api, invoke);
   const aiSession = useAiSession(api);
   const [fonts, setFonts] = useState(() => {
     try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
@@ -1445,6 +1447,16 @@ export default function App() {
     Promise.resolve().then(command.run).catch(err => setError(err.message));
   };
 
+  const externalWordDialog = externalWord.visible && (
+    <Modal title={externalWord.document?.name ?? "파일 열기"} wide className="external-word-dialog" onClose={externalWord.close}>
+      <p className="muted">임시 미리보기 · 보관함에 추가하지 않습니다.</p>
+      {externalWord.document && <div className="word-preview-actions">
+        <button onClick={externalWord.openSource} disabled={externalWord.opening}>원본을 기본 앱에서 열기</button>
+        <button onClick={externalWord.refresh} disabled={externalWord.opening}>Word 미리보기 새로고침</button>
+      </div>}
+      <WordPreview html={externalWord.document?.html} error={externalWord.error} />
+    </Modal>
+  );
   if (!vault)
     return (
       <div className="loading-screen">
@@ -1453,6 +1465,8 @@ export default function App() {
         </div>
         <h1>Dynote</h1>
         <p>{error || "생각을 연결할 준비를 하고 있어요…"}</p>
+        <button onClick={externalWord.choose} disabled={!api || externalWord.opening}>파일 열기</button>
+        {externalWordDialog}
       </div>
     );
   const resolveDocument = key => {
@@ -1584,6 +1598,9 @@ export default function App() {
               <span className={`space-badge ${space?.purpose ?? "unclassified"}`}>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"}</span>
             </span>
             <ChevronDown size={16} />
+          </button>
+          <button className="search-shortcut file-open-shortcut" aria-label="파일 열기" onClick={externalWord.choose} disabled={!api || externalWord.opening}>
+            <FolderOpen size={15} /><span>파일 열기</span><kbd>{shortcut} O</kbd>
           </button>
           <button
             className="search-shortcut"
@@ -2678,6 +2695,7 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {externalWordDialog}
     </div>
   );
 }

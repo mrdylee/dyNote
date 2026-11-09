@@ -77,6 +77,8 @@ npm start
 
 ## 파일과 복구
 
+보관함 밖의 Word 파일은 **파일 → 파일 열기…**(Windows `Ctrl+O`, macOS `⌘O`) 또는 왼쪽 **파일 열기** 버튼으로 선택합니다. 탐색기/Finder에서 `.docx` 하나를 Dynote 창에 끌어 놓아도 자동으로 열립니다. 25MB 이하의 파일을 임시 폴더에 복사해 미리보기로 표시하며, 보관함에는 추가하지 않고 앱을 정상 종료할 때 임시 사본을 정리합니다. **원본을 기본 앱에서 열기**는 처음 선택한 원본 파일을 엽니다. Word에서 저장한 뒤 Dynote로 돌아오거나 **Word 미리보기 새로고침**을 누르면 수정 내용이 반영됩니다.
+
 보관함 폴더에 Word `.docx` 파일을 저장한 뒤 **파일 목록 → 문서 새로고침**을 누르면 파일 트리에 표시됩니다. **모든 문서 검색**에서 파일명과 본문을 검색하고, 선택하면 제목·표·이미지를 읽기 전용으로 볼 수 있습니다. 본문 검색과 미리보기는 25MB 이하를 지원합니다.
 
 Polarion의 LiveDoc에 수정 내용을 반영할 때는 **Word Round-trip**으로 내보낸 파일을 사용합니다. 수정 가능 범위는 내보낼 때 선택한 설정을 따릅니다. 운영체제의 `.docx` 기본 앱을 Microsoft Word로 지정하고 Dynote의 **기본 앱에서 열기**를 누르면 보관함의 같은 파일이 열립니다. Word에서 저장하고 Dynote로 돌아오면 열린 문서의 미리보기와 검색 본문이 갱신됩니다. 저장한 파일은 Polarion의 Round-trip 가져오기에 사용합니다. [Siemens Word Round-trip 안내](https://blogs.sw.siemens.com/polarion/new-tutorial-video-word-round-trip/)
