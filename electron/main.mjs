@@ -98,7 +98,7 @@ function checkVault(args, target = vault) {
 
 function togetherEntries() {
   const entries = registry.list().filter(entry => entry.purpose);
-  return entries.some(entry => entry.purpose === "personal") && entries.some(entry => entry.purpose === "team") ? entries : [];
+  return entries.some(entry => entry.purpose === "personal") ? entries : [];
 }
 
 function openVaultController(target, refresh = false) {

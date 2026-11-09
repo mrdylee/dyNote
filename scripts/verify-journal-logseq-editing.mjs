@@ -7,7 +7,7 @@ const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'p
 const root=await mkdtemp(path.join(tmpdir(),'dynote-journal-editing-')),profile=path.join(root,'profile'),vault=path.join(root,'vault');
 const output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/journal-logseq-editing',journal=`Journal/${localDate()}.md`,mod=process.platform==='darwin'?'Meta':'Control';
 for(const directory of [profile,path.join(vault,'Journal'),output])await mkdir(directory,{recursive:true});
-await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vault}));await writeFile(path.join(vault,journal),'- First\n- Second');
+await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));await writeFile(path.join(vault,journal),'- First\n- Second');
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||path.join(process.cwd(),'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 const checks=[],failures=[],errors=[],observations={};let page;
 const check=async(name,run)=>{try{await run();checks.push(name);}catch(error){failures.push({name,error:error.message});}};

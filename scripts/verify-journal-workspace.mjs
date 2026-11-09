@@ -5,7 +5,7 @@ import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await mkdtemp(`${tmpdir()}/dynote-journal-workspace-`),profile=`${root}/profile`,vault=`${root}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir(`${vault}/Projects`);
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 for(const name of ['A','B','C','D'])await writeFile(`${vault}/${name}.md`,`# ${name}\noriginal ${name}\n`);
 await writeFile(`${vault}/Projects/Plan.md`,'# Projects\n');
 const launch=async()=>{

@@ -7,7 +7,7 @@ const root=await mkdtemp(`${tmpdir()}/dynote-journal-ergonomics-`),profile=`${ro
 const output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/journal-ergonomics',mod=process.platform==='darwin'?'Meta':'Control',journal=`Journal/${localDate()}.md`;
 const original='# General\n\nKeep this document.\n',journalOriginal=`# ${localDate()}\n\n## Project review\n\n- Project planning\n`;
 for(const path of [profile,`${vault}/Journal`,`${vault}/Project/Sub`,`${vault}/Keep/Daily`,`${vault}/_attachments`,outside,output])await mkdir(path,{recursive:true});
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 await writeFile(`${vault}/General.md`,original);await writeFile(`${vault}/${journal}`,journalOriginal);
 await writeFile(`${vault}/Project/A.md`,'# A\n');await writeFile(`${vault}/Project/Sub/B.md`,'# B\n');await writeFile(`${vault}/Project/Sub/unknown.dat`,'preserve every file in system trash');
 await writeFile(`${vault}/Keep/Daily/Keep.md`,'# Keep\n');await writeFile(`${vault}/_attachments/Index.md`,'# Attachment index\n');await writeFile(`${outside}/untouched.txt`,'outside');await symlink(outside,`${vault}/Linked`,process.platform==='win32'?'junction':'dir');

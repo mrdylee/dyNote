@@ -2026,9 +2026,12 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .space-filter { display:flex; align-items:center; gap:8px; padding:6px 14px; color:var(--muted); font-size:11px; }
 .space-filter span { flex-shrink:0; }
 .space-filter select { min-width:0; flex:1; padding:5px 6px; border:1px solid var(--border); border-radius:5px; background:var(--surface); color:inherit; }
-.space-trees { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; scrollbar-width:thin; }
-.space-tree { display:flex; flex-direction:column; min-height:0; }
-.space-tree:not(:only-child) { min-height:min(84px, 100%); }
+.space-trees { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.space-tree-group { display:flex; flex-direction:column; min-height:min(84px, calc((100% - 6px) / 2)); overflow:hidden; }
+.space-tree { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.space-tree .file-tree { min-height:0; }
+.space-tree-resize { flex:0 0 6px; cursor:row-resize; touch-action:none; user-select:none; border-block:1px solid var(--border); }
+.space-tree-resize:hover, .space-tree-resize:focus-visible, .space-tree-resize:active { background:#c9bce8; outline:none; }
 .space-tree h3 { flex:none; margin:10px 12px 3px; padding:6px; border-top:1px solid var(--border); color:var(--text-secondary); font-size:11px; overflow-wrap:anywhere; }
 .folder-row[data-drop-label], .space-tree h3[data-drop-label], .vault-switch[data-drop-label] {
   display: flex; align-items: center; gap: 8px; background: #eee9f8; outline: 1px solid #b9a7d7; outline-offset: -1px;

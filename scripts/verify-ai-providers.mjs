@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const root = await mkdtemp(`${tmpdir()}/dynote-providers-`), profile = `${root}/profile`, vault = `${root}/vault`;
 await mkdir(profile); await mkdir(vault); await mkdir("output/playwright", { recursive: true });
-await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault }));
+await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault, vaultPurposes: { [vault]: "personal" } }));
 await writeFile(`${vault}/Home.md`, "# Home\n원본\n");
 const app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
 const report = { checks: [], errors: [], inference: "deterministic IPC fixture; no live account or paid model request" };

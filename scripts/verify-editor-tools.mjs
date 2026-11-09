@@ -6,7 +6,7 @@ const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 
 const fixture=await mkdtemp(`${tmpdir()}/dynote-editor-tools-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
 const original='- Parent\n  - Child\n- Sibling\n';
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/List.md`,original);
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));await writeFile(`${vault}/List.md`,original);
 await mkdir(`${vault}/Journal`);
 const journalDiagram='```mermaid\n---\nconfig:\n  htmlLabels: true\n  flowchart:\n    htmlLabels: true\n---\nflowchart LR\nA[시작] --> B[완료]\n```';
 for(const date of [localDate(),'2020-01-01'])await writeFile(`${vault}/Journal/${date}.md`,journalDiagram);

@@ -5,7 +5,7 @@ import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await mkdtemp(`${tmpdir()}/dynote-journal-write-large-`),profile=`${root}/profile`,vault=`${root}/vault`;
 await mkdir(profile);await mkdir(vault);
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 let app=await launch();
 const errors=[],checks=[],journalPath=`Journal/${localDate()}.md`;

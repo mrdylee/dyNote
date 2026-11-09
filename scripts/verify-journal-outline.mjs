@@ -5,7 +5,7 @@ import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await mkdtemp(`${tmpdir()}/dynote-journal-outline-`),profile=`${root}/profile`,vault=`${root}/vault`,mod=process.platform==='darwin'?'Meta':'Control';
 await mkdir(profile);await mkdir(`${vault}/Journal`,{recursive:true});await mkdir(`${vault}/Templates`);
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 const old='# Old journal\n\nKeep this prose.\n',regular='Normal document\n';
 await writeFile(`${vault}/Journal/2020-01-01.md`,old);await writeFile(`${vault}/Regular.md`,regular);
 await writeFile(`${vault}/Guide.md`,'# Guide\n');
@@ -52,6 +52,7 @@ try{
  await editor().evaluate((el,from)=>{const view=el.cmTile.root.view;view.dispatch({selection:{anchor:from,head:view.state.doc.length}});view.focus();},continued.length);
  await page.keyboard.press('Backspace');await save();assert.equal(await content(),continued);
  checks.push('Enter accepts an active journal wiki-link completion without inserting a block');
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('region',{name:'달력과 일지',exact:true}).getByTitle(path,{exact:true}).click();
  await app.evaluate(({ipcMain})=>{
   ipcMain.removeHandler('notes:copilot-status');ipcMain.handle('notes:copilot-status',()=>({ok:true,value:{authenticated:true,login:'synthetic',models:[{id:'outline-fixture',name:'outline fixture'}]}}));
@@ -78,6 +79,7 @@ try{
  checks.push('normal documents retain their existing editor and Enter behavior');
  await page.evaluate(async()=>{const snapshot=(await window.notes.snapshot()).value;localStorage.setItem(`dynote.journal.${snapshot.id}`,JSON.stringify({daily:{folder:'Journal',template:'Templates/journal.md'}}));});
  await app.close();app=await launch();await setup();await page.getByRole('region',{name:'저널 피드'}).waitFor();
+ await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByLabel('일지 날짜',{exact:true}).fill('2020-01-02');await page.getByRole('button',{name:'선택한 날짜의 일지 만들기',exact:true}).click();await editor().waitFor();
  assert.equal(await readFile(`${vault}/Journal/2020-01-02.md`,'utf8'),'# Custom 2020-01-02\n\nTemplate prose\n');
  await open(path);assert.equal(await content(),confirmed);assert.equal(await page.locator('.cm-journal-block[data-level="1"]').count(),1);

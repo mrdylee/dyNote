@@ -6,7 +6,7 @@ import {localDate} from '../core/periodic-notes.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
 const fixture=await mkdtemp(`${tmpdir()}/dynote-git-ui-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 await runGit(vault,['init','--initial-branch=main']);await runGit(vault,['config','user.name','Fixture']);await runGit(vault,['config','user.email','fixture@example.test']);
 const today=`Journal/${localDate()}.md`;
 await writeFile(`${vault}/A.md`,'original\n');await runGit(vault,['add','--','A.md']);await runGit(vault,['commit','-m','initial']);await writeFile(`${vault}/A.md`,'native changed\n');

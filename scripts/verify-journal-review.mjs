@@ -6,7 +6,7 @@ const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'p
 const root=await mkdtemp(`${tmpdir()}/dynote-journal-review-`),profile=`${root}/profile`,vault=`${root}/vault`,outside=`${root}/outside`,output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/journal-review';
 const mod=process.platform==='darwin'?'Meta':'Control',journal=`Journal/${localDate()}.md`;
 for(const directory of [profile,`${vault}/Journal`,`${vault}/Projects`,`${outside}/Projects`,output])await mkdir(directory,{recursive:true});
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));await writeFile(`${vault}/Image.png`,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLQ0AAAAASUVORK5CYII=','base64'));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));await writeFile(`${vault}/Image.png`,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jLQ0AAAAASUVORK5CYII=','base64'));
 await writeFile(`${vault}/${journal}`,`# ${localDate()}\n\n## Projects\n- Review this project\n`);await writeFile(`${vault}/Projects/Plan.md`,'# Project\n');await writeFile(`${outside}/Projects/Outside.md`,'OUTSIDE MUST REMAIN');
 const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 const checks=[],failures=[],errors=[];

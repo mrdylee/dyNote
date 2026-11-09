@@ -3,6 +3,7 @@ import {
   BookOpen,
   Bookmark,
   CalendarDays,
+  CalendarRange,
   History,
   Terminal,
   Check,
@@ -19,6 +20,7 @@ import {
   LoaderCircle,
   MessageCircle,
   Network,
+  NotebookPen,
   PanelRight,
   PencilLine,
   Plus,
@@ -60,6 +62,7 @@ import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
 import { STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 import PanelResize from "./PanelResize.jsx";
+import SpaceTrees from "./SpaceTrees.jsx";
 import { normalizePanelWidths, fitPanelWidths } from "../core/panel-widths.mjs";
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
@@ -255,20 +258,20 @@ export default function App() {
   const selectedVault = useRef(null);
   const workspace = useDocumentWorkspace();
   const [section, setSection] = useState("files");
-  const [journalScopeId, setJournalScopeId] = useState(null);
+  const [journalCalendar, setJournalCalendar] = useState(false);
   const [spaces, setSpaces] = useState({ entries: [] });
   const personalSpace = spaces.entries.find(entry => entry.purpose === "personal");
   const together = !!personalSpace && spaces.entries.some(entry => entry.purpose === "team");
   const registryReady = !!spaces.current && vaults[selectedVaultId]?.root === spaces.current;
-  const dailyRoot = registryReady ? together ? personalSpace.root : spaces.current : null;
+  const dailyRoot = registryReady ? personalSpace?.root : null;
   const dailyVaultId = dailyRoot && Object.values(vaults).find(scope => scope.root === dailyRoot)?.id;
-  const showCalendar = section === "journal" && (!together || journalScopeId !== null);
+  const showCalendar = section === "journal" && !!dailyVaultId && journalCalendar;
   const { vaultId: focusedVaultId, path: focusedPath } = documentRef(workspace.active, selectedVaultId);
   const [openedAttachment, setAttachment] = useState(null);
   const attachment = vaults[openedAttachment?.vaultId] ? openedAttachment : null;
   const attachmentRequest = useRef(0);
   const wordIndexRequest = useRef(0);
-  const journalScope = section === "journal" ? vaults[journalScopeId ?? dailyVaultId] : null;
+  const journalScope = section === "journal" ? vaults[dailyVaultId] : null;
   const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
   const active = vault?.id === focusedVaultId ? focusedPath : null;
   const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
@@ -526,7 +529,7 @@ export default function App() {
       setSelectedVaultId(snapshot.id);
     }
     if (changedVault) {
-      setJournalScopeId(null);
+      setJournalCalendar(false);
       const startPath = navigation.recent[0] ?? snapshot.notes.find(n => n.path === "시작하기.md")?.path
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
       const key = documentKey(snapshot.id, startPath);
@@ -828,19 +831,23 @@ export default function App() {
     updateVault(vaultId, old => ({ ...old, journalPreferences: value }));
     persist(`dynote.journal.${vaultId}`, value);
   };
-  const createPeriodic = async (target) => {
-    const vaultId = vault.id;
+  const createPeriodic = async ({ period, date }) => {
+    const vaultId = dailyVaultId;
+    const scope = vaultsRef.current[vaultId];
+    if (!scope) { setSettingsTab("vault"); setModal("settings"); return; }
     setBusy(true);
     try {
       await flush();
-      const content = periodicContent(target, journalPreferences, model.notes);
+      const preferences = scope.journalPreferences;
+      const target = periodicNote(period, date, { ...preferences[period], locale: preferences.locale });
+      const content = periodicContent(target, preferences, models.get(vaultId).notes);
       const created = await invoke(api.openOrCreateNote({ vaultId, path: target.path, content }));
-      if (currentVault.current !== vaultId) return;
-      revisions.current.set(created.path, created.revision);
-      setRaw(old => [...old.filter(n => n.path !== created.path), created]);
-      openNote(created.path); setError("");
-      setEditorCommand({ path: created.path, type: "focus-end" });
-    } catch (err) { if (currentVault.current === vaultId) setError(err.message); }
+      if (!vaultsRef.current[vaultId]) return;
+      revisionMap(vaultId).set(created.path, created.revision);
+      updateVault(vaultId, old => ({ ...old, notes: [...old.notes.filter(n => n.path !== created.path), created] }));
+      openNote(created.path, vaultId); setError("");
+      updateEditorCommand({ path: created.path, type: "focus-end", vaultId });
+    } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
 
@@ -1418,10 +1425,12 @@ export default function App() {
     ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
     { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
-    ...[["planner", "개발 플래너"], ["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["journal", "달력과 일지"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
+    { id: "open-journal", label: "저널 열기 (Open Journal)", run: () => { setJournalCalendar(false); setSection("journal"); setModal(null); } },
+    { id: "journal", label: "달력과 일지", run: () => { setJournalCalendar(true); setSection("journal"); setModal(null); } },
+    ...[["planner", "개발 플래너"], ["files", "파일 목록"], ["recent", "최근 파일"], ["bookmarks", "북마크"], ["graph", "그래프 보기"], ["search", "전체 검색"]].map(([id,label]) => ({ id, label, run: () => { setSection(id); setModal(null); } })),
     { id: "bookmark", label: "현재 문서 북마크 전환", disabled: !note && !structured, run: () => { updateNavigation({ type: "bookmark", path: active }, vault.id); setModal(null); } },
-    { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic(periodicNote("daily", localDate(), { ...journalPreferences.daily, locale: journalPreferences.locale })) },
-    ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic(periodicNote(period, localDate(), { ...journalPreferences[period], locale: journalPreferences.locale })) })),
+    { id: "today", label: "오늘의 일지 열기 또는 만들기", run: () => createPeriodic({ period: "daily", date: localDate() }) },
+    ...["weekly", "monthly", "quarterly", "yearly"].map((period, i) => ({ id: period, label: `현재 ${["주간", "월간", "분기", "연간"][i]} 노트 열기 또는 만들기`, run: () => createPeriodic({ period, date: localDate() }) })),
     { id: "template", label: "템플릿 삽입", disabled: !note || edits.blocked(), run: () => { setMode("edit"); setModal("template"); } },
     ...[["up", "목록 항목 위로 이동"], ["down", "목록 항목 아래로 이동"], ["indent", "목록 들여쓰기"], ["outdent", "목록 내어쓰기"], ["fold", "목록 접기"], ["unfold", "목록 펼치기"]].map(([action,label]) => ({ id: `outline-${action}`, label, disabled: !note || edits.blocked(), run: () => { setModal(null); if (!["edit", "live", "split"].includes(mode)) setMode("edit"); setEditorCommand({ path: active, action }); } })),
     { id: "mermaid", label: "Mermaid 작성 도구", disabled: !note || edits.blocked(), run: () => { if (mode === "read" || mode === "mindmap") setMode("edit"); setModal("mermaid"); } },
@@ -1554,11 +1563,12 @@ export default function App() {
             <IconButton label="명령 팔레트" disabled={busy} onClick={() => { setCommandQuery(""); setCommandIndex(0); setModal("commands"); }}><Terminal size={20}/></IconButton>
             <IconButton label="최근 파일" active={section === "recent"} onClick={() => setSection("recent")}><History size={20}/></IconButton>
             <IconButton label="북마크" active={section === "bookmarks"} onClick={() => setSection("bookmarks")}><Bookmark size={20}/></IconButton>
-            <IconButton label="달력과 일지" active={showCalendar} onClick={() => { setJournalScopeId(vault.id); setSection("journal"); }}><CalendarDays size={20}/></IconButton>
-            <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><Sparkles size={20}/></IconButton>
+            <IconButton label="저널" active={section === "journal" && !journalCalendar} onClick={() => { setJournalCalendar(false); setSection("journal"); }}><NotebookPen size={20}/></IconButton>
+            <IconButton label="달력과 일지" active={showCalendar && journalCalendar} onClick={() => { setJournalCalendar(true); setSection("journal"); }}><CalendarDays size={20}/></IconButton>
+            <IconButton label="개발 플래너" active={section === "planner"} onClick={() => setSection("planner")}><CalendarRange size={20}/></IconButton>
             <IconButton
               label="파일 목록"
-              active={section === "files" || (section === "journal" && !showCalendar)}
+              active={section === "files"}
               onClick={() => setSection("files")}
             >
               <Files size={20} />
@@ -1676,12 +1686,8 @@ export default function App() {
               )}
             </div>
           ) : (
-            together ? <div className="space-trees">
-              {visibleSpaces.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)}>
-                <h3 {...treeDropProps(scope.id, "")}>{spaceLabel(scope)}</h3>
-                {renderTree(scope)}
-              </section>)}
-            </div> : renderTree(vault)
+            together ? <SpaceTrees spaces={visibleSpaces} renderTree={renderTree} dropProps={treeDropProps}/>
+            : renderTree(vault)
           )}
           <div className="structured-create-actions">
             <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
@@ -1915,13 +1921,18 @@ export default function App() {
           </>}
           {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "journal" ? <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
+            {section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
+              <NotebookPen size={40} />
+              <h2>저널은 개인 노트에 저장됩니다</h2>
+              <p>보관함에서 개인 노트를 연결해 주세요.</p>
+              <button className="primary-button" disabled={busy} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>개인 노트 설정</button>
+            </div> : <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
               currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}
               onOpen={openNote} onChange={(path, content) => changeFile(path, content, vault.id, true)}
               onImportFiles={files => importFiles(files, vault.id)} onLink={followEditorLink}
               jump={editorJump?.vaultId === vault.id ? editorJump : null}
               fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
-              disabled={!registryReady || (!journalScopeId && !dailyVaultId) || busy || captureLocked || edits.blocked()} capture={captureControls}/>
+              disabled={!registryReady || busy || captureLocked || edits.blocked()} capture={captureControls}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
@@ -2071,7 +2082,7 @@ export default function App() {
                 <List size={14} />
                 문서 정보
               </button>
-              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><Sparkles size={14} />AI 채팅</button>
+              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><MessageCircle size={14} />AI 채팅</button>
             </div>
             {together && <div className="context-space" aria-label="현재 문서 공간">{spaceLabel(vault)}</div>}
             {Object.values(vaults).map(scope => {

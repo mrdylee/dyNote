@@ -45,6 +45,9 @@ try {
   await page.locator(".vault-switch strong").filter({ hasText: "다른 보관함" }).waitFor();
   const firstRow = page.locator(".vault-settings-list li").filter({ has: page.getByText(vaultRoot, { exact: true }) });
   await firstRow.getByRole("button", { name: "열기", exact: true }).click();
+  await page.getByRole("dialog", { name: "설정", exact: true }).getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "파일 목록", exact: true }).click();
+  await menu();
   await page.locator(".vault-switch strong").filter({ hasText: "내 노트" }).waitFor();
   const otherRow = page.locator(".vault-settings-list li").filter({ has: page.getByText(other, { exact: true }) });
   await otherRow.getByRole("button", { name: "목록에서 제거", exact: true }).click();

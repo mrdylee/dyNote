@@ -7,7 +7,7 @@ const output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/journal-threading'
 const path='Journal/2026-11-04.md';
 const original='# 2026-11-04\n\n- # Heading one\n  - ## Heading two\n    - Earlier leaf\n    - Active leaf 한글\n      Continuation text\n  - Peer branch\n    - Peer leaf\n- Other root\n- [ ] Task parent\n  - [ ] Task leaf\n\nTail prose\n';
 await mkdir(profile);await mkdir(`${vault}/Journal`,{recursive:true});await mkdir(output,{recursive:true});
-await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
+await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault,vaultPurposes:{[vault]:'personal'}}));
 await writeFile(`${vault}/${path}`,original);await writeFile(`${vault}/Normal.md`,original);
 const longPath='Journal/2026-11-03.md',longContent='- # Scroll root\n  - ## Scroll parent\n    - Wrapped sibling '+('긴 문장을 여러 줄로 표시합니다. '.repeat(180))+'\n    - Scrolled leaf\n';
 await writeFile(`${vault}/${longPath}`,longContent);
