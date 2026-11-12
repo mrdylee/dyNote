@@ -34,6 +34,10 @@ for (const [platform, relative] of packages.filter(([platform]) => !selected || 
     const app = path.join(packageRoot, "Dynote-darwin-arm64", "Dynote.app");
     execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], { stdio: "pipe" });
     const iconFile = execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleIconFile", path.join(app, "Contents", "Info.plist")], { encoding: "utf8" }).trim();
+    for (const key of ["CFBundleName", "CFBundleDisplayName", "CFBundleExecutable"])
+      assert.equal(execFileSync("/usr/libexec/PlistBuddy", ["-c", `Print ${key}`, path.join(app, "Contents", "Info.plist")], { encoding: "utf8" }).trim(), "Dynote");
+    assert.equal(iconFile, "dynote.icns");
+    await assert.rejects(access(path.join(app, "Contents/Resources/electron.icns")), { code: "ENOENT" });
     assert.deepEqual(await readFile(path.join(app, "Contents", "Resources", iconFile)), await readFile("branding/dynote.icns"), "Dynote.app must embed the approved icon");
   } else {
     const exe = NtExecutable.from(await readFile(path.join(packageRoot, "Dynote-win32-x64", "Dynote.exe")));

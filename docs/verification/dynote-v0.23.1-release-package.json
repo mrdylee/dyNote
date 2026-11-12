@@ -1,0 +1,15 @@
+{
+  "version": "0.23.1",
+  "packages": [
+    {
+      "platform": "darwin-arm64",
+      "asarSha256": "24f45825fa5a72a8a07b703a14186ef10e351fbe7f8c2fec9c879a9da1f8049c",
+      "matchedSourceAndBundleFiles": 292,
+      "wasmSha256": "9ef72a4d3c5ce1d3b772bcd7f4b02dded8ebb170bbcff10742c4ae5885fd653e",
+      "copilotRuntimeIncluded": true
+    }
+  ],
+  "windowsRuntimeTested": false,
+  "distributionSigned": false,
+  "notarized": false
+}

@@ -76,13 +76,42 @@ async function fixture(bodies, run) {
   }
 }
 
-const memo = page => page.getByRole("textbox", { name: "포스트잇 메모" });
+const memo = page => page.getByRole("textbox", { name: "Sticky Note 메모" });
 const markdown = page => memo(page).evaluate(field => field.cmTile.root.view.state.doc.toString());
 const click = (app, id) => app.evaluate((_electron, id) => {
   const item = globalThis.stickyReviewMenu.getMenuItemById(id);
   if (!item) throw new Error("Missing tray item " + id);
   item.click();
 }, id);
+
+test("Sticky Note labels and five matching background/text colors", async () => {
+  await fixture([], async ({ app }) => {
+    assert.equal(await app.evaluate(() => globalThis.stickyReviewMenu.getMenuItemById("sticky-new").label), "새 Sticky Note");
+    const colors = [], textColors = [];
+    const luminance = rgb => rgb.match(/\d+/g).slice(0, 3).map(Number).map(n => n / 255)
+      .map(n => n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, n, index) => sum + n * [0.2126, 0.7152, 0.0722][index], 0);
+    for (let index = 0; index < 5; index++) {
+      const opened = app.waitForEvent("window");await click(app, "sticky-new");const card = await opened;
+      await card.getByRole("textbox", { name: "Sticky Note 메모", exact: true }).waitFor();
+      assert.equal(await card.locator("header span").textContent(), "Sticky Note");
+      await memo(card).fill("- 배경과 어울리는 메모");
+      const style = await card.locator("body").evaluate(body => ({
+        color: body.dataset.color, paper: getComputedStyle(body).backgroundColor,
+        text: getComputedStyle(body.querySelector(".cm-content")).color,
+        title: getComputedStyle(body.querySelector("header span")).color,
+        bullet: getComputedStyle(body.querySelector(".cm-live-bullet"), "::after").backgroundColor,
+      }));
+      assert.equal(style.text, style.title);
+      assert.equal(style.bullet, style.text);
+      assert.ok((luminance(style.paper) + 0.05) / (luminance(style.text) + 0.05) >= 4.5, JSON.stringify(style));
+      colors.push(style.color);textColors.push(style.text);
+      await mkdir("output/playwright", { recursive: true });
+      await card.screenshot({ path: `output/playwright/sticky-theme-${style.color}.png` });
+    }
+    assert.equal(new Set(colors).size, 5);assert.equal(new Set(textColors).size, 5);
+  });
+});
 
 async function openCard(app, record) {
   const id = "sticky-recent-" + record.id;
@@ -132,7 +161,7 @@ test("renamed and relocated cards keep autosaving and restore from the new path"
     await assert.rejects(readFile(path.join(vault, renamed)), { code: "ENOENT" });
 
     const closed = card.waitForEvent("close");
-    await card.getByRole("button", { name: "포스트잇 닫기" }).click();
+    await card.getByRole("button", { name: "Sticky Note 닫기" }).click();
     await closed;
     const archived = "정리/최종.md";
     const archivedResult = await move(main, relocated, archived);

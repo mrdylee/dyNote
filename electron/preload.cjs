@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld(
     },
     updateState: () => call("update-state"),
     updateSettings: args => call("update-settings",args),
+    pickUpdateDownloadDirectory: () => call("update-directory"),
     downloadUpdate: () => call("update-download"),
     showUpdate: () => call("update-show"),
     onUpdateStatus: callback => { const listener=(_event,value)=>callback(value);ipcRenderer.on("notes:update-status",listener);return()=>ipcRenderer.removeListener("notes:update-status",listener); },

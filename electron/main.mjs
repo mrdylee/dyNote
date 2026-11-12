@@ -128,12 +128,12 @@ function stickyRoot() {
 async function stickyVault(root) {
   const allowed = () => registry.list().some(entry => entry.root === root && entry.purpose !== "team");
   if (!allowed() || await realpath(root) !== root)
-    throw new Error("포스트잇을 저장한 개인 보관함을 다시 연결해 주세요.");
+    throw new Error("Sticky Note를 저장한 개인 보관함을 다시 연결해 주세요.");
   const existing = [...openedVaults.values()].find(entry => entry.vault.root === root);
   const entry = existing ?? openVaultController(await Vault.open(root, recovery));
   await entry.ready;
   if (!allowed() || entry.vault.root !== root)
-    throw new Error("포스트잇 보관함 위치가 변경되었습니다.");
+    throw new Error("Sticky Note 보관함 위치가 변경되었습니다.");
   return entry;
 }
 
@@ -272,7 +272,7 @@ app
     vault = await initialVault();
     copilotJournal = new CopilotJournal({file:path.join(app.getPath("userData"),"copilot-journal.json"),sourceRoot:path.join(app.getPath("appData"),"Code","User","workspaceStorage")});
     await copilotJournal.load().catch(() => {});
-    updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),current:app.getVersion(),
+    updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),downloadDirectory:app.getPath("downloads"),current:app.getVersion(),
       onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
     await updates.init();
     if (vault) {
@@ -489,6 +489,10 @@ app
       "check-updates": () => updates.check(true),
       "update-state": () => updates.state,
       "update-settings": args => updates.configure(args),
+      "update-directory": async () => {
+        const selected = await dialog.showOpenDialog(window, { title: "업데이트 다운로드 폴더 선택", defaultPath: updates.state.preferences.downloadDirectory, properties: ["openDirectory", "createDirectory"] });
+        return selected.canceled ? updates.state : updates.configure({ downloadDirectory: selected.filePaths[0] });
+      },
       "update-download": () => updates.download(),
       "update-show": async () => {shell.showItemInFolder(await updates.readyPath());return true;},
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
@@ -829,7 +833,7 @@ app
       openLink: async (root, sourcePath, target, kind) => {
         const { vault: source } = await stickyVault(root);
         if (!window || window.isDestroyed() || quitRequested) return;
-        if (!workspaceVault(source.id)) throw new Error("메인 창에서 포스트잇 보관함을 먼저 열어 주세요.");
+        if (!workspaceVault(source.id)) throw new Error("메인 창에서 Sticky Note 보관함을 먼저 열어 주세요.");
         showMainWindow();
         window.webContents.send("notes:sticky-link", { vaultId: source.id, sourcePath, target, kind });
       },
@@ -842,7 +846,7 @@ app
       stickyNotes = stickyController;
     } catch (error) {
       stickyController.dispose();
-      console.error("포스트잇 초기화:", error.message);
+      console.error("Sticky Note 초기화:", error.message);
     }
     const checkUpdates = () => updates.check().catch(error=>console.error("Update check:",error.message));
     const updateTimer = setInterval(checkUpdates,60*60*1000);updateTimer.unref();

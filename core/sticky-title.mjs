@@ -3,5 +3,5 @@ export function stickyTitle(content) {
     const title = line.trim().replace(/^(?:#{1,6}|[-+*]|\d+[.)])(?:\s+|$)/, "");
     if (title) return title;
   }
-  return "포스트잇";
+  return "Sticky Note";
 }

@@ -1,0 +1,334 @@
+{
+  "base": "ff9d0f95e6c490f6de7128b49c179fbc4b1176e0",
+  "checkedRefs": [
+    {
+      "ref": "feat/external-file-open",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "feat/external-word-open",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "feat/general-ui-colors",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "feat/update-folder-sticky-theme",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "feat/word-documents",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "fix/copilot-session-import",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "fix/hourly-copilot-capture",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "fix/journal-idle",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "fix/journal-navigation",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "main",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "release/dynote-v0.19.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "release/dynote-v0.20.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "release/dynote-v0.21.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "release/dynote-v0.22.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/docs/copilot-capture-mcp-design",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/docs/personal-team-together-copy",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/copilot-journal-auto",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/development-planner",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/editor-font-context-panels",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/ess-3d",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/native-plugin-features",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/obsidian-plugin-runtime",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/personal-team-together",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/sticky-note-links",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/sticky-note-titles",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/feat/sticky-notes",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/fix/copilot-personal-import",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/fix/journal-logseq-editing",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/fix/macos-package-signature",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/fix/mermaid-live-preview",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/main",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/copilot-journal-v0.16.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/dynote-v0.18.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/dynote-v0.19.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/journal-editing-v0.16.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/journal-ergonomics-v0.15.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/journal-review-v0.15.2",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/outline-regions-v0.15.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/windows-v0.11.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-central/release/workspace-v0.17.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-daily/feat/daily-journal-sidebar",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-daily/fix/copilot-personal-import",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-daily/main",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-legacy/feat/canvas-bases",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-legacy/feat/desktop-mvp",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-legacy/feat/fonts-git-backup",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-legacy/feat/live-preview",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-legacy/main",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-mermaid/fix/mermaid-live-preview",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "audit-mermaid/release/journal-editing-v0.16.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/feat/ess-3d",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/feat/native-plugin-features",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/feat/obsidian-plugin-runtime",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/feat/sticky-notes",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/main",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/copilot-journal-v0.16.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.18.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.19.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.19.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.20.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.21.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.22.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.22.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/dynote-v0.23.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/journal-blocks-v0.13.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/journal-blocks-v0.13.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/journal-editing-v0.16.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/journal-ergonomics-v0.15.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/journal-review-v0.15.2",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/macos-v0.12.2",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/outline-regions-v0.15.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/personal-team-v0.14.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/verify-windows-font-v0.17.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/windows-v0.11.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/windows-v0.12.0",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/windows-v0.12.1",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/windows-v0.12.2",
+      "commitsNotInBase": 0
+    },
+    {
+      "ref": "origin/release/workspace-v0.17.0",
+      "commitsNotInBase": 0
+    }
+  ],
+  "pendingChangesIntegratedFrom": [
+    "dynote-main",
+    "dynote-session-import"
+  ],
+  "originalWorkingDirectoriesPreserved": true,
+  "localVerification": {
+    "unitTestsPassed": 478,
+    "vulnerabilities": 0,
+    "macNativeScriptsPassed": 28,
+    "macStickyRegressionsPassed": 7,
+    "macMatchedSourceBundleFiles": 292,
+    "windowsVerification": "release pipeline required"
+  }
+}

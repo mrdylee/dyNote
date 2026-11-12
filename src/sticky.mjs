@@ -49,7 +49,7 @@ const view = new EditorView({
     journalOutline({ live: true }),
     EditorView.lineWrapping,
     keymap.of([{ key: "Enter", run: startJournalBullet }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
-    EditorView.contentAttributes.of({ "aria-label": "포스트잇 메모", spellcheck: "false" }),
+    EditorView.contentAttributes.of({ "aria-label": "Sticky Note 메모", spellcheck: "false" }),
     EditorView.updateListener.of(({ docChanged, state }) => {
       if (docChanged) publish(state);
     }),

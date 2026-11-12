@@ -121,7 +121,7 @@ try{
    app.waitForEvent('window'),
    app.evaluate(()=>globalThis.captureTestTray.getMenuItemById('sticky-new').click()),
   ]);
-  await sticky.getByRole('textbox',{name:'포스트잇 메모'}).waitFor();
+  await sticky.getByRole('textbox',{name:'Sticky Note 메모'}).waitFor();
   const feed=page.getByRole('region',{name:'저널 피드',exact:true});
   const controls=feed.getByRole('button',{name:/^(저널 블록 추가|하위 블록 접기|하위 블록 펼치기|가져오기)$/});
   assert.equal(await controls.count(),4);

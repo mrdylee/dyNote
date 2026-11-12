@@ -47,7 +47,7 @@ export class StickyNotes {
         this.#records.set(record.id, record);
         if (!this.#lastPlacement || record.createdAt > this.#lastPlacement.createdAt) this.#lastPlacement = record;
       } catch (error) {
-        console.error("포스트잇 상태 읽기:", error.message);
+        console.error("Sticky Note 상태 읽기:", error.message);
       }
     }
 
@@ -76,7 +76,7 @@ export class StickyNotes {
       const pendingMove = state.pendingMoves.find(move => move.version > moveVersion);
       const sourcePath = pendingMove?.from ?? state.record.path ?? stickyFolder;
       void this.openLink(state.record.root, sourcePath, target, kind)
-        .catch(error => dialog.showErrorBox("Dynote 포스트잇", error.message));
+        .catch(error => dialog.showErrorBox("Dynote Sticky Note", error.message));
     });
     ipcMain.on("sticky:pin", event => {
       const state = this.#sender(event);
@@ -92,7 +92,7 @@ export class StickyNotes {
     const trayImage = nativeImage.createFromPath(icon);
     trayImage.setTemplateImage(true);
     this.#tray = new Tray(trayImage);
-    this.#tray.setToolTip("Dynote 포스트잇");
+    this.#tray.setToolTip("Dynote Sticky Note");
     this.shortcutRegistered = globalShortcut.register(STICKY_SHORTCUT, () => this.open());
     this.#refreshMenu();
   }
@@ -107,7 +107,7 @@ export class StickyNotes {
     void this.#enqueue(() => {
       const record = this.#records.get(id);
       if (this.canOpen() && (!id || record)) return this.#open(record);
-    }).catch(error => dialog.showErrorBox("Dynote 포스트잇", error.message));
+    }).catch(error => dialog.showErrorBox("Dynote Sticky Note", error.message));
   }
 
   moveFile(vault, from, to, revision) {
@@ -169,7 +169,7 @@ export class StickyNotes {
     if (Object.keys(bounds).some(key => bounds[key] !== record.bounds[key])) record = { ...record, bounds };
 
     const window = new BrowserWindow({
-      ...bounds, title: "Dynote 포스트잇", show: false,
+      ...bounds, title: "Dynote Sticky Note", show: false,
       frame: false, resizable: true, minWidth: 240, minHeight: 160, minimizable: false,
       maximizable: false, fullscreenable: false, skipTaskbar: true,
       alwaysOnTop: record.pinned === true,
@@ -200,7 +200,7 @@ export class StickyNotes {
         if (!saved) {
           const { response } = await dialog.showMessageBox(window, {
             type: "warning",
-            message: "포스트잇의 변경 사항을 저장하지 못했습니다.",
+            message: "Sticky Note의 변경 사항을 저장하지 못했습니다.",
             detail: "메모로 돌아가서 내용을 복사하거나 다시 저장할 수 있습니다.",
             buttons: ["메모로 돌아가기", "변경 사항 버리고 닫기"],
             defaultId: 0,
@@ -290,9 +290,9 @@ export class StickyNotes {
   #refreshMenu() {
     const cards = [...this.#records.values()].sort((a, b) => b.updatedAt - a.updatedAt);
     const menu = Menu.buildFromTemplate([
-      { id: "sticky-new", label: "새 포스트잇", click: () => this.open() },
+      { id: "sticky-new", label: "새 Sticky Note", click: () => this.open() },
       ...(!this.shortcutRegistered ? [{ label: `${STICKY_SHORTCUT} 등록 불가`, enabled: false }] : []),
-      { id: "sticky-recent", label: "포스트잇 열기", enabled: cards.length > 0, submenu: cards.map(record => ({
+      { id: "sticky-recent", label: "Sticky Note 열기", enabled: cards.length > 0, submenu: cards.map(record => ({
         id: `sticky-recent-${record.id}`, label: record.title, click: () => this.open(record.id),
       })) },
       { type: "separator" },

@@ -13,7 +13,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--edge);
   background: var(--paper);
-  color: #2f2b36;
+  color: var(--quiet);
   font: 13px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
 }
 
@@ -73,7 +73,9 @@ button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke
 #memo .cm-scroller { font-family: inherit; font-size: var(--body-size); line-height: 1.55; overflow: auto; }
 #memo .cm-content { padding: 2px 0 6px; }
 .cm-live-preview .cm-line { padding-inline: var(--journal-line-padding); }
-#memo .cm-cursor { border-left-color: #8e70bc; }
+#memo .cm-cursor { border-left-color: var(--quiet); }
+#memo .cm-live-bullet { --journal-bullet-color: var(--quiet); }
+#memo .cm-live-checkbox { accent-color: var(--quiet); }
 
 footer {
   flex: none;

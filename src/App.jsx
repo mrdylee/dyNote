@@ -1283,7 +1283,7 @@ export default function App() {
 
   const followStickyLink = useEffectEvent(({ target, kind, sourcePath, vaultId }) => {
     if (!models.has(vaultId)) {
-      setError("포스트잇 보관함을 불러온 뒤 링크를 다시 열어 주세요.");
+      setError("Sticky Note 보관함을 불러온 뒤 링크를 다시 열어 주세요.");
       return;
     }
     followEditorLink(target, kind, sourcePath, vaultId);
@@ -2607,9 +2607,9 @@ export default function App() {
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "shortcuts" && <section className="settings-section">
-            <h3>포스트잇</h3>
-            <p><strong>새 포스트잇 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
-            <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 포스트잇을 열 수 있습니다. 메뉴 막대에서도 포스트잇을 열 수 있습니다.</p>
+            <h3>Sticky Note</h3>
+            <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
+            <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
           </section>}
           {settingsTab === "vault" && <VaultSettings key={selectedVaultId ?? "missing"}
             onList={loadSpaces}
@@ -2645,7 +2645,7 @@ export default function App() {
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
             onEnable={(id, enabled) => invoke(api.enablePlugin({ vaultId: vault.id, id, enabled }))}
             onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
-          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
+          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
           {settingsTab === "git-workspace" && gitVault.id && <GitWorkspace key={gitVault.id} busy={busy} backupEnabled={gitSettingsStatus.enabled}
             onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
             onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: gitVault.id, path, staged }))}

@@ -114,11 +114,11 @@ const openWithKey = async app => {
     })));
     throw error;
   });
-  await page.getByRole("textbox", { name: "포스트잇 메모" }).waitFor();
+  await page.getByRole("textbox", { name: "Sticky Note 메모" }).waitFor();
   return page;
 };
 const stickyBounds = async (app, page) => (await app.browserWindow(page)).evaluate(win => win.getBounds());
-const memo = page => page.getByRole("textbox", { name: "포스트잇 메모" });
+const memo = page => page.getByRole("textbox", { name: "Sticky Note 메모" });
 const markdown = page => memo(page).evaluate(field => field.cmTile?.root.view.state.doc.toString() ?? field.value);
 const color = page => page.locator("body").getAttribute("data-color");
 const diskFiles = async () => (await readdir(folder).catch(error => {
@@ -135,7 +135,7 @@ try {
   await main.getByRole("button", { name: "설정", exact: true }).click();
   await main.getByRole("button", { name: "단축키", exact: true }).click();
   await main.getByText(shortcut, { exact: true }).waitFor();
-  await main.getByText("새 포스트잇 열기", { exact: true }).waitFor();
+  await main.getByText("새 Sticky Note 열기", { exact: true }).waitFor();
   await main.keyboard.press("Escape");
   assert.equal(await app.evaluate(({ globalShortcut }, key) => globalShortcut.isRegistered(key), shortcut), true);
   const mainWindow = await app.browserWindow(main);
@@ -201,7 +201,7 @@ try {
   const finalBody = "- 회의 메모 1\n  - 닫기 직전 편집";
   await memo(cards[0]).fill(finalBody);
   const closed = cards[0].waitForEvent("close");
-  await cards[0].getByRole("button", { name: "포스트잇 닫기" }).click();
+  await cards[0].getByRole("button", { name: "Sticky Note 닫기" }).click();
   await closed;
   assert.equal(await readFile(notePath, "utf8"), finalBody);
   const quitBody = "회의 메모 3\n- 종료 직전 편집";
@@ -230,7 +230,7 @@ try {
   assert.deepEqual(await stickyBounds(app, restored), resized);
   await restored.locator(".cm-journal-threading .cm-journal-thread").waitFor({ timeout: 5000 });
   assert.equal(await (await app.browserWindow(restored)).evaluate(win => win.isAlwaysOnTop()), true);
-  await blank.getByRole("button", { name: "포스트잇 닫기" }).click();
+  await blank.getByRole("button", { name: "Sticky Note 닫기" }).click();
   assert.equal((await diskFiles()).length, 3);
   await mkdir("output/playwright", { recursive: true });
   await restored.screenshot({ path: "output/playwright/sticky-note.png" });
@@ -250,7 +250,7 @@ try {
     };
   });
   const conflictClosed = restored.waitForEvent("close", { timeout: 5000 });
-  await restored.getByRole("button", { name: "포스트잇 닫기" }).click();
+  await restored.getByRole("button", { name: "Sticky Note 닫기" }).click();
   await conflictClosed;
   assert.equal(await readFile(notePath, "utf8"), external);
   console.log("Verified native shortcut, hidden main window, settings, three Markdown files, close/quit saves, tray reopen, bullet threading, resize restoration and external-edit conflict handling.");

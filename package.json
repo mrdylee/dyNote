@@ -1,7 +1,7 @@
 {
   "name": "dynote",
   "productName": "Dynote",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "private": true,
   "description": "An independent local Markdown notebook informed by REA artifact analysis.",
   "author": "Dynote contributors",
@@ -17,7 +17,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "npm run build:graph && vite build",
     "test": "node --test tests/*.test.mjs",
-    "start": "electron .",
+    "start": "node scripts/start-desktop.mjs",
     "package:mac": "npm run build && node scripts/package-desktop.mjs darwin",
     "package:win": "npm run build && node scripts/package-desktop.mjs win32",
     "package:linux": "npm run build && node scripts/package-desktop.mjs linux",

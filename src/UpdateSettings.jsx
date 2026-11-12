@@ -1,5 +1,5 @@
 import {useState} from 'react';
-export default function UpdateSettings({currentVersion,state,onCheck,onSettings,onDownload,onShow,onOpen}) {
+export default function UpdateSettings({currentVersion,state,onCheck,onSettings,onDirectory,onDownload,onShow,onOpen}) {
   const [pending,setPending]=useState(false),[error,setError]=useState('');
   const run=async action=>{setPending(true);setError('');try{await action();}catch(e){setError(e.message);}finally{setPending(false);}};
   if(!state)return <p>업데이트 설정을 불러오는 중…</p>;
@@ -10,13 +10,16 @@ export default function UpdateSettings({currentVersion,state,onCheck,onSettings,
     <label><input type="checkbox" aria-label="매주 업데이트 자동 확인" checked={preferences.enabled} disabled={busy} onChange={e=>run(()=>onSettings({enabled:e.target.checked}))}/>매주 업데이트 자동 확인</label>
     <label><input type="checkbox" aria-label="백그라운드 다운로드" checked={preferences.backgroundDownload} disabled={busy} onChange={e=>run(()=>onSettings({backgroundDownload:e.target.checked}))}/>새 버전을 백그라운드에서 다운로드</label>
     <label><input type="checkbox" aria-label="시험 버전 포함" checked={preferences.includePrerelease} disabled={busy} onChange={e=>run(()=>onSettings({includePrerelease:e.target.checked}))}/>시험 버전도 확인</label>
+    <label>다운로드 폴더<input aria-label="업데이트 다운로드 폴더" value={preferences.downloadDirectory||''} readOnly/></label>
+    <button disabled={busy} onClick={()=>run(onDirectory)}>다운로드 폴더 선택</button>
+    <p className="muted">새 다운로드에 적용됩니다. 이미 받은 파일은 아래 저장 위치에서 확인할 수 있습니다.</p>
     <p className="muted">마지막 확인으로부터 7일 뒤에 확인합니다. 앱을 꺼 두었다면 다음 실행 때 확인합니다.</p>
     <p>마지막 확인: {lastCheckedAt?new Date(lastCheckedAt).toLocaleString():'아직 확인하지 않음'}</p>
     <div className="update-actions"><button className="primary-button" disabled={busy} onClick={()=>run(onCheck)}>{phase==='checking'?'확인 중…':'지금 업데이트 확인'}</button>
       {!!preferences.ignored.length&&<button disabled={busy} onClick={()=>run(()=>onSettings({ignored:[]}))}>무시한 버전 다시 표시</button>}</div>
     {(error||phase==='error')&&<p role="alert" className="settings-message error">{error||message}</p>}
     {phase==='downloading'&&<p role="status">백그라운드 다운로드 중 · {state.progress}%</p>}
-    {phase==='ready'&&<div role="status"><p>다운로드 검증 완료 · 설치 준비가 되었습니다.</p><p>ZIP 파일 전체를 풀고 앱을 종료한 다음 기존 앱을 교체해 주세요.</p><button onClick={()=>run(onShow)}>설치 파일 위치 열기</button></div>}
+    {state.downloadedPath&&<div role="status"><p>다운로드 검증이 완료된 설치 파일입니다.</p><label>받은 파일<input aria-label="다운로드된 업데이트 파일" value={state.downloadedPath} readOnly/></label><p>ZIP 파일 전체를 풀고 앱을 종료한 다음 기존 앱을 교체해 주세요.</p><button disabled={busy} onClick={()=>run(onShow)}>설치 파일 위치 열기</button></div>}
     {result&&phase!=='error'&&<div aria-label="업데이트 확인 결과" role="status">
       <p>{!latest?'이 기기에 맞는 공개 배포 파일을 찾지 못했습니다.':result.available?(skipped?'이 버전의 알림을 무시했습니다.':'새 버전을 사용할 수 있습니다.'):'이 기기에 맞는 공개 배포에 현재보다 새 버전이 없습니다.'}</p>
       {latest&&<><h4>{latest.name} · {latest.tag}</h4><div className="update-actions"><button onClick={()=>onOpen(latest.url)}>공식 릴리스 열기</button>
