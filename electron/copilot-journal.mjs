@@ -187,6 +187,35 @@ export class CopilotJournal{
   }
   return {sessions,error};
  }
+ async projectSessions(config,projects){
+  const wsl=await this.wslSources(config.wslSource,projects),sessions=[];
+  for(const project of projects){
+   const local=await this.sources(config.sourceRoot,project.id);
+   const localIds=new Set(local.filter(source=>source.messages.length).map(source=>source.id));
+   const remote=(wsl.sessions.get(project.id)??[]).filter(source=>!localIds.has(source.id));
+   for(const source of [...local,...remote])sessions.push({project,source});
+  }
+  return {sessions,error:wsl.error};
+ }
+ async listSessions(vault,projectIds){
+  const config=this.config(vault),available=await this.projects(config.sourceRoot);
+  if(!Array.isArray(projectIds)||projectIds.some(id=>!available.some(project=>project.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
+  const projects=available.filter(project=>projectIds.includes(project.id));
+  const sources=await this.projectSessions(config,projects),sessions=new Map();
+  const saved=sessionRecords(config.records);
+  const aliases=new Map([...saved].map(([id,session])=>[session.sourceKey??id,id]));
+  for(const {project,source} of sources.sessions){
+   const messages=source.messages.filter(message=>!config.blocked.includes(`g:${captureId(project.key,localDate(message.at))}`));
+   if(!messages.length)continue;
+   const id=captureId(project.key,source.sessionId),fileId=captureId(project.key,source.id);
+   const previousId=aliases.get(id)??(saved.has(fileId)?fileId:id);
+   if([id,fileId,previousId].some(key=>config.blocked.includes(`s:${key}`)))continue;
+   const lastActivity=messages.reduce((latest,message)=>Math.max(latest,message.at),0);
+   if((sessions.get(id)?.lastActivity??-1)>=lastActivity)continue;
+   sessions.set(id,{id,projectId:project.id,projectLabel:project.label,projectPath:project.path,title:source.title||'대화',lastActivity});
+  }
+  return {sessions:[...sessions.values()].sort((a,b)=>b.lastActivity-a.lastActivity),error:sources.error??''};
+ }
  async commit(vault,previous,next){
   if(await realpath(vault.root)!==vault.root)throw new Error('보관함 경로가 바뀌었습니다. 다시 열어 주세요.');
   next.sessionLayout=true;
@@ -241,30 +270,30 @@ export class CopilotJournal{
   const previous=this.config(vault),{pendingCapture,...config}=previous;
   if(pendingCapture)return this.commit(vault,previous,{...config,...pendingCapture});
  }
- async sync(vault,daily={},manual=false,{checkOnly=false,dateRange}={}){
+ async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
   const migrating=legacyLayout(previous);
   if(!previous.pendingCapture&&!migrating&&!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 저널 자동기록에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
   const today=localDate(this.now());
-  let from=today,to=today;
-  if(manual&&dateRange!==undefined){
-   ({from,to}=dateRange??{});
-   if(typeof from!=='string'||typeof to!=='string'||from>to||to>today)throw new Error('오늘까지의 올바른 날짜 범위를 선택해 주세요.');
-   periodicNote('daily',from);periodicNote('daily',to);
+  if(manual&&sessionIds!==undefined&&(!Array.isArray(sessionIds)||!sessionIds.length||sessionIds.some(id=>typeof id!=='string'||!/^[a-f0-9]{20}$/.test(id))))throw new Error('가져올 세션을 선택해 주세요.');
+  const selected=manual&&sessionIds!==undefined?new Set(sessionIds):null;
+  if(previous.pendingCapture){
+   if(checkOnly)return {pending:true};
+   const recovered=await this.finishPending(vault);
+   if(!selected)return recovered;
+   const imported=await this.sync(vault,daily,manual,{sessionIds});
+   return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
-  if(previous.pendingCapture)return checkOnly?{pending:true}:this.finishPending(vault);
   const next=clone(previous);
   const sessions=sessionRecords(next.records),updated=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
   const projects=(await this.projects(previous.sourceRoot)).filter(project=>Object.hasOwn(previous.projects,project.id));
-  const wsl=await this.wslSources(previous.wslSource,projects);
-  for(const project of projects){
-   const local=await this.sources(previous.sourceRoot,project.id);
-   const localIds=new Set(local.filter(source=>source.messages.length).map(source=>source.id));
-   const remote=(wsl.sessions.get(project.id)??[]).filter(source=>!localIds.has(source.id));
-   for(const source of [...local,...remote]){
+  const sources=await this.projectSessions(previous,projects),matched=new Set();
+  for(const {project,source} of sources.sessions){
     const sourceKey=captureId(project.key,source.sessionId),fileKey=captureId(project.key,source.id);
+    if(selected&&!selected.has(sourceKey))continue;
+    matched.add(sourceKey);
     const legacy=sessions.get(fileKey);
     const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?fileKey:sourceKey);
     if([sourceKey,fileKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
@@ -281,7 +310,7 @@ export class CopilotJournal{
     }
     for(const message of source.messages){
      if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<previous.projects[project.id].since))continue;
-     const date=localDate(message.at);if(manual&&(date<from||date>to))continue;
+     const date=localDate(message.at);if(manual&&!selected&&date!==today)continue;
      const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      compatible??=compatibleSource(existing,source);
      if(!compatible){incompatible=true;break;}
@@ -303,13 +332,13 @@ export class CopilotJournal{
       sourceKeys.set(sourceKey,sessionId);
      }
     }
-   }
   }
+  if(selected&&[...selected].some(id=>!matched.has(id)))throw new Error('선택한 세션을 읽을 수 없습니다. 세션 목록을 새로 불러와 주세요.');
   for(const session of updated)session.messages.sort((a,b)=>a.at-b.at);
   const changed=migrating||updated.size>0;
   if(checkOnly&&changed)return {pending:true};
   const result=changed?await this.commit(vault,previous,next):{changed:false,status:await this.status(vault)};
-  if(wsl.error||incompatible)result.status.error=[wsl.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
+  if(sources.error||incompatible)result.status.error=[sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }
  async trash(vault,{id,sessionId}){

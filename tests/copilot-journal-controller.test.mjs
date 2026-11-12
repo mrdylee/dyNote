@@ -45,17 +45,72 @@ test('manual import brings today into the journal with automation off and ignore
  assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/오늘 대화/);
  assert.doesNotMatch(JSON.stringify(result.status),/수집하면 안됨/);
 });
-test('manual date ranges import both boundaries into their own journals once',async t=>{
+test('available sessions are scoped to chosen projects, deduplicated by native ID and ordered by last activity',async t=>{
+ const f=await fixture(t);
+ await f.put('old','PRIVATE OLD MESSAGE',f.now()-86400000);
+ const newer=path.join(f.source,'project/chatSessions/newer.json');
+ await f.put('new','PRIVATE NEW MESSAGE',f.now(),newer);
+ const renamed=path.join(f.source,'project/chatSessions/renamed.json');
+ await writeFile(renamed,await readFile(newer,'utf8'));
+ await f.put('other','UNSELECTED MESSAGE',f.now()+1,path.join(f.source,'other/chatSessions/other.json'));
+ const before=structuredClone(f.controller.config(f.vault));
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ const key=captureId(pathToFileURL(path.join(f.root,'Work')).href);
+ assert.deepEqual(sessions.map(session=>session.id),[captureId(key,'newer'),captureId(key,'session')]);
+ assert.deepEqual(sessions.map(session=>session.lastActivity),[f.now(),f.now()-86400000]);
+ assert.ok(sessions.every(session=>session.projectId==='project'&&session.projectLabel==='Work'));
+ assert.doesNotMatch(JSON.stringify(sessions),/PRIVATE|UNSELECTED/);
+ assert.deepEqual(f.controller.config(f.vault),before);
+});
+test('manual session selection imports every recorded date of only that session and retries without duplicates',async t=>{
+ const f=await fixture(t),past=f.now()-3*86400000;
+ await f.put('past','선택한 세션의 과거 질문',past);
+ const source=JSON.parse(await readFile(f.sourceFile,'utf8'));
+ source.requests.push({...source.requests[0],requestId:'today',timestamp:f.now(),message:{text:'선택한 세션의 오늘 질문'}});
+ await writeFile(f.sourceFile,JSON.stringify(source));
+ await f.put('other','같은 프로젝트의 다른 세션',f.now(),path.join(f.source,'project/chatSessions/other.json'));
+ await f.configure(true);
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ const selected=sessions.find(session=>session.title==='검토 대화');
+ const selection={sessionIds:[selected.id]};
+ const result=await f.controller.sync(f.vault,{},true,selection);
+ assert.deepEqual(result.status.records.map(record=>record.date).sort(),[localDate(past),f.date]);
+ const paths=new Set(result.status.records.flatMap(record=>record.sessions.map(session=>session.path)));
+ assert.equal(paths.size,1);
+ const content=await readFile(path.join(f.vault.root,[...paths][0]),'utf8');
+ assert.match(content,/선택한 세션의 과거 질문/);assert.match(content,/선택한 세션의 오늘 질문/);
+ assert.doesNotMatch(content,/다른 세션/);
+ assert.equal((await f.controller.sync(f.vault,{},true,selection)).changed,false);
+ for(const record of result.status.records)assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,record.journalPath),'utf8')).length,1);
+ const deleted=await f.controller.trash(f.vault,{id:result.status.records[0].id,sessionId:result.status.records[0].sessions[0].id});
+ assert.ok(!(await f.controller.listSessions(f.vault,['project'])).sessions.some(session=>session.id===selected.id));
+ await f.controller.restore(f.vault,deleted.trashId);
+});
+test('invalid or stale session selections are rejected before importing a partial selection',async t=>{
+ const f=await fixture(t);await f.put();await f.configure(false);
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ for(const sessionIds of [null,17,[],['bad'],[sessions[0].id,'a'.repeat(20)]]){
+  await assert.rejects(f.controller.sync(f.vault,{},true,{sessionIds}),/세션/);
+  assert.equal(Object.keys(f.controller.config(f.vault).records).length,0);
+ }
+ await assert.rejects(f.controller.listSessions(f.vault,['missing']),/프로젝트/);
+ await rm(f.sourceFile);
+ await assert.rejects(f.controller.sync(f.vault,{},true,{sessionIds:[sessions[0].id]}),/세션/);
+ assert.equal(Object.keys(f.controller.config(f.vault).records).length,0);
+});
+test('multiple selected sessions write their own journals once without importing other sessions',async t=>{
  const f=await fixture(t),day=86400000;
- const from=localDate(f.now()-2*day),to=localDate(f.now()-day),dateRange={from,to};
+ const from=localDate(f.now()-2*day),to=localDate(f.now()-day);
  const earlierJournal=`Journal/${from}.md`;
  await writeFile(path.join(f.vault.root,earlierJournal),'# Earlier\n\n직접 쓴 일지\n');
  for(const [days,text] of [[3,'기간 전'],[2,'첫날 대화'],[1,'마지막 날 대화'],[0,'오늘 대화']]){
   await f.put(`q${days}`,text,f.now()-days*day-1,path.join(f.source,`project/chatSessions/session-${days}.json`));
  }
  await f.configure(true);
- assert.equal((await f.controller.sync(f.vault,{},false,{dateRange})).changed,false);
- const result=await f.controller.sync(f.vault,{},true,{dateRange});
+ const key=captureId(pathToFileURL(path.join(f.root,'Work')).href);
+ const selection={sessionIds:[captureId(key,'session-2'),captureId(key,'session-1')]};
+ assert.equal((await f.controller.sync(f.vault,{},false,selection)).changed,false);
+ const result=await f.controller.sync(f.vault,{},true,selection);
  assert.deepEqual(result.status.records.map(record=>record.date).sort(),[from,to]);
  for(const [date,text] of [[from,'첫날 대화'],[to,'마지막 날 대화']]){
   const record=result.status.records.find(record=>record.date===date);
@@ -63,19 +118,7 @@ test('manual date ranges import both boundaries into their own journals once',as
   assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,`Journal/${date}.md`),'utf8')).length,1);
  }
  assert.match(await readFile(path.join(f.vault.root,earlierJournal),'utf8'),/직접 쓴 일지/);
- assert.equal((await f.controller.sync(f.vault,{},true,{dateRange})).changed,false);
-});
-test('manual import rejects invalid or future date ranges',async t=>{
- const f=await fixture(t);await f.configure(false);
- for(const dateRange of [
-  {from:'2026-02-29',to:f.date},
-  {from:f.date,to:'2026-11-03'},
-  {from:f.date,to:'2026-11-05'},
-  {from:f.date},
-  null,
- ]){
-  await assert.rejects(f.controller.sync(f.vault,{},true,{dateRange}),/날짜/);
- }
+ assert.equal((await f.controller.sync(f.vault,{},true,selection)).changed,false);
 });
 test('existing daily records and links migrate once and later imports only add new messages to the session',async t=>{
  const f=await fixture(t);
@@ -137,7 +180,7 @@ test('existing daily records and links migrate once and later imports only add n
  const remaining=await readFile(document,'utf8');
  assert.match(remaining,/기존 질문 0/);assert.doesNotMatch(remaining,/기존 질문 1|새 답변/);
  assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,f.journal),'utf8')).length,0);
- assert.equal((await f.controller.sync(f.vault,{},true,{dateRange:{from:dates[0],to:f.date}})).changed,false);
+ assert.equal((await f.controller.sync(f.vault,{},true,{sessionIds:[captureId(key,'original-session-id')]})).changed,false);
  const restored=await f.controller.restore(f.vault,deleted.trashId);
  assert.equal(restored.status.records.length,2);
  assert.equal(await readFile(document,'utf8'),content);
@@ -162,6 +205,25 @@ test('an interrupted save resumes the same session and link after restart',async
  const text=await readFile(path.join(f.vault.root,sessionPath),'utf8');
  assert.match(text,/> 질문/);assert.match(text,/> 다음 질문/);
  assert.equal((await restarted.sync(f.vault,{})).changed,false);
+});
+test('a selected session is imported after completing an interrupted earlier import',async t=>{
+ const f=await fixture(t);await f.configure(true);await f.put();
+ const persist=f.controller.persist.bind(f.controller);
+ f.controller.persist=async(vault,config)=>{
+  if(config.sessionLayout&&!config.pendingCapture)throw new Error('Interrupted final write');
+  return persist(vault,config);
+ };
+ await assert.rejects(f.controller.sync(f.vault,{}),/Interrupted final write/);
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,now:f.now});
+ await restarted.load();
+ await f.put('b','새로 선택한 세션',f.now()+2,path.join(f.source,'project/chatSessions/second.json'));
+ const {sessions}=await restarted.listSessions(f.vault,['project']);
+ const selection={sessionIds:[sessions.find(session=>session.title==='다른 대화').id]};
+ const imported=await restarted.sync(f.vault,{},true,selection);
+ assert.equal(imported.status.records[0].sessions.length,2);
+ const selected=imported.status.records[0].sessions.find(session=>session.title==='다른 대화');
+ assert.match(await readFile(path.join(f.vault.root,selected.path),'utf8'),/새로 선택한 세션/);
+ assert.equal((await restarted.sync(f.vault,{},true,selection)).changed,false);
 });
 test('WSL projects in VS Code workspaceStorage can be selected and imported',async t=>{
  const f=await fixture(t);
@@ -204,14 +266,17 @@ test('a selected WSL project imports its own VS Code Agent Host history from ses
  await put('current','/home/dev/Work','vscode-agent-host',f.now()+1,'새 WSL 질문');
  await put('unselected','/home/dev/Work-other','vscode-agent-host',yesterday,'다른 프로젝트');
  await put('cli','/home/dev/Work','github/cli',yesterday,'독립 CLI 대화');
- const result=await f.controller.sync(f.vault,{},true,{dateRange:{from:date,to:date}});
+ const available=await f.controller.listSessions(f.vault,['project','other']);
+ assert.deepEqual(available.sessions.map(session=>session.title),['새 WSL 질문','이전 WSL 질문']);
+ const selection={sessionIds:[available.sessions[1].id]};
+ const result=await f.controller.sync(f.vault,{},true,selection);
  assert.equal(result.status.records.length,1);
  const [record]=result.status.records;
  assert.equal(record.date,date);
  const content=await readFile(path.join(f.vault.root,record.sessions[0].path),'utf8');
  assert.match(content,/이전 WSL 질문/);
  assert.doesNotMatch(content,/PRIVATE REASONING|다른 프로젝트|독립 CLI 대화|새 WSL 질문/);
- assert.equal((await f.controller.sync(f.vault,{},true,{dateRange:{from:date,to:date}})).changed,false);
+ assert.equal((await f.controller.sync(f.vault,{},true,selection)).changed,false);
  const automatic=await f.controller.sync(f.vault,{});
  assert.equal(automatic.status.records.length,2);
  const today=automatic.status.records.find(record=>record.date===f.date);

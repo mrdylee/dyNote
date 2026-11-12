@@ -701,15 +701,8 @@ export default function App() {
         ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
       if (!vaultsRef.current[id]) return;
       if (manual && action === "sync") {
-        const { dateRange } = args;
-        let scope = "오늘";
-        if (dateRange) {
-          const { from, to } = dateRange;
-          const period = from === to ? from : `${from} ~ ${to}`;
-          scope = `${period} ·`;
-        }
         const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
-          ? `${scope} 대화를 개인 노트에 가져왔습니다.` : `${scope} 새로 가져올 대화가 없습니다.`;
+          ? "선택한 세션의 대화를 개인 노트에 가져왔습니다." : "선택한 세션에 새로 가져올 대화가 없습니다.";
         setCaptureImportResult({ vaultId: id, notice });
       }
       updateCaptureState(id, () => result.status);
@@ -746,8 +739,7 @@ export default function App() {
   }, [captureIds, captureAction, updateCaptureState]);
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
   const importCapture = async () => {
-    if (!captureTargetState?.personal || (!captureTargetState.needsMigration && !captureTargetState.pendingCapture
-        && !captureTargetState.projects.some(project => project.selected))) { captureSettings(); return; }
+    if (!captureTargetState?.personal || (!captureTargetState.needsMigration && !captureTargetState.pendingCapture)) { captureSettings(); return; }
     await captureAction("sync", true, {}, captureVaultId);
   };
   const captureControls = { state: captureState, importNotice: captureImportNotice,
@@ -2635,7 +2627,7 @@ export default function App() {
             }}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
-            destination={captureVault?.name} today={today} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
+            destination={captureVault?.name} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
             onRefresh={async () => { const state = await invoke(api.captureStatus({ vaultId: captureVaultId })); updateCaptureState(captureVaultId, () => state); return state; }}
             onSource={async (wsl = false) => {
               const state = await invoke(api.pickCaptureSource({ vaultId: captureVaultId, wsl }));
@@ -2646,7 +2638,8 @@ export default function App() {
               return state;
             }}
             onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}
-            onImport={dateRange=>captureAction("sync",true,{dateRange},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
+            onSessions={projects=>invoke(api.captureSessions({vaultId:captureVaultId,projects}))}
+            onImport={sessionIds=>captureAction("sync",true,{sessionIds},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
           {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}

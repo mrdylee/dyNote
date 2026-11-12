@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld(
     snapshot: args => call("snapshot", args),
     workspaceSnapshots: () => call("workspace-snapshots"),
     captureStatus: args => call("capture-status", args),
+    captureSessions: args => call("capture-sessions", args),
     configureCapture: args => call("capture-configure", args),
     pickCaptureSource: args => call("capture-source", args),
     syncCapture: args => call("capture-sync", args),

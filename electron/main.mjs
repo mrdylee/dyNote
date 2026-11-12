@@ -445,7 +445,7 @@ app
       onOpen: value => { if (value.created) gitBackup.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
     const scopedActions = new Set([
-      "capture-status", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
+      "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
@@ -497,6 +497,11 @@ app
       "copilot-send": args => sendAi(copilot, args),
       "copilot-cancel": (args) => copilot.cancel(args?.requestId),
       "capture-status": (args, vault) => { checkVault(args, vault); return copilotJournal.status(vault); },
+      "capture-sessions": (args, vault) => {
+        checkVault(args, vault);
+        if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
+        return copilotJournal.listSessions(vault,args.projects);
+      },
       "capture-configure": (args, vault) => { checkVault(args, vault); return copilotJournal.configure(vault,args.input,registry.purposes[vault.root]==="personal"); },
       "capture-source": async (args, vault) => {
         checkVault(args, vault);
@@ -510,7 +515,7 @@ app
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
         if (args.checkOnly === true) return copilotJournal.sync(vault,args.dailyOptions,false,{checkOnly:true});
-        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{dateRange:args.dateRange});});
+        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{sessionIds:args.sessionIds});});
       },
       "capture-trash": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 삭제해 주세요.");
@@ -738,7 +743,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

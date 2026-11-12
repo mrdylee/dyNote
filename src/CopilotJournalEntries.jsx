@@ -3,7 +3,7 @@ export function CopilotJournalToolbar({state,importNotice,disabled,onImport,onHi
  return <div className="capture-toolbar" aria-label="저널 자동기록 작업">
   <span className={state?.error?'capture-error':''} role="status" title={state?.error||undefined}>{state?.error||(state?.enabled?'Copilot 자동 기록 켜짐':'Copilot 대화 기록')}</span>
   {importNotice&&<span role="status">{importNotice}</span>}
-  <button disabled={disabled} title="선택한 VS Code 프로젝트의 오늘 대화를 가져옵니다." onClick={onImport}><Download size={14}/>가져오기</button>
+  <button disabled={disabled} title="가져올 Copilot 대화 세션을 선택합니다." onClick={onImport}><Download size={14}/>가져오기</button>
   {onHistory&&<button disabled={disabled} onClick={onHistory}>프로젝트별 기록</button>}
   <button disabled={disabled} aria-label="저널 자동기록 설정" onClick={onSettings}><Settings size={14}/></button>
   {state?.trashId&&<button disabled={disabled} onClick={onRestore}><Undo2 size={14}/>삭제 되돌리기</button>}
