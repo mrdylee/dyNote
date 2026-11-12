@@ -139,7 +139,7 @@ export class CopilotJournal{
   config.projects=Object.fromEntries(input.projects.map(id=>[id,{since:input.enabled&&(!previous.enabled||!Object.hasOwn(previous.projects,id))?this.now():previous.projects[id]?.since??this.now()}]));
   await this.persist(vault,config);return this.status(vault);
  }
- async sources(root,workspace){
+ async sources(root,workspace,errors){
   const sessions=new Map();
   for(const [folder,kind] of [['chatSessions','chat'],['GitHub.copilot-chat/transcripts','transcript']]){
    const relative=`${workspace}/${folder}`,directory=path.join(root,relative);
@@ -150,7 +150,10 @@ export class CopilotJournal{
     if(!/^[\w-]+\.jsonl?$/.test(entry.name))continue;
     if(entry.isSymbolicLink())throw new Error('대화 기록의 심볼릭 링크는 가져올 수 없습니다.');
     if(!entry.isFile())continue;
-    const id=entry.name.replace(/\.jsonl?$/,''),parsed=parseChatSource(await sourceFile(root,`${relative}/${entry.name}`),id);
+    const id=entry.name.replace(/\.jsonl?$/,'');
+    let parsed;
+    try{parsed=parseChatSource(await sourceFile(root,`${relative}/${entry.name}`),id);}
+    catch(error){if(!errors)throw error;errors.push(error);continue;}
     const pair=sessions.get(id)??{};pair[kind]=parsed;sessions.set(id,pair);
    }
   }
@@ -187,21 +190,23 @@ export class CopilotJournal{
   }
   return {sessions,error};
  }
- async projectSessions(config,projects){
+ async projectSessions(config,projects,isolateErrors=false){
   const wsl=await this.wslSources(config.wslSource,projects),sessions=[];
+  const errors=isolateErrors?[]:undefined;
   for(const project of projects){
-   const local=await this.sources(config.sourceRoot,project.id);
+   const local=await this.sources(config.sourceRoot,project.id,errors);
    const localIds=new Set(local.filter(source=>source.messages.length).map(source=>source.id));
    const remote=(wsl.sessions.get(project.id)??[]).filter(source=>!localIds.has(source.id));
    for(const source of [...local,...remote])sessions.push({project,source});
   }
-  return {sessions,error:wsl.error};
+  const error=[wsl.error,errors?.length&&'VS Code 대화 일부를 읽지 못해 목록에서 제외했습니다. 원본 기록 파일을 확인해 주세요.'].filter(Boolean).join(' · ');
+  return {sessions,error};
  }
  async listSessions(vault,projectIds){
   const config=this.config(vault),available=await this.projects(config.sourceRoot);
   if(!Array.isArray(projectIds)||projectIds.some(id=>!available.some(project=>project.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
   const projects=available.filter(project=>projectIds.includes(project.id));
-  const sources=await this.projectSessions(config,projects),sessions=new Map();
+  const sources=await this.projectSessions(config,projects,true),sessions=new Map();
   const saved=sessionRecords(config.records);
   const aliases=new Map([...saved].map(([id,session])=>[session.sourceKey??id,id]));
   for(const {project,source} of sources.sessions){
@@ -284,12 +289,13 @@ export class CopilotJournal{
    const imported=await this.sync(vault,daily,manual,{sessionIds});
    return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
+  if(manual&&migrating&&!selected)return this.commit(vault,previous,clone(previous));
   const next=clone(previous);
   const sessions=sessionRecords(next.records),updated=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
   const projects=(await this.projects(previous.sourceRoot)).filter(project=>Object.hasOwn(previous.projects,project.id));
-  const sources=await this.projectSessions(previous,projects),matched=new Set();
+  const sources=await this.projectSessions(previous,projects,selected!==null),matched=new Set();
   for(const {project,source} of sources.sessions){
     const sourceKey=captureId(project.key,source.sessionId),fileKey=captureId(project.key,source.id);
     if(selected&&!selected.has(sourceKey))continue;

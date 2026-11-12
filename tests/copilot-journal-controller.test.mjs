@@ -98,6 +98,32 @@ test('invalid or stale session selections are rejected before importing a partia
  await assert.rejects(f.controller.sync(f.vault,{},true,{sessionIds:[sessions[0].id]}),/세션/);
  assert.equal(Object.keys(f.controller.config(f.vault).records).length,0);
 });
+test('an unreadable unselected session is reported without blocking a valid selected session',async t=>{
+ const f=await fixture(t);await f.put('q','선택한 정상 대화');await f.configure(false);
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ const bad=path.join(f.source,'project/chatSessions/unselected.json');
+ await writeFile(bad,JSON.stringify({version:99,sessionId:'unselected',requests:[]}));
+ const listed=await f.controller.listSessions(f.vault,['project']);
+ assert.deepEqual(listed.sessions.map(session=>session.id),sessions.map(session=>session.id));
+ assert.match(listed.error,/일부/);
+ const imported=await f.controller.sync(f.vault,{},true,{sessionIds:[sessions[0].id]});
+ assert.equal(imported.status.records.length,1);
+ assert.match(imported.status.error,/일부/);
+ const [{path:document}]=imported.status.records[0].sessions;
+ assert.match(await readFile(path.join(f.vault.root,document),'utf8'),/선택한 정상 대화/);
+ await f.configure(true);
+ await assert.rejects(f.controller.sync(f.vault,{}),/버전/);
+});
+test('a selected session that becomes unreadable rejects the whole selection before writing',async t=>{
+ const f=await fixture(t);await f.put();await f.configure(false);
+ const second=path.join(f.source,'project/chatSessions/second.json');
+ await f.put('q2','두 번째 대화',f.now()+2,second);
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ await writeFile(second,JSON.stringify({version:99,sessionId:'second',requests:[]}));
+ await assert.rejects(f.controller.sync(f.vault,{},true,{sessionIds:sessions.map(session=>session.id)}),/선택한 세션/);
+ assert.equal(Object.keys(f.controller.config(f.vault).records).length,0);
+ await assert.rejects(readFile(path.join(f.vault.root,`AI Conversations/${captureId(pathToFileURL(path.join(f.root,'Work')).href)}/${sessions[0].id}.md`)),{code:'ENOENT'});
+});
 test('multiple selected sessions write their own journals once without importing other sessions',async t=>{
  const f=await fixture(t),day=86400000;
  const from=localDate(f.now()-2*day),to=localDate(f.now()-day);
@@ -184,6 +210,28 @@ test('existing daily records and links migrate once and later imports only add n
  const restored=await f.controller.restore(f.vault,deleted.trashId);
  assert.equal(restored.status.records.length,2);
  assert.equal(await readFile(document,'utf8'),content);
+});
+test('manual legacy migration writes only existing conversations until a new session is selected',async t=>{
+ const f=await fixture(t);await f.configure(false);
+ const key=captureId(pathToFileURL(path.join(f.root,'Work')).href),date=localDate(f.now()-86400000);
+ const sessionId=captureId(key,'legacy');
+ const record={id:captureId(key,date),date,label:'Work',path:`AI Conversations/${key}/${date}.md`,journalPath:`Journal/${date}.md`,
+  sessions:{[sessionId]:{title:'기존 대화',messages:[{id:'old:user',role:'user',text:'보관 중인 대화',at:f.now()-86400000}]}}};
+ await mkdir(path.dirname(path.join(f.vault.root,record.path)),{recursive:true});
+ const legacyText=renderCapture(record)+'\n사용자 메모\n';
+ await writeFile(path.join(f.vault.root,record.path),legacyText);
+ await writeFile(path.join(f.vault.root,record.journalPath),captureLink(record));
+ await f.controller.persist(f.vault,{...f.controller.config(f.vault),records:{[record.id]:record}});
+ await f.put('new','선택하지 않은 오늘 대화');
+ const migrated=await f.controller.sync(f.vault,{},true);
+ assert.equal(migrated.migrated,true);
+ assert.deepEqual(migrated.status.records.flatMap(record=>record.sessions.map(session=>session.title)),['기존 대화']);
+ assert.equal(await readFile(path.join(f.vault.root,record.path),'utf8'),legacyText);
+ assert.doesNotMatch(await readFile(path.join(f.vault.root,f.journal),'utf8'),/dynote:copilot/);
+ const {sessions}=await f.controller.listSessions(f.vault,['project']);
+ const selected=await f.controller.sync(f.vault,{},true,{sessionIds:[sessions[0].id]});
+ assert.equal(selected.status.records.length,2);
+ assert.match(await readFile(path.join(f.vault.root,selected.status.records.find(record=>record.date===f.date).sessions[0].path),'utf8'),/선택하지 않은 오늘 대화/);
 });
 test('an interrupted save resumes the same session and link after restart',async t=>{
  const f=await fixture(t);await f.configure(true);await f.put();

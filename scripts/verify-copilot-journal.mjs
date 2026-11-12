@@ -251,10 +251,13 @@ try{
    {type:'assistant.message',id:'a',timestamp,data:{content:'검증용 답변',reasoningText:'DO NOT IMPORT THINKING'}},
    {type:'assistant.turn_end',data:{}},
   ].map(event=>JSON.stringify(event)).join('\n')+'\n');
+  const unreadable=path.join(source,'project/chatSessions/unreadable.json');
+  await writeFile(unreadable,JSON.stringify({version:99,sessionId:'unreadable',requests:[]}));
   await page.getByRole('button',{name:'저널 자동기록 설정',exact:true}).click();
   await settings().getByText(wslRoot,{exact:true}).waitFor();
   await importSession('어제 작성한 질문');
   await settings().getByText('선택한 세션의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
+  await settings().getByRole('alert').filter({hasText:'VS Code 대화 일부를 읽지 못해 목록에서 제외했습니다.'}).waitFor();
   const [imported]=(await captureState()).records;
   assert.equal(imported.date,date);
   assert.equal(imported.journalPath,`Journal/${date}.md`);
@@ -263,6 +266,7 @@ try{
   await settings().getByRole('button',{name:'선택한 세션 가져오기',exact:true}).click();
   await settings().getByText('선택한 세션에 새로 가져올 대화가 없습니다.',{exact:true}).waitFor();
   assert.equal((await readFile(path.join(vault,imported.journalPath),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);
+  await rm(unreadable);
   await closeSettings();
  });
  await check('an existing daily document is preserved while its journal link moves to the session',async()=>{
