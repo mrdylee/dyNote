@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld(
     },
     copyText: (args) => call("copy-text", args),
     moveFile: (args) => call("move-file", args),
+    renameTreeEntry: (args) => call("rename-tree-entry", { ...args, workspace: true }),
     copyFile: (args) => call("copy-file", args),
     trashFile: (args) => call("trash-file", args),
     trashFolder: (args) => call("trash-folder", args),

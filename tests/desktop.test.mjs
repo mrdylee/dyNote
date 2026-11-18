@@ -252,3 +252,28 @@ test('CORE-AUDIO imports typed local recordings without changing their bytes',as
  const trashed=await store.trashFile(path,current.revision);await store.restoreTrash(trashed.id);assert.deepEqual((await store.readAttachment(path)).bytes,current.bytes);
  const oversized=Buffer.alloc(25*1024*1024+1);oversized.set([0x1a,0x45,0xdf,0xa3]);await assert.rejects(store.importAttachment('oversized.webm',oversized),/25MB/);
 });
+
+test('renaming a folder preserves nested files and updates Markdown and Canvas links', async t => {
+  const { root, store } = await fixture(t);
+  await mkdir(join(root,'Old','Nested'),{recursive:true});
+  await mkdir(join(root,'Taken'));
+  await writeFile(join(root,'Old/Nested/data.txt'),'opaque data');
+  await store.create('Old/Nested/A.md','[Home](../../Home.md)\n');
+  await store.create('Home.md','[Note](Old/Nested/A.md) [[Old/Nested/A|Same note]]\n');
+  const canvas={nodes:[{id:'a',type:'file',file:'Old/Nested/A.md',x:0,y:0,width:200,height:100}],edges:[]};
+  await writeFile(join(root,'Map.canvas'),JSON.stringify(canvas));
+  await assert.rejects(store.renameTreeEntry('Old','Taken',{folder:true}),/같은 이름/);
+  await assert.rejects(store.renameTreeEntry('Old','../Escape',{folder:true}),/이름/);
+  const result=await store.renameTreeEntry('Old','New Space',{folder:true});
+  assert.ok(result.folders.includes('New Space/Nested'));
+  assert.equal(await readFile(join(root,'New Space/Nested/data.txt'),'utf8'),'opaque data');
+  assert.equal(await readFile(join(root,'New Space/Nested/A.md'),'utf8'),'[Home](../../Home.md)\n');
+  assert.equal(await readFile(join(root,'Home.md'),'utf8'),'[Note](New%20Space/Nested/A.md) [[New Space/Nested/A|Same note]]\n');
+  assert.equal(JSON.parse(await readFile(join(root,'Map.canvas'),'utf8')).nodes[0].file,'New Space/Nested/A.md');
+  await assert.rejects(readFile(join(root,'Old/Nested/data.txt')),{code:'ENOENT'});
+  const note=result.notes.find(note=>note.path==='New Space/Nested/A.md');
+  await assert.rejects(store.moveFile(note.path,'New Space/Nested/a.md','stale'),/외부에서/);
+  const renamed=await store.moveFile(note.path,'New Space/Nested/a.md',note.revision);
+  assert.ok(renamed.notes.some(note=>note.path==='New Space/Nested/a.md'));
+  assert.match(await readFile(join(root,'Home.md'),'utf8'),/Nested\/a\.md/);
+});

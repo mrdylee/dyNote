@@ -183,12 +183,16 @@ function relativePath(from, to) {
   return [...a.map(() => ".."), ...b].join("/");
 }
 export function rewriteLinks(source, from, oldPath, newPath, files) {
-  const newFrom = from === oldPath ? newPath : from;
+  return rewriteLinkPaths(source, from, name => name === oldPath ? newPath : name, files);
+}
+
+export function rewriteLinkPaths(source, from, moved, files, index) {
+  const newFrom = moved(from);
   let result = source;
   for (const link of scanLinks(source).reverse()) {
-    const resolved = resolvePath(link.target, from, files, { kind: link.kind });
+    const resolved = resolvePath(link.target, from, files, { kind: link.kind, index });
     if (resolved.status !== "resolved") continue;
-    const destination = resolved.path === oldPath ? newPath : resolved.path;
+    const destination = moved(resolved.path);
     if (destination === resolved.path && newFrom === from) continue;
     const fragment = link.target.match(/[#^].*$/)?.[0] ?? "";
     const target =

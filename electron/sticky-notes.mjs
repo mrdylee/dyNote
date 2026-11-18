@@ -145,6 +145,10 @@ export class StickyNotes {
     });
   }
 
+  hasNotesWithin(vault, folder) {
+    return [...this.#records.values()].some(record => record.root === vault.root && record.path.startsWith(folder + '/'));
+  }
+
   async #open(record) {
     const existing = record && this.#windows.get(record.id);
     if (existing) {

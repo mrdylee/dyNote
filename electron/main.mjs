@@ -15,7 +15,7 @@ import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault, validFilePath, validNotePath } from "../core/vault.mjs";
-import { canTrashFolder } from "../core/file-tree.mjs";
+import { canTrashFolder, managedCopilotPath, treeRenameDestination } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
 import { demoNotes } from "../core/demo.mjs";
@@ -450,7 +450,7 @@ app
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
-      "move-file", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
+      "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
@@ -696,6 +696,22 @@ app
           ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
           : vault.moveFile(args.from, args.to, args.revision);
       },
+      "rename-tree-entry": (args, vault, gitBackup) => gitBackup.enqueue(async () => {
+        checkVault(args, vault);
+        if (typeof args.from !== "string" || typeof args.name !== "string" || typeof args.folder !== "boolean")
+          throw new Error("이름을 바꿀 파일 또는 폴더를 선택해 주세요.");
+        const { from, folder, revision } = args;
+        const to = treeRenameDestination(from, args.name, folder);
+        if (from === to) throw new Error("현재 이름과 다른 이름을 입력해 주세요.");
+        if (registry.purposes[vault.root] === "personal" &&
+            [from, to].some(name => managedCopilotPath(name, Object.values(copilotJournal.config(vault).records))))
+          throw new Error("Copilot 기록이 참조하는 경로입니다. 연결을 유지하려면 이 경로의 이름을 바꿀 수 없습니다.");
+        if (folder && (!canTrashFolder(from, args.protectedFolders) || !canTrashFolder(to, args.protectedFolders) ||
+            from === "포스트잇" || stickyNotes?.hasNotesWithin(vault, from)))
+          throw new Error("저널, 첨부파일 또는 Sticky Note가 사용하는 폴더는 이름을 바꿀 수 없습니다.");
+        if (folder || /\.docx$/i.test(from)) return vault.renameTreeEntry(from, to, { folder, revision });
+        return stickyNotes && validNotePath(from) ? stickyNotes.moveFile(vault, from, to, revision) : vault.moveFile(from, to, revision);
+      }),
       "copy-file": async (args, target) => {
         checkVault(args, target);
         const source = args.workspace === true ? workspaceVault(args.sourceVaultId) : target;
@@ -746,7 +762,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
@@ -774,7 +790,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

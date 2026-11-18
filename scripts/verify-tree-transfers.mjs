@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { localDate } from "../core/periodic-notes.mjs";
@@ -24,6 +24,9 @@ try {
   await writeFile(path.join(personal, "Deliver.md"), "# Hand-off\n");
   await writeFile(path.join(personal, "Linked.md"), "[Reference](Reference.md)\n");
   await writeFile(path.join(team, "Shared/Reference.md"), "# Another reference\n");
+  await mkdir(path.join(team,"Taken"));
+  await writeFile(path.join(team,"TeamIndex.md"),"[Shared](Shared/Reference.md)\n");
+  await copyFile(new URL("../tests/fixtures/word-roundtrip.docx",import.meta.url),path.join(team,"Shared/Original.docx"));
   app = await electron.launch({
     executablePath: process.env.DYNOTE_EXECUTABLE || path.resolve("node_modules/electron/dist", process.platform === "darwin"
       ? "Electron.app/Contents/MacOS/Electron" : process.platform === "win32" ? "electron.exe" : "electron"),
@@ -115,8 +118,38 @@ try {
   await page.getByText(/링크 “Reference\.md”의 대상이 복사 후 달라집니다/).waitFor();
   await assert.rejects(readFile(path.join(team, "Shared/Linked.md")), { code: "ENOENT" });
   assert.equal(await readFile(path.join(personal, "Linked.md"), "utf8"), "[Reference](Reference.md)\n");
+  const menu=page.getByRole("menu",{name:"문서·폴더 작업",exact:true});
+  const renameDialog=page.getByRole("dialog",{name:"이름 바꾸기",exact:true});
+  const renameEntry=async (tree,from,name)=>{
+    await row(tree,from).click({button:"right"});
+    await menu.getByRole("menuitem",{name:"이름 바꾸기",exact:true}).click();
+    await renameDialog.getByLabel("새 이름",{exact:true}).fill(name);
+    await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
+  };
+  await row(personalTree,"Archive/Plan.md").click();
+  await renameEntry(personalTree,"Archive/Plan.md","내 계획.md");
+  await row(personalTree,"Archive/내 계획.md").waitFor();
+  await pane("Archive/내 계획.md").waitFor();
+  assert.match(await readFile(path.join(personal,"Reference.md"),"utf8"),/Archive\/%EB%82%B4%20%EA%B3%84%ED%9A%8D.md/);
+  await row(teamTree,"Shared/Reference.md").click();
+  await renameEntry(teamTree,"Shared","Taken");
+  await renameDialog.getByRole("alert").filter({hasText:"같은 이름"}).waitFor();
+  await renameDialog.getByLabel("새 이름",{exact:true}).fill("공유 문서");
+  await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
+  await row(teamTree,"공유 문서/Reference.md").waitFor();
+  await pane("공유 문서/Reference.md").waitFor();
+  assert.match(await readFile(path.join(team,"TeamIndex.md"),"utf8"),/%EA%B3%B5%EC%9C%A0%20%EB%AC%B8%EC%84%9C\/Reference.md/);
+  await renameEntry(teamTree,"공유 문서/Reference.md","Reference revised.md");
+  await row(teamTree,"공유 문서/Reference revised.md").waitFor();
+  await pane("공유 문서/Reference revised.md").waitFor();
+  await renameEntry(teamTree,"공유 문서/Original.docx","팀 문서.docx");
+  await row(teamTree,"공유 문서/팀 문서.docx").waitFor();
+  assert.deepEqual(await readFile(path.join(team,"공유 문서/팀 문서.docx")),await readFile(new URL("../tests/fixtures/word-roundtrip.docx",import.meta.url)));
+  await row(personalTree,"Journal").click({button:"right"});
+  assert.equal(await menu.getByRole("menuitem",{name:"이름 바꾸기",exact:true}).isDisabled(),true);
+  await page.keyboard.press("Escape");
   assert.deepEqual(errors, []);
-  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, and block cross-vault link changes.");
+  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries with links intact.");
 } finally {
   await app?.close();
   await rm(root, { recursive: true, force: true });

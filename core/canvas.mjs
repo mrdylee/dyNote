@@ -1,4 +1,4 @@
-import { rewriteLinks } from "./links.mjs";
+import { rewriteLinkPaths } from "./links.mjs";
 
 const record = (v) => v && typeof v === "object" && !Array.isArray(v);
 const localPath = (v) =>
@@ -98,17 +98,21 @@ export function parseCanvas(source) {
 }
 
 export function rewriteCanvas(source, from, oldPath, newPath, files) {
+  return rewriteCanvasPaths(source, from, name => name === oldPath ? newPath : name, files);
+}
+
+export function rewriteCanvasPaths(source, from, moved, files, index) {
   const { data } = parseCanvas(source);
   let changed = false;
   const nodes = (data.nodes ?? []).map((n) => {
     const next = { ...n };
     for (const key of ["file", "background"])
-      if (n[key] === oldPath) {
-        next[key] = newPath;
+      if (typeof n[key] === 'string' && moved(n[key]) !== n[key]) {
+        next[key] = moved(n[key]);
         changed = true;
       }
     if (n.type === "text") {
-      next.text = rewriteLinks(n.text, from, oldPath, newPath, files);
+      next.text = rewriteLinkPaths(n.text, from, moved, files, index);
       changed ||= next.text !== n.text;
     }
     return next;

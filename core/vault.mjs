@@ -5,6 +5,8 @@ import {
   readdir,
   mkdir,
   rename,
+  rmdir,
+  link,
   unlink,
   writeFile,
   readFile,
@@ -13,9 +15,10 @@ import { constants } from "node:fs";
 import { attachmentMime, validateAttachment } from "./attachments.mjs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { createLinkIndex, resolvePath, rewriteLinks, scanLinks } from "./links.mjs";
+import { createLinkIndex, resolvePath, rewriteLinks, rewriteLinkPaths, scanLinks } from "./links.mjs";
+import { renamedTreePath } from "./file-tree.mjs";
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
-import { parseCanvas, rewriteCanvas } from "./canvas.mjs";
+import { parseCanvas, rewriteCanvas, rewriteCanvasPaths } from "./canvas.mjs";
 import { noteAliases, parseMetadata } from "./metadata.mjs";
 import { readWordContent } from "./word-documents.mjs";
 
@@ -715,7 +718,75 @@ export class Vault {
     });
   }
 
+  renameTreeEntry(from, to, { folder, revision } = {}) {
+    return this.#enqueue(async () => {
+      const word = !folder && validWordPath(from);
+      const valid = folder ? validRelativePath : word ? validWordPath : validFilePath;
+      if (!valid(from) || !valid(to) || from === to || path.posix.dirname(from) !== path.posix.dirname(to))
+        throw new Error("같은 위치에서 사용할 수 있는 다른 이름을 입력해 주세요.");
+      if (!folder && path.extname(from).toLowerCase() !== path.extname(to).toLowerCase())
+        throw new Error("기존 확장자를 유지해 주세요.");
+      const checkedPath = async name => folder
+        ? path.dirname(await this.#file(`${name}/rename-${randomUUID()}.md`))
+        : this.#file(name, false, valid);
+      const source = await checkedPath(from);
+      const entry = await lstat(source, { bigint: true });
+      if (entry.isSymbolicLink() || !(folder ? entry.isDirectory() : entry.isFile()))
+        throw new Error("보관함 안의 일반 파일이나 폴더를 선택해 주세요.");
+      if (!folder && (revision || !word) && (word ? wordRevision(entry) : (await this.#binary(from)).revision) !== revision)
+        throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
+      const destination = path.join(this.root, to);
+      const existing = await lstat(destination, { bigint: true }).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+        return null;
+      });
+      const sameName = from.normalize('NFC').toLowerCase() === to.normalize('NFC').toLowerCase();
+      if (existing && !(sameName && sameEntry(entry, existing))) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
+      const snapshot = await this.#snapshot();
+      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.wordDocuments, ...snapshot.attachments];
+      const index = createLinkIndex(files), moved = name => renamedTreePath(name, from, to);
+      const edits = [...snapshot.notes, ...snapshot.documents].flatMap(file => {
+        const content = file.kind === "canvas" ? rewriteCanvasPaths(file.content, file.path, moved, files, index)
+          : file.kind === "base" ? file.content : rewriteLinkPaths(file.content, file.path, moved, files, index);
+        return content === file.content ? [] : [{ file, content, path: moved(file.path) }];
+      });
+      const current = await lstat(await checkedPath(from), { bigint: true });
+      if (!sameEntry(entry, current) || current.mtimeNs !== entry.mtimeNs || current.ctimeNs !== entry.ctimeNs)
+        throw new Error("이름을 바꾸기 전에 파일이나 폴더가 변경되었습니다.");
+      // Reserve the destination on platforms where rename can replace an empty folder.
+      const reserve = folder && !existing && process.platform !== "win32";
+      if (reserve) await mkdir(destination);
+      try {
+        if (!folder && !existing) {
+          await link(source, destination);
+          try { await unlink(source); }
+          catch (error) { await unlink(destination).catch(() => {}); throw error; }
+        } else await rename(source, destination);
+      }
+      catch (error) { if (reserve) await rmdir(destination).catch(() => {}); throw error; }
+      const saved = [];
+      try {
+        for (const edit of edits) {
+          const result = await this.#save(edit.path, edit.content, edit.file.revision);
+          saved.push({ ...edit, revision: result.revision });
+        }
+        return await this.#snapshot();
+      } catch (error) {
+        for (const edit of saved.reverse()) await this.#save(edit.path, edit.file.content, edit.revision).catch(() => {});
+        const actual = await lstat(destination, { bigint: true }).catch(() => null);
+        if (actual && sameEntry(entry, actual) &&
+            await realpath(destination).catch(() => null) === destination &&
+            (existing || !await lstat(source).catch(() => null))) await rename(destination, source);
+        throw error;
+      }
+    });
+  }
+
   moveFile(from, to, expectedRevision) {
+    if (typeof from === 'string' && typeof to === 'string' && from !== to &&
+        from.normalize('NFC').toLowerCase() === to.normalize('NFC').toLowerCase() &&
+        path.posix.dirname(from) === path.posix.dirname(to))
+      return this.renameTreeEntry(from, to, { folder: false, revision: expectedRevision });
     return this.#enqueue(async () => {
       if (
         from === to ||

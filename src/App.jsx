@@ -50,7 +50,7 @@ import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
 import { DOCUMENT_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
-import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder } from "../core/file-tree.mjs";
+import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder, managedCopilotPath, renamedTreePath, treeRenameDestination } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
@@ -171,7 +171,7 @@ function FileTree({ notes, folders, active, reveal, onOpen, onContext, onDragDoc
               className={`file-row ${active === path ? "selected" : ""}`}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
-              onContextMenu={word ? undefined : event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
+              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word}); }}
               onPointerDown={word ? undefined : event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
@@ -1058,21 +1058,36 @@ export default function App() {
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
   const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
-  const moveWorkspaceFile = async (vaultId, from, to, revision) => {
-    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision }));
-    const oldKey = documentKey(vaultId, from), newKey = documentKey(vaultId, to);
-    workspace.dispatch({ type: "rename", path: oldKey, to: newKey });
-    setTabs(old => [...new Set(old.map(key => key === oldKey ? newKey : key))]);
-    updateNavigation({ type: "rename", from, to }, vaultId);
+  const applyWorkspaceRename = (vaultId, from, to, snapshot) => {
+    const scope = vaultsRef.current[vaultId];
+    const moved = name => renamedTreePath(name, from, to);
+    let navigation = scope.navigation;
+    for (const key of new Set([...workspace.paths, ...Object.keys(workspace.modes)])) {
+      const reference = documentRef(key);
+      if (reference.vaultId === vaultId && moved(reference.path) !== reference.path)
+        workspace.dispatch({ type: "rename", path: key, to: documentKey(vaultId, moved(reference.path)) });
+    }
+    for (const name of new Set([...navigation.recent, ...navigation.bookmarks]))
+      if (moved(name) !== name) navigation = navigationAction(navigation, { type: "rename", from: name, to: moved(name) });
+    persist(`dynote.navigation.${vaultId}`, navigation);
+    setTabs(old => [...new Set(old.map(key => {
+      const reference = documentRef(key);
+      return reference.vaultId === vaultId ? documentKey(vaultId, moved(reference.path)) : key;
+    }))]);
     acceptSnapshot(snapshot);
-    const preferences = vaultsRef.current[vaultId].journalPreferences;
-    const templatePeriods = Object.keys(periods).filter(period => preferences[period]?.template === from);
+    setAttachment(old => old?.vaultId === vaultId && old.path !== moved(old.path) ? { ...old, path: moved(old.path) } : old);
+    const preferences = scope.journalPreferences;
+    const templatePeriods = Object.keys(periods).filter(period => preferences[period]?.template && moved(preferences[period].template) !== preferences[period].template);
     if (templatePeriods.length) {
       const next = { ...preferences };
-      for (const period of templatePeriods) next[period] = { ...preferences[period], template: to };
+      for (const period of templatePeriods) next[period] = { ...preferences[period], template: moved(preferences[period].template) };
       updateJournalPreferences(next, vaultId);
     }
     setError(snapshot.warnings.join(" · "));
+  };
+  const moveWorkspaceFile = async (vaultId, from, to, revision) => {
+    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision }));
+    applyWorkspaceRename(vaultId, from, to, snapshot);
   };
   const transferTreeFile = async ({ source, vaultId, folder, operation, confirmedRevision }) => {
     if (busy || !vaultsRef.current[source.vaultId] || !vaultsRef.current[vaultId]) return;
@@ -1150,15 +1165,18 @@ export default function App() {
   };
   const showTreeMenu = (origin, x, y, target, vaultId) => {
     const scope = vaultsRef.current[vaultId];
-    if (!scope || busy || editState.forVault(vaultId).blocked() || (target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)))) {
+    if (!scope || busy || editState.forVault(vaultId).blocked()) {
       setTreeMenu(null);
       return;
     }
     const rect = origin.getBoundingClientRect();
+    const protectedFolder = target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences));
+    const managed = scope.purpose === 'personal' && managedCopilotPath(target.path, captureState?.records);
     setTreeMenu({
-      ...target, vaultId, origin,
+      ...target, vaultId, origin, canTrash: !protectedFolder && !target.word,
+      renameReason: managed ? 'Copilot 기록이 참조하는 경로입니다.' : protectedFolder || (target.folder && target.path === '포스트잇') ? '앱에서 사용하는 기본 폴더입니다.' : '',
       x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
-      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 48)),
+      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 92)),
     });
   };
   const startMacCopy = (event, vaultId, path) => {
@@ -1198,13 +1216,14 @@ export default function App() {
   const prepareFile = async (path, action, folder = false, vaultId = vault.id) => {
     try {
       let revision = revisionMap(vaultId).get(path);
-      if (!folder && !/\.(md|canvas|base)$/i.test(path))
+      if (action === "rename" && /\.docx$/i.test(path)) revision = vaultsRef.current[vaultId]?.wordDocuments?.find(file => file.path === path)?.revision;
+      else if (!folder && !/\.(md|canvas|base)$/i.test(path))
         revision = (
           await invoke(api.readAttachment({ vaultId, path }))
         ).revision;
       setError("");
       setFileTarget({ path, revision, folder, vaultId });
-      setNewName(path);
+      setNewName(action === "rename" ? path.split('/').at(-1) : path);
       setModal(action);
     } catch (err) {
       setError(err.message);
@@ -1218,7 +1237,13 @@ export default function App() {
       const vaultId = fileTarget.vaultId;
       const revision = revisionMap(vaultId).get(fileTarget.path) ?? fileTarget.revision;
       const preferences = vaultsRef.current[vaultId]?.journalPreferences;
-      if (modal === "move") {
+      if (modal === "rename") {
+        const from = fileTarget.path, folder = fileTarget.folder;
+        const to = treeRenameDestination(from, newName, folder);
+        const snapshot = await invoke(api.renameTreeEntry({ vaultId, from, name: newName, folder, revision, protectedFolders: protectedTreeFolders(preferences) }));
+        applyWorkspaceRename(vaultId, from, to, snapshot);
+        setTreeReveal({ vaultId, folder: to.split('/').slice(0, -1).join('/') });
+      } else if (modal === "move") {
         await moveWorkspaceFile(vaultId, fileTarget.path, newName.trim(), revision);
         if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim(), vaultId);
         else await openAttachment(newName.trim(), "", vaultId);
@@ -2298,7 +2323,9 @@ export default function App() {
       </div>
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
-        <button role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>
+        <button role="menuitem" aria-disabled={!!treeMenu.renameReason||busy||edits.blocked()} title={treeMenu.renameReason||undefined} onClick={()=>{if(treeMenu.renameReason||busy||edits.blocked())return;const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"rename",folder,vaultId);}}>이름 바꾸기</button>
+        {treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
+        {treeMenu.canTrash && <button className="tree-trash" role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>}
       </div>}
       {lastTrash && (
         <div className="undo-toast">
@@ -2317,9 +2344,9 @@ export default function App() {
           </button>
         </div>
       )}
-      {(modal === "move" || modal === "trash") && (
+      {(modal === "move" || modal === "rename" || modal === "trash") && (
         <Modal
-          title={modal === "move" ? "파일 이름 변경·이동" : "휴지통으로 이동"}
+          title={modal === "rename" ? "이름 바꾸기" : modal === "move" ? "파일 이름 변경·이동" : "휴지통으로 이동"}
           onClose={() => !busy && setModal(null)}
         >
           <form onSubmit={alterFile}>
@@ -2329,9 +2356,9 @@ export default function App() {
                 {error}
               </p>
             )}
-            {modal === "move" ? (
+            {modal === "move" || modal === "rename" ? (
               <>
-                <label htmlFor="file-destination">보관함 안의 새 경로</label>
+                <label htmlFor="file-destination">{modal === "rename" ? "새 이름" : "보관함 안의 새 경로"}</label>
                 <input
                   id="file-destination"
                   autoFocus
@@ -2339,7 +2366,7 @@ export default function App() {
                   onChange={(e) => setNewName(e.target.value)}
                 />
                 <p className="muted">
-                  확장자를 유지하세요. 연결 문서의 링크도 함께 갱신합니다.
+                  {!fileTarget?.folder && "확장자를 유지하세요. "}연결 문서의 링크도 함께 갱신합니다.
                 </p>
               </>
             ) : (
@@ -2357,7 +2384,7 @@ export default function App() {
                 className="primary-button"
                 disabled={busy || !newName.trim()}
               >
-                {modal === "move" ? "이동·링크 갱신" : "휴지통으로 이동"}
+                {modal === "rename" ? "이름 바꾸기" : modal === "move" ? "이동·링크 갱신" : "휴지통으로 이동"}
               </button>
             </div>
           </form>
