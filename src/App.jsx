@@ -72,10 +72,12 @@ import GitHistory from "./GitHistory.jsx";
 import GitWorkspace from "./GitWorkspace.jsx";
 import UpdateSettings from "./UpdateSettings.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
+import CopilotDocument, { DocumentPromptSettings } from "./CopilotDocument.jsx";
 import useAiSession from "./useAiSession.jsx";
 import useCopilotEdits from "./useCopilotEdits.jsx";
 import { overlayNotes } from "./copilotEdits.mjs";
 import { applyProposal } from "../core/copilot.mjs";
+import { defaultDocumentPrompt } from "../core/copilot-document.mjs";
 import { isolateHistory } from "@codemirror/commands";
 import { normalizeFonts, fontVariables } from "../core/font-preferences.mjs";
 import "katex/dist/katex.min.css";
@@ -116,6 +118,7 @@ const stored = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 };
 const persist = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Remain usable during this session. */ } };
+const documentPromptsKey = "dynote.document-prompts";
 
 function IconButton({ label, children, onClick, active = false, ...props }) {
   return (
@@ -261,6 +264,11 @@ function Modal({ title, children, onClose, wide = false, className = "" }) {
 export default function App() {
   const externalFile = useExternalDocuments(api, invoke);
   const aiSession = useAiSession(api);
+  const [documentPrompts, setDocumentPrompts] = useState(() => {
+    const saved = stored(documentPromptsKey, null);
+    return Array.isArray(saved) && saved[0]?.id === "default" && saved.every(p =>
+      typeof p?.id === "string" && typeof p.name === "string" && typeof p.text === "string") ? saved : [defaultDocumentPrompt];
+  });
   const [fonts, setFonts] = useState(() => {
     try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
   });
@@ -500,6 +508,7 @@ export default function App() {
   const pendingEdit = edits.drafts.find(draft => draft.path === active);
   const chatPaths = useRef(new Map());
   const note = section === "journal" || attachment ? null : model.notes.find(n => n.path === active);
+  const canMakeCopilotDocument = vault?.purpose === "personal" && note && copilotSessionPath.test(note.path);
   if (note) chatPaths.current.set(vault.id, note.path);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
   const structured = section === "journal" || attachment ? null : documents.find(d => d.path === active);
@@ -911,6 +920,19 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveCopilotDocument = async (path, content) => {
+    if (!canMakeCopilotDocument || busy || captureLocked || edits.blocked()) throw new Error("현재 문서 작업이 끝난 뒤 다시 저장해 주세요.");
+    const id = vault.id;
+    setBusy(true);
+    try {
+      await flush();
+      const created = await invoke(api.createNote({ vaultId: id, path, content }));
+      revisionMap(id).set(created.path, created.revision);
+      updateVault(id, old => old && ({ ...old, notes: [...old.notes, created] }));
+      openNote(created.path, id);
+    } finally { setBusy(false); }
   };
 
   const reload = async () => {
@@ -1857,6 +1879,8 @@ export default function App() {
               </span>
             </div>
             <div className="toolbar-actions">
+              {canMakeCopilotDocument && !["graph", "planner"].includes(section) && <button className="text-action" disabled={busy || captureLocked || edits.blocked()}
+                onClick={() => setModal("copilot-document")}>문서로 만들기</button>}
               {note && <button className="text-action" disabled={busy} onClick={()=>{setModal("compare");}}>문서 나란히 보기</button>}
               {!["graph"].includes(section) && (note || structured) && (
                 <>
@@ -2530,6 +2554,10 @@ export default function App() {
         <input type="date" aria-label="과거 기록 기준 날짜" value={historyDate} onChange={e => { if (e.target.value) setHistoryDate(e.target.value); }}/>
         <NavigationPanel title="지난 기록" paths={onThisDay(model.notes,historyDate,{...journalPreferences.daily,locale:journalPreferences.locale}).map(n=>n.path)} onOpen={openNote}/>
       </Modal>}
+      {modal === "copilot-document" && canMakeCopilotDocument && <Modal title="문서로 만들기" wide className="conversation-document-modal" onClose={() => !busy && setModal(null)}>
+        <CopilotDocument key={note.path} source={{ ...note, title: captureTreeEntries.get(vault.id)?.get(note.path)?.label ?? note.title }} vaultId={vault.id}
+          session={aiSession} prompts={documentPrompts} onSave={saveCopilotDocument} />
+      </Modal>}
       {modal === "capture-history" && vault?.purpose === "personal" && (
         <Modal title="프로젝트별 기록" className="capture-history-modal" onClose={() => setModal(null)}>
           <CopilotJournalHistory state={captureState} onOpen={({path,heading,date}) => {
@@ -2669,7 +2697,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
@@ -2713,6 +2741,11 @@ export default function App() {
             onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}
             onSessions={projects=>invoke(api.captureSessions({vaultId:captureVaultId,projects}))}
             onImport={sessionIds=>captureAction("sync",true,{sessionIds},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
+          {settingsTab === "document-prompts" && <DocumentPromptSettings prompts={documentPrompts} onSave={value => {
+            try { localStorage.setItem(documentPromptsKey, JSON.stringify(value)); }
+            catch { throw new Error("프롬프트 설정을 저장하지 못했습니다."); }
+            setDocumentPrompts(value);
+          }} />}
           {settingsTab === "fonts" && <FontSettings value={fonts} onChange={(value) => setFonts(normalizeFonts(value))} />}
           {settingsTab === "plugins" && vault.id && <PluginSettings key={vault.id} data={pluginData}
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
