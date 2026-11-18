@@ -1534,7 +1534,7 @@ export default function App() {
   };
   const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles)]}
     folders={scope.folders ?? emptyFiles}
-    folderLabels={new Map((captureStates[scope.id]?.records ?? []).map(record => [`Copilot Note/${record.projectKey}`, record.label]))}
+    folderLabels={new Map((captureStates[scope.id]?.records ?? []).map(record => [record.projectFolder, record.label]))}
     active={vault.id === scope.id ? displayedPath : null}
     disabled={busy} onOpen={path => openFile(path, scope.id)}
     reveal={treeReveal?.vaultId === scope.id ? treeReveal : null}

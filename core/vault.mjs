@@ -766,11 +766,12 @@ export class Vault {
       catch (error) { if (reserve) await rmdir(destination).catch(() => {}); throw error; }
       const saved = [];
       try {
+        // Keep the renamed file's inode available for rollback until the other links are saved.
+        edits.sort((a, b) => Number(a.file.path === from) - Number(b.file.path === from));
         for (const edit of edits) {
           const result = await this.#save(edit.path, edit.content, edit.file.revision);
           saved.push({ ...edit, revision: result.revision });
         }
-        return await this.#snapshot();
       } catch (error) {
         for (const edit of saved.reverse()) await this.#save(edit.path, edit.file.content, edit.revision).catch(() => {});
         const actual = await lstat(destination, { bigint: true }).catch(() => null);
@@ -779,6 +780,7 @@ export class Vault {
             (existing || !await lstat(source).catch(() => null))) await rename(destination, source);
         throw error;
       }
+      return this.#snapshot();
     });
   }
 

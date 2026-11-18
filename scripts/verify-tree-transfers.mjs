@@ -126,9 +126,9 @@ try {
     await renameDialog.getByLabel("새 이름",{exact:true}).fill(name);
     await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
   };
-  await row(personalTree,"Archive/Plan.md").click();
   const renameWithF2=async (tree,from,name)=>{
-    await row(tree,from).press("F2");
+    await row(tree,from).click();
+    await page.keyboard.press("F2");
     await renameDialog.getByLabel("새 이름",{exact:true}).fill(name);
     await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
   };

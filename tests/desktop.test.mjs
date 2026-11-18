@@ -4,12 +4,14 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   writeFile,
   symlink,
   rm,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { Vault } from "../core/vault.mjs";
 import * as knowledge from "../core/knowledge.mjs";
 const png = Buffer.from(
@@ -276,4 +278,18 @@ test('renaming a folder preserves nested files and updates Markdown and Canvas l
   const renamed=await store.moveFile(note.path,'New Space/Nested/a.md',note.revision);
   assert.ok(renamed.notes.some(note=>note.path==='New Space/Nested/a.md'));
   assert.match(await readFile(join(root,'Home.md'),'utf8'),/Nested\/a\.md/);
+});
+
+test('a failed link update restores the original name of a self-linking note', async t => {
+  const { root, store } = await fixture(t);
+  const selfLink = '[Self](Alpha.md)\n';
+  const note = await store.create('Alpha.md',selfLink);
+  await store.create('Zed.md','[Alpha](Alpha.md)\n');
+  await mkdir(store.recoveryRoot,{recursive:true});
+  const backup = createHash('sha256').update('Zed.md').digest('hex').slice(0,16);
+  await writeFile(join(store.recoveryRoot,backup),'block the backup directory');
+  await assert.rejects(store.moveFile('Alpha.md','alpha.md',note.revision),{code:'EEXIST'});
+  assert.deepEqual((await readdir(root)).sort(),['Alpha.md','Zed.md']);
+  assert.equal(await readFile(join(root,'Alpha.md'),'utf8'),selfLink);
+  assert.equal(await readFile(join(root,'Zed.md'),'utf8'),'[Alpha](Alpha.md)\n');
 });

@@ -112,7 +112,7 @@ export class CopilotJournal{
   return {sourceRoot:config.sourceRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,projects:projects.map(p=>({...p,selected:Object.hasOwn(config.projects,p.id)})),error,
    needsMigration:legacyLayout(config),pendingCapture:!!config.pendingCapture,
    records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,journalPath:r.journalPath,
-    projectKey:path.posix.basename(path.posix.dirname(r.path)),
+    projectKey:path.posix.basename(path.posix.dirname(r.path)),projectFolder:path.posix.dirname(r.path),
     sessions:Object.entries(r.sessions).map(([id,s])=>({id,title:s.title,
      path:config.sessionLayout?sessionPath(r,id):r.path,
      heading:config.sessionLayout?r.date:captureSessionHeading(s.title).trim(),

@@ -3,7 +3,7 @@ import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,readdir} from 'node:fs/prom
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {localDate} from '../core/periodic-notes.mjs';
-import {captureLink,renderCapture} from '../core/copilot-journal.mjs';
+import {captureId,captureLink,renderCapture} from '../core/copilot-journal.mjs';
 import {captureDateHeading,captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await realpath(await mkdtemp(path.join(tmpdir(),'dynote-copilot-journal-'))),profile=path.join(root,'profile'),vault=path.join(root,'vault'),team=path.join(root,'team'),source=path.join(root,'workspaceStorage');
@@ -385,6 +385,28 @@ try{
  await check('team and stale-vault IPC cannot capture private chats',async()=>{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);
   assert.equal(result[0].ok,true);assert.equal(result[1].ok,false);assert.equal(result[2].ok,false);assert.match(result[2].error,/개인/);
+ });
+ await check('an existing AI Conversations folder keeps its path and displays its saved project name',async()=>{
+  await app.close();
+  const stored=JSON.parse(await readFile(configFile,'utf8'));
+  const config=stored.vaults[vaultId];
+  const record=structuredClone(Object.values(config.records)[0]);
+  record.id=captureId('legacy',record.date);
+  record.label='Previously imported project';
+  const folder=`AI Conversations/${captureId('legacy')}`;
+  record.path=`${folder}/${record.date}.md`;
+  config.records[record.id]=record;
+  await writeFile(configFile,JSON.stringify(stored));
+  await writeFile(path.join(profile,'settings.json'),JSON.stringify({vaultRoot:vault,vaults:[vault,team],vaultPurposes:{[vault]:'personal',[team]:'team'}}));
+  const sessionPath=`${folder}/${Object.keys(record.sessions)[0]}.md`;
+  await mkdir(path.join(vault,folder),{recursive:true});
+  await writeFile(path.join(vault,sessionPath),'# Previously imported chat\n');
+  app=await launch();await setup();
+  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
+  const tree=page.getByRole('region',{name:'개인 노트 · vault',exact:true});
+  await tree.getByRole('button',{name:record.label,exact:true}).and(tree.getByTitle(folder,{exact:true})).waitFor();
+  await tree.getByTitle(sessionPath,{exact:true}).click();
+  await page.getByRole('region',{name:`문서 ${sessionPath}`,exact:true}).waitFor();
  });
  await check('renderer has no errors',async()=>assert.deepEqual(errors,[]));
  await writeFile(path.join(output,'report.json'),JSON.stringify({checks,errors},null,2)+'\n');console.log(JSON.stringify({checks,errors},null,2));

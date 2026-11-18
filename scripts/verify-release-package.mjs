@@ -54,6 +54,7 @@ for (const [platform, relative] of packages.filter(([platform]) => !selected || 
     assert.deepEqual(embedded, expected, "Dynote.exe must embed the approved icon at every size");
   }
   const contents = listPackage(archive).map(name => name.replaceAll("\\", "/"));
+  assert.ok(!contents.some(name => /\/node_modules\/picomatch(?:\/|$)/.test(name)), "Build-only picomatch must not ship");
   assert.ok(!contents.some((name) => name.includes("graph-simulation.wasm")));
   const runtimes = contents.filter(name => /^\/node_modules\/@github\/copilot-sdk-[^/]+$/.test(name));
   assert.deepEqual(runtimes, [`/node_modules/@github/copilot-sdk-${platform}`], "Package only the target Copilot runtime");
