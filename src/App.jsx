@@ -131,7 +131,9 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
   );
 }
 
-function FileTree({ notes, folders, folderLabels, active, reveal, onOpen, onContext, onRename, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
+const copilotSessionPath = /^(?:Copilot Note|AI Conversations)\/[a-f0-9]{20}\/[a-f0-9]{20}\.md$/;
+
+function FileTree({ notes, folders, captureEntries, active, reveal, onOpen, onContext, onRename, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
   const [closed, setClosed] = useState(new Set());
   useEffect(() => {
     if (!reveal?.folder) return;
@@ -154,7 +156,6 @@ function FileTree({ notes, folders, folderLabels, active, reveal, onOpen, onCont
     const parts = note.path.split("/");
     children(parts.slice(0, -1))[parts.at(-1)] = { note };
   }
-  const labelFor = (prefix, name) => folderLabels.get(prefix + name) ?? name;
   const renameOnF2 = (event, target) => {
     if (event.key !== "F2" || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     event.preventDefault();
@@ -162,13 +163,18 @@ function FileTree({ notes, folders, folderLabels, active, reveal, onOpen, onCont
   };
   const render = (level, prefix = "", depth = 0) =>
     Object.entries(level)
-      .sort(
-        ([a, av], [b, bv]) =>
-          Number(!!bv.children) - Number(!!av.children) ||
-          labelFor(prefix, a).localeCompare(labelFor(prefix, b), "ko") || a.localeCompare(b, "ko"),
-      )
       .map(([name, item]) => {
         const path = prefix + name;
+        const capture = captureEntries?.get(path);
+        const label = capture?.label ?? (copilotSessionPath.test(path) ? item.note?.title : undefined);
+        return { name, item, path, label, lastActivity: capture?.lastActivity ?? 0 };
+      })
+      .sort(
+        (a, b) => Number(!!b.item.children) - Number(!!a.item.children) ||
+          b.lastActivity - a.lastActivity ||
+          (a.label ?? a.name).localeCompare(b.label ?? b.name, "ko") || a.name.localeCompare(b.name, "ko"),
+      )
+      .map(({ name, item, path, label }) => {
         const word = item.note?.kind === "word";
         if (item.note)
           return (
@@ -187,7 +193,7 @@ function FileTree({ notes, folders, folderLabels, active, reveal, onOpen, onCont
               onDragEnd={word ? undefined : onDragEnd}
             >
               <FileText size={14} />
-              <span>{name.replace(/\.md$/i, "")}</span>
+              <span title={label}>{label ?? name.replace(/\.md$/i, "")}</span>
               {active === path && <span className="active-file-dot" />}
             </button>
           );
@@ -217,7 +223,7 @@ function FileTree({ notes, folders, folderLabels, active, reveal, onOpen, onCont
                 <ChevronRight size={13} />
               )}
               <Folder size={14} />
-              <span>{labelFor(prefix, name)}</span>
+              <span>{label ?? name}</span>
             </button>
             {expanded && render(item.children, path + "/", depth + 1)}
           </div>
@@ -399,6 +405,17 @@ export default function App() {
   const navigation = vault?.navigation ?? emptyNavigation;
   const journalPreferences = vault?.journalPreferences ?? {};
   const [captureStates, setCaptureStates] = useState({});
+  const captureTreeEntries = useMemo(() => new Map(Object.entries(captureStates).map(([id, state]) => {
+    const entries = new Map();
+    for (const { projectFolder, label, sessions } of state?.records ?? []) {
+      entries.set(projectFolder, { label });
+      for (const { path, title, lastActivity } of sessions) {
+        if (copilotSessionPath.test(path) && lastActivity > (entries.get(path)?.lastActivity ?? -Infinity))
+          entries.set(path, { label: title || undefined, lastActivity });
+      }
+    }
+    return [id, entries];
+  })), [captureStates]);
   const [captureImportResult, setCaptureImportResult] = useState(null);
   const [automaticCaptureId, setAutomaticCaptureId] = useState(null);
   const captureLocked = !!vault?.id && automaticCaptureId === vault.id;
@@ -1534,7 +1551,7 @@ export default function App() {
   };
   const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles)]}
     folders={scope.folders ?? emptyFiles}
-    folderLabels={new Map((captureStates[scope.id]?.records ?? []).map(record => [record.projectFolder, record.label]))}
+    captureEntries={captureTreeEntries.get(scope.id)}
     active={vault.id === scope.id ? displayedPath : null}
     disabled={busy} onOpen={path => openFile(path, scope.id)}
     reveal={treeReveal?.vaultId === scope.id ? treeReveal : null}

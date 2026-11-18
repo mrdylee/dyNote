@@ -111,12 +111,14 @@ try{
   assert.match(await readFile(path.join(source,'project/chatSessions/first.json'),'utf8'),/첫 질문 원문/);
  });
  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
- await check('personal tree displays the project name while keeping the real project path',async()=>{
+ await check('personal tree displays project and session titles while keeping their real paths',async()=>{
   const tree=page.getByRole('region',{name:'개인 노트 · vault',exact:true});
   const folder=path.posix.dirname(record.sessions[0].path);
   await tree.getByRole('button',{name:record.label,exact:true}).and(tree.getByTitle(folder,{exact:true})).waitFor();
   assert.equal(await tree.getByRole('button',{name:record.projectKey,exact:true}).count(),0);
-  await tree.getByTitle(record.sessions[0].path,{exact:true}).waitFor();
+  const session=record.sessions[0];
+  await tree.getByRole('button',{name:session.title,exact:true}).and(tree.getByTitle(session.path,{exact:true})).waitFor();
+  assert.equal(await tree.getByRole('button',{name:path.posix.basename(session.path,'.md'),exact:true}).count(),0);
  });
  await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
@@ -324,6 +326,15 @@ try{
   await closeSettings();
   const {projects,records}=await captureState();
   const {key}=projects.find(project=>project.id==='project');
+  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
+  const tree=page.getByRole('region',{name:'개인 노트 · vault',exact:true});
+  await tree.getByRole('button',{name:continuedTitle,exact:true}).waitFor();
+  const folder=records.find(record=>record.projectKey===key).projectFolder;
+  const titles=await tree.locator('.file-row').evaluateAll((rows,folder)=>rows
+   .filter(row=>row.title.startsWith(`${folder}/`)&&/[a-f0-9]{20}\.md$/.test(row.title))
+   .map(row=>row.textContent),folder);
+  assert.deepEqual(titles,[continuedTitle,'어제 작성한 질문','먼저 끝난 세션']);
+  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
   const history=page.getByRole('dialog',{name:'프로젝트별 기록',exact:true});
   const openHistory=()=>page.getByRole('button',{name:'프로젝트별 기록',exact:true}).click({timeout:5000});
   const project=distro=>history.locator('.capture-history-project').filter({has:page.getByText(`WSL (${distro}) · /home/dev/WSL Work`,{exact:true})});
@@ -386,7 +397,7 @@ try{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);
   assert.equal(result[0].ok,true);assert.equal(result[1].ok,false);assert.equal(result[2].ok,false);assert.match(result[2].error,/개인/);
  });
- await check('an existing AI Conversations folder keeps its path and displays its saved project name',async()=>{
+ await check('AI Conversations keeps its paths and shows saved or recovered titles after restart',async()=>{
   await app.close();
   const stored=JSON.parse(await readFile(configFile,'utf8'));
   const config=stored.vaults[vaultId];
@@ -401,12 +412,16 @@ try{
   const sessionPath=`${folder}/${Object.keys(record.sessions)[0]}.md`;
   await mkdir(path.join(vault,folder),{recursive:true});
   await writeFile(path.join(vault,sessionPath),'# Previously imported chat\n');
+  const recoveredPath=`${folder}/${captureId('recovered-session')}.md`;
+  await writeFile(path.join(vault,recoveredPath),'# Recovered chat title\n');
   app=await launch();await setup();
   await page.getByRole('button',{name:'파일 목록',exact:true}).click();
   const tree=page.getByRole('region',{name:'개인 노트 · vault',exact:true});
   await tree.getByRole('button',{name:record.label,exact:true}).and(tree.getByTitle(folder,{exact:true})).waitFor();
-  await tree.getByTitle(sessionPath,{exact:true}).click();
+  const title=Object.values(record.sessions)[0].title;
+  await tree.getByRole('button',{name:title,exact:true}).and(tree.getByTitle(sessionPath,{exact:true})).click();
   await page.getByRole('region',{name:`문서 ${sessionPath}`,exact:true}).waitFor();
+  await tree.getByRole('button',{name:'Recovered chat title',exact:true}).and(tree.getByTitle(recoveredPath,{exact:true})).waitFor();
  });
  await check('renderer has no errors',async()=>assert.deepEqual(errors,[]));
  await writeFile(path.join(output,'report.json'),JSON.stringify({checks,errors},null,2)+'\n');console.log(JSON.stringify({checks,errors},null,2));
