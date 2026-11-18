@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { captureDateHeading } from "../core/copilot-journal-links.mjs";
 import {
   BookOpen,
   Bookmark,
@@ -2463,12 +2464,14 @@ export default function App() {
       </Modal>}
       {modal === "capture-history" && vault?.purpose === "personal" && (
         <Modal title="프로젝트별 기록" className="capture-history-modal" onClose={() => setModal(null)}>
-          <CopilotJournalHistory state={captureState} onOpen={({path,heading}) => {
+          <CopilotJournalHistory state={captureState} onOpen={({path,heading,date}) => {
             const target = model.notes.find(note => note.path === path);
             if (!target) { setModal(null); setError("가져온 대화 문서를 찾을 수 없습니다."); return; }
             openNote(path, vault.id);
             const lines = target.content.split(/\r\n?|\n/);
-            const matches = target.headings.filter(h => h.level === 2 && h.text === heading && /^##(?:[ \t]|$)/.test(lines[h.line]));
+            const headings = target.headings.filter(h => h.level === 2 && /^##(?:[ \t]|$)/.test(lines[h.line]));
+            const generated = heading === date ? headings.filter(h => h.text === captureDateHeading(date)) : [];
+            const matches = generated.length ? generated : headings.filter(h => h.text === heading);
             if (matches.length === 1) setEditorJump({ path, heading: matches[0] }, vault.id);
           }}/>
         </Modal>

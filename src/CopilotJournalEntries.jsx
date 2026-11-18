@@ -30,7 +30,7 @@ export function CopilotJournalHistory({state,onOpen}){
    .sort(([a],[b])=>newestFirst(a,b));
   return <details className="capture-history-project" key={key}>
    <summary><strong>{project.label}</strong> <small>{sessions.length}건</small>
-    <small className="capture-history-path">{projectPaths.get(key)??`AI Conversations/${key}`}</small>
+    <small className="capture-history-path">{projectPaths.get(key)??sessions[0]?.[0].path.split('/').slice(0,-1).join('/')}</small>
    </summary>
    <ul>{sessions.map(([latest,...earlier])=><li key={latest.id}>
     <button className="capture-history-session" onClick={()=>onOpen(latest)}>

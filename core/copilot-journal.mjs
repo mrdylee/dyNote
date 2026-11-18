@@ -1,4 +1,7 @@
 import {createHash} from 'node:crypto';
+import MarkdownIt from 'markdown-it';
+import {captureDateHeading} from './copilot-journal-links.mjs';
+export const COPILOT_NOTE_FOLDER='Copilot Note';
 export const captureId=(...parts)=>createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0,20);
 const problem=()=>new Error('지원하지 않거나 저장 중인 Copilot 대화 기록 형식입니다.');
 const text=value=>typeof value==='string'?value:'';
@@ -78,6 +81,17 @@ export function parseChatSource(source,sessionId){
 const heading=value=>title(value).replace(/[#[\]|<>`]/g,'');
 export const captureSessionHeading=value=>heading(value)||'대화';
 const quote=value=>value.split('\n').map(line=>`> ${line}`).join('\n');
+const markdown=new MarkdownIt();
+function endMessage(text){
+ if(!text.includes('```')&&!text.includes('~~~'))return text;
+ const fence=markdown.parse(text,{}).at(-1);
+ if(fence?.type!=='fence'||fence.level!==0)return text;
+ const [start,end]=fence.map;
+ const closer=new RegExp(`^ {0,3}${fence.markup[0]}{${fence.markup.length},}[ \\t]*$`);
+ if(end>start+1&&closer.test(text.split(/\r\n|\n|\r/)[end-1]))return text;
+ // Close an unfinished code block so it cannot absorb the next speaker heading.
+ return text+(text.endsWith('\n')?'':'\n')+fence.markup;
+}
 export function renderCapture(record){
  const parts=[`# ${heading(record.label)} · AI 대화 · ${record.date}`,'','VS Code Copilot에서 가져온 대화 기록입니다.',''];
  for(const session of Object.values(record.sessions)){
@@ -86,12 +100,13 @@ export function renderCapture(record){
  }
  return parts.join('\n');
 }
-export function renderSessionCapture(session){
+export function renderSessionCapture(session,{legacy=false}={}){
  const parts=[`# ${captureSessionHeading(session.title)}`,'',`${heading(session.label)} · VS Code Copilot 대화 기록`,''];
  let date;
  for(const message of session.messages.values()){
-  if(date!==message.date){date=message.date;parts.push(`## ${date}`,'');}
-  parts.push(`### ${message.role==='user'?'질문':'답변'}`,'',quote(message.text),'');
+  if(date!==message.date){date=message.date;parts.push(`## ${legacy?date:captureDateHeading(date)}`,'');}
+  const speaker=message.role==='user'?(legacy?'질문':'내 프롬프트'):(legacy?'답변':'Copilot 답변');
+  parts.push(`### ${speaker}`,'',legacy?quote(message.text):endMessage(message.text),'');
  }
  return parts.join('\n');
 }

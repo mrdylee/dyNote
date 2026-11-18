@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {parseDocument} from 'yaml';
-import {parseChatSource,captureId,captureSessionHeading,renderSessionCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
+import {COPILOT_NOTE_FOLDER,parseChatSource,captureId,captureSessionHeading,renderSessionCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
 import {localDate,periodicNote} from '../core/periodic-notes.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const directoryName=value=>/^[\w-]{1,128}$/.test(value);
@@ -257,7 +257,8 @@ export class CopilotJournal{
    const oldText=before?renderSessionCapture(before):null,newText=after?renderSessionCapture(after):null;
    if(oldText===newText)continue;
    const name=(after??before).path,current=notes.get(name);
-   if(current&&current.content!==oldText&&current.content!==newText)throw new Error('가져온 대화 문서가 수정되었습니다. 내용을 확인한 뒤 다시 가져와 주세요.');
+   if(current&&current.content!==oldText&&current.content!==newText&&
+      (!before||current.content!==renderSessionCapture(before,{legacy:true})))throw new Error('가져온 대화 문서가 수정되었습니다. 내용을 확인한 뒤 다시 가져와 주세요.');
    if(!current&&before&&after)throw new Error('가져온 대화 문서가 삭제되거나 이동되었습니다. 자동 기록 제목에서 삭제 상태를 정리해 주세요.');
    if(current?.content!==newText&&(current||after))edits.set(name,newText);
   }
@@ -291,6 +292,8 @@ export class CopilotJournal{
   }
   if(manual&&migrating&&!selected)return this.commit(vault,previous,clone(previous));
   const next=clone(previous);
+  // Keep sessions in the same folder across dates until their saved paths are moved.
+  const folder=Object.values(previous.records).some(record=>record.path.startsWith('AI Conversations/'))?'AI Conversations':COPILOT_NOTE_FOLDER;
   const sessions=sessionRecords(next.records),updated=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
@@ -320,7 +323,7 @@ export class CopilotJournal{
      const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      compatible??=compatibleSource(existing,source);
      if(!compatible){incompatible=true;break;}
-     const record=next.records[id]??={id,date,label:project.label,path:`AI Conversations/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
+     const record=next.records[id]??={id,date,label:project.label,path:`${folder}/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
      let session=record.sessions[sessionId];
      if(!session){
       session=record.sessions[sessionId]={title:source.title||'대화',messages:[]};

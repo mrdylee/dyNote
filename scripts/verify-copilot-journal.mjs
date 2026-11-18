@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {localDate} from '../core/periodic-notes.mjs';
 import {captureLink,renderCapture} from '../core/copilot-journal.mjs';
-import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
+import {captureDateHeading,captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
 const root=await realpath(await mkdtemp(path.join(tmpdir(),'dynote-copilot-journal-'))),profile=path.join(root,'profile'),vault=path.join(root,'vault'),team=path.join(root,'team'),source=path.join(root,'workspaceStorage');
 const output=process.env.DYNOTE_UI_OUTPUT||'output/playwright/copilot-journal',mod=process.platform==='darwin'?'Meta':'Control',journal=`Journal/${localDate()}.md`;
@@ -208,7 +208,7 @@ try{
   await settings().getByText('선택한 세션의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
   await closeSettings();
   const content=await readFile(path.join(vault,secondPath),'utf8');
-  assert.match(content,/> 두 번째 질문/);assert.doesNotMatch(content,/교체하면 안 되는 질문/);
+  assert.match(content,/### 내 프롬프트\n\n두 번째 질문/);assert.doesNotMatch(content,/교체하면 안 되는 질문/);
   assert.match(content,/즉시 가져올 첫 질문/);assert.match(content,/즉시 가져올 두 번째 질문/);
   assert.equal(captureLinkRanges(await readFile(path.join(vault,journal),'utf8')).length,1);
  });
@@ -340,7 +340,7 @@ try{
    return state.doc.lineAt(state.selection.main.head).text;
   });
   await pane.waitFor();
-  assert.equal(await cursorLine(),`## ${from}`,'open the earlier date in the same session document');
+  assert.equal(await cursorLine(),`## ${captureDateHeading(from)}`,'open the earlier date in the same session document');
   const openLatest=async()=>{
    await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
    await openHistory();
@@ -348,10 +348,10 @@ try{
    await history.getByRole('button',{name:/^이어진 세션/}).click();
   };
   await openLatest();
-  assert.equal(await cursorLine(),`## ${to}`,'skip matching headings quoted inside the session');
+  assert.equal(await cursorLine(),`## ${captureDateHeading(to)}`,'skip matching dates in the original message heading');
   const file=path.join(vault,target);
   const [heading,...sections]=(await readFile(file,'utf8')).split(/(?=^## )/m);
-  const index=sections.findIndex(section=>section.startsWith(`## ${to}\n`));
+  const index=sections.findIndex(section=>section.startsWith(`## ${captureDateHeading(to)}\n`));
   assert.ok(index>0);
   const reordered=[heading,sections[index],...sections.filter((_,i)=>i!==index)].map(part=>part.trimEnd()).join('\n\n')+'\n';
   await editor.evaluate((el,content)=>{
@@ -362,7 +362,7 @@ try{
   await page.locator('.save-status.saved').waitFor();
   assert.equal(await readFile(file,'utf8'),reordered);
   await openLatest();
-  assert.equal(await cursorLine(),`## ${to}`,'follow the latest date after reordering sections');
+  assert.equal(await cursorLine(),`## ${captureDateHeading(to)}`,'follow the latest date after reordering sections');
   await page.getByRole('button',{name:'읽기 보기',exact:true}).click();
   await page.evaluate(()=>{
    const scroll=Element.prototype.scrollIntoView;
@@ -373,7 +373,7 @@ try{
   });
   await openLatest();
   await pane.locator('.document-content.read .markdown-preview').waitFor();
-  assert.equal(await page.evaluate(()=>window.captureTestReadHeading),to,'scroll to the latest date in the read view');
+  assert.equal(await page.evaluate(()=>window.captureTestReadHeading),captureDateHeading(to),'scroll to the latest date in the read view');
  });
  await check('team and stale-vault IPC cannot capture private chats',async()=>{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);

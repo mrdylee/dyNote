@@ -86,6 +86,33 @@ test('manual session selection imports every recorded date of only that session 
  assert.ok(!(await f.controller.listSessions(f.vault,['project'])).sessions.some(session=>session.id===selected.id));
  await f.controller.restore(f.vault,deleted.trashId);
 });
+test('Copilot Note stores raw Markdown under speaker headings and keeps journal links on later dates',async t=>{
+ const f=await fixture(t);
+ await f.put('first','첫 줄\n둘째 줄\n> 원래 인용문\n\n```js\nconst value = 1;\n```');
+ const initialSource=JSON.parse(await readFile(f.sourceFile,'utf8'));
+ initialSource.requests[0].response=[{value:'답변\n\n````js\nconst unfinished = true;'}];
+ await writeFile(f.sourceFile,JSON.stringify(initialSource));
+ await f.configure(false);
+ const [{id}]=(await f.controller.listSessions(f.vault,['project'])).sessions;
+ const options={sessionIds:[id]};
+ const first=await f.controller.sync(f.vault,{},true,options);
+ const [{path:document}]=first.status.records[0].sessions;
+ assert.match(document,/^Copilot Note\//);
+ const note=await readFile(path.join(f.vault.root,document),'utf8');
+ assert.ok(note.includes('### 내 프롬프트\n\n첫 줄\n둘째 줄\n> 원래 인용문\n\n```js\nconst value = 1;\n```'));
+ assert.ok(note.includes('### Copilot 답변\n\n답변\n\n````js\nconst unfinished = true;\n````'));
+ const source=JSON.parse(await readFile(f.sourceFile,'utf8'));
+ source.requests.push({...source.requests[0],requestId:'second',timestamp:f.now()+86400000,message:{text:'다음 날짜 질문'}});
+ await writeFile(f.sourceFile,JSON.stringify(source));
+ const next=await f.controller.sync(f.vault,{},true,options);
+ assert.equal(next.status.records.length,2);
+ for(const record of next.status.records){
+  assert.equal(record.sessions[0].path,document);
+  const [link]=captureLinkRanges(await readFile(path.join(f.vault.root,record.journalPath),'utf8'));
+  assert.ok(link?.link.text.includes(document));
+ }
+ assert.equal((await f.controller.sync(f.vault,{},true,options)).changed,false);
+});
 test('invalid or stale session selections are rejected before importing a partial selection',async t=>{
  const f=await fixture(t);await f.put();await f.configure(false);
  const {sessions}=await f.controller.listSessions(f.vault,['project']);
@@ -122,7 +149,7 @@ test('a selected session that becomes unreadable rejects the whole selection bef
  await writeFile(second,JSON.stringify({version:99,sessionId:'second',requests:[]}));
  await assert.rejects(f.controller.sync(f.vault,{},true,{sessionIds:sessions.map(session=>session.id)}),/선택한 세션/);
  assert.equal(Object.keys(f.controller.config(f.vault).records).length,0);
- await assert.rejects(readFile(path.join(f.vault.root,`AI Conversations/${captureId(pathToFileURL(path.join(f.root,'Work')).href)}/${sessions[0].id}.md`)),{code:'ENOENT'});
+ await assert.rejects(readFile(path.join(f.vault.root,`Copilot Note/${captureId(pathToFileURL(path.join(f.root,'Work')).href)}/${sessions[0].id}.md`)),{code:'ENOENT'});
 });
 test('multiple selected sessions write their own journals once without importing other sessions',async t=>{
  const f=await fixture(t),day=86400000;
@@ -248,10 +275,10 @@ test('an interrupted save resumes the same session and link after restart',async
  assert.equal(recovered.status.records.length,1);
  const [{path:sessionPath}]=recovered.status.records[0].sessions;
  assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,f.journal),'utf8')).length,1);
- assert.match(await readFile(path.join(f.vault.root,sessionPath),'utf8'),/> 질문/);
+ assert.match(await readFile(path.join(f.vault.root,sessionPath),'utf8'),/### 내 프롬프트\n\n질문/);
  assert.equal((await restarted.sync(f.vault,{})).changed,true);
  const text=await readFile(path.join(f.vault.root,sessionPath),'utf8');
- assert.match(text,/> 질문/);assert.match(text,/> 다음 질문/);
+ assert.match(text,/### 내 프롬프트\n\n질문/);assert.match(text,/### 내 프롬프트\n\n다음 질문/);
  assert.equal((await restarted.sync(f.vault,{})).changed,false);
 });
 test('a selected session is imported after completing an interrupted earlier import',async t=>{
