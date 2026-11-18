@@ -142,7 +142,7 @@ try {
   await assert.rejects(readFile(`${vault}/시험 대화 · 문서.md`), { code: "ENOENT" });
   const fileName = compose.getByRole("textbox", { name: "파일 이름", exact: true });
   await fileName.fill("Home");
-  await draft.fill("# 검증 절차\n\n검토한 초안을 저장합니다.");
+  await draft.fill("# 검증 절차\n\n검토한 초안을 저장합니다.\n\n```sh\nnpm test");
   const save = compose.getByRole("button", { name: "새 문서로 저장", exact: true });
   await save.click();
   await compose.getByRole("alert").filter({ hasText: "같은 이름" }).waitFor();
@@ -150,7 +150,9 @@ try {
   await fileName.fill("검증 절차");
   await save.click();
   await page.getByRole("region", { name: "문서 검증 절차.md", exact: true }).waitFor();
-  assert.match(await readFile(`${vault}/검증 절차.md`, "utf8"), /검토한 초안[\s\S]*\[\[Copilot%20Note\/.*\|원본 Copilot 대화\]\]/);
+  const savedDraft = await readFile(`${vault}/검증 절차.md`, "utf8");
+  assert.match(savedDraft, /검토한 초안을 저장합니다/);
+  assert.match(savedDraft, /\[\[Copilot%20Note\/.*\|원본 Copilot 대화\]\]/);
   assert.equal(await readFile(`${vault}/${copilotPath}`, "utf8"), transcript);
   assert.equal(await readFile(`${vault}/기존 일지.md`, "utf8"), journal);
   await page.getByRole("button", { name: "읽기 보기", exact: true }).click();

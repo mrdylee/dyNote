@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { conversationDocumentRequest, defaultDocumentPrompt, documentPrompt } from "../core/copilot-document.mjs";
+import { conversationDocumentContent, conversationDocumentRequest, defaultDocumentPrompt, documentPrompt } from "../core/copilot-document.mjs";
 
 export function DocumentPromptSettings({ prompts, onSave }) {
   const [editor, setEditor] = useState(prompts[0]);
@@ -107,8 +107,7 @@ export default function CopilotDocument({ source, vaultId, session, prompts, onS
     if (!name || /[\\/]/.test(name)) { setError("개인 노트에 저장할 파일 이름을 입력해 주세요."); return; }
     setSaving(true);
     try {
-      const target = source.path.split("/").map(encodeURIComponent).join("/");
-      await onSave(`${name}.md`, `${draft.trim()}\n\n출처: [[${target}|원본 Copilot 대화]]\n`);
+      await onSave(`${name}.md`, conversationDocumentContent(draft, source.path));
     } catch (failure) { setError(failure.message); }
     finally { setSaving(false); }
   };

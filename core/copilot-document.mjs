@@ -1,4 +1,5 @@
 import { prepareRequest } from "./copilot.mjs";
+import { parseMetadata } from "./metadata.mjs";
 
 const encoder = new TextEncoder();
 const partLimit = 64 * 1024;
@@ -44,4 +45,17 @@ export function conversationDocumentRequest({ requestId, vaultId, model, reasoni
     prompt: documentPrompt(template), context: { kind: "document", path: source.path, content: parts[0] },
     references: parts.slice(1).map((content, index) => ({ path: `${source.path} (${index + 2}/${parts.length})`, content })),
     history: [], vaultAccess: false });
+}
+
+export function conversationDocumentContent(draft, sourcePath) {
+  const content = draft.replace(/^(?:[ \t]*\r?\n)+/, "").trimEnd();
+  const { body } = parseMetadata(content);
+  const title = /^ {0,3}#[ \t]+[^\r\n]*(?:\r?\n|$)/.exec(body)?.[0] ?? "";
+  const end = content.length - body.length + title.length;
+  const header = content.slice(0, end).replace(/[\r\n]+$/, "");
+  const text = content.slice(end).replace(/^(?:[ \t]*\r?\n)+/, "");
+  const target = sourcePath.split("/").map(encodeURIComponent).join("/");
+  const eol = content.match(/\r?\n/)?.[0] ?? "\n";
+  // Keep the link outside an unfinished code block, without moving front matter or a title.
+  return [header, `출처: [[${target}|원본 Copilot 대화]]`, text].filter(Boolean).join(eol + eol) + eol;
 }

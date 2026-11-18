@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { conversationDocumentRequest, defaultDocumentPrompt, documentPrompt } from "../core/copilot-document.mjs";
+import { conversationDocumentContent, conversationDocumentRequest, defaultDocumentPrompt, documentPrompt } from "../core/copilot-document.mjs";
 
 const request = content => conversationDocumentRequest({ requestId: "fixture", vaultId: "personal", model: "model",
   source: { path: "Copilot Note/project/conversation.md", content }, template: defaultDocumentPrompt.text });
@@ -22,4 +22,13 @@ test("invalid prompts and oversized source documents are rejected without trunca
   assert.throws(() => documentPrompt("가".repeat(3000)), /너무 깁니다/);
   assert.throws(() => request("a".repeat(196609)), /192 KiB/);
   assert.throws(() => request("   "), /비어 있습니다/);
+});
+
+test("the original link comes after metadata and the title, before the draft body", () => {
+  const heading = "---\r\ntags: review\r\n---\r\n# Report";
+  const body = "```sh\r\nnpm test";
+  const source = "Copilot Note/project/conversation.md";
+  const link = "출처: [[Copilot%20Note/project/conversation.md|원본 Copilot 대화]]";
+  assert.equal(conversationDocumentContent(`${heading}\r\n\r\n${body}`, source), `${heading}\r\n\r\n${link}\r\n\r\n${body}\r\n`);
+  assert.equal(conversationDocumentContent("    indented code", source), `${link}\n\n    indented code\n`);
 });
