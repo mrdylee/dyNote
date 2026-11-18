@@ -16,7 +16,7 @@ try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   page.on("pageerror", (e) => report.errors.push(e.message));
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
   await app.evaluate(({ ipcMain, BrowserWindow, app }) => {
     globalThis.composerRequests = [];
     ipcMain.removeHandler("notes:copilot-status");
@@ -29,7 +29,9 @@ try {
     });
     BrowserWindow.getAllWindows()[0].setSize(1050, 700);
   });
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
+  await page.getByRole("button", { name: "파일 목록", exact: true }).click();
+  await page.locator('.file-row[title="Home.md"]').click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
   await page.getByLabel("Copilot 모델").selectOption("auto");
   const input = page.getByLabel("Copilot 질문");
@@ -80,7 +82,7 @@ try {
   await page.locator(".copilot-transcript").evaluate((element) => { element.scrollTop = 0; });
   await page.screenshot({ path: "output/playwright/copilot-composer.png" });
 } finally {
-  await app.evaluate(({ BrowserWindow }) => { setTimeout(() => BrowserWindow.getAllWindows().forEach((w) => w.destroy()), 30); }).catch(() => {});
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); }).catch(() => {});
   await app.close();
   await writeFile("docs/verification/copilot-composer-runtime.json", JSON.stringify(report, null, 2) + "\n");
 }

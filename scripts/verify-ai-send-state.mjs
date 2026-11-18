@@ -19,6 +19,7 @@ try {
   BrowserWindow.getAllWindows()[0].setSize(1420,940);
  },vault);
  await page.getByRole("dialog",{name:"설정",exact:true}).getByRole("button",{name:"닫기",exact:true}).click();
+ await page.getByRole("tab",{name:"Copilot",exact:true}).click();
  await refresh();
  await page.getByLabel("Copilot 모델",{exact:true}).selectOption("auto");
  const prompt=page.getByLabel("Copilot 질문",{exact:true}),send=page.getByRole("button",{name:"Copilot 보내기",exact:true});
@@ -27,6 +28,8 @@ try {
  assert.match(await page.getByLabel("Copilot 전송 상태",{exact:true}).innerText(),/노트 폴더/);
  report.checks.push("missing vault reproduces disabled send with explicit reason and prompt retained");
  await page.getByRole("button",{name:"AI용 노트 폴더 열기",exact:true}).click();
+ await page.getByRole("button",{name:"개인 노트 폴더 연결",exact:true}).click();
+ await page.getByRole("dialog",{name:"설정",exact:true}).getByRole("button",{name:"닫기",exact:true}).click();
  await page.getByRole("button",{name:"파일 목록",exact:true}).click();
  await page.locator('.file-row[title="Home.md"]').click();
  await refresh();

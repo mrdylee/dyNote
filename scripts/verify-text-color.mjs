@@ -34,7 +34,7 @@ const save = async expected => {
 try {
   await setup(); await page.getByRole("button", { name: "편집 보기", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: /ESS LINK/ }).count(), 0);
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByLabel("AI 제공자", { exact: true }).selectOption("codex");
   assert.equal(await page.getByText("MCP·스킬", { exact: true }).count(), 0);
   assert.equal(await page.getByRole("button", { name: "MCP 설정 연결", exact: true }).count(), 0);
@@ -86,8 +86,8 @@ try {
   await select(red.length);
   assert.equal(await page.locator(".cm-live-color").first().evaluate(el => getComputedStyle(el).color), "rgb(198, 40, 40)");
   await select(2, 4); await choose("#1565c0"); await apply();
-  await page.getByRole("tab", { name: "문서 정보", exact: true }).click();
-  const outline = page.locator(".outline").getByRole("button", { name: "색상", exact: true });
+  await page.getByRole("tab", { name: "목차", exact: true }).click();
+  const outline = page.getByRole("region", { name: "문서 목차" }).getByRole("button", { name: "색상", exact: true });
   await outline.waitFor(); await select((await content()).length); await outline.click();
   const headingLine = await editor().evaluate(el => { const view = el.cmTile.root.view; return view.state.doc.lineAt(view.state.selection.main.head).number; });
   assert.equal(headingLine, 1);

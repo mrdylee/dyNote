@@ -36,6 +36,7 @@ try{
   });
  },captureAuditPrompt);
  await page.getByRole('button',{name:'파일 목록',exact:true}).click();
+ await page.getByRole('tab',{name:'Copilot',exact:true}).click();
  await page.getByRole('button',{name:'Copilot 연결 상태 확인',exact:true}).click();
  await page.getByLabel('Copilot 모델',{exact:true}).selectOption('fixture');
  await page.getByRole('button',{name:'개발 플래너',exact:true}).click();

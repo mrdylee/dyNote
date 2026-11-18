@@ -6,9 +6,7 @@ import { captureAuditPrompt } from "../core/planner.mjs";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const root = await mkdtemp(`${tmpdir()}/dynote-studio-session-`), profile = `${root}/profile`, vault = `${root}/vault`;
 await mkdir(profile); await mkdir(vault); await mkdir("output/playwright", { recursive: true });
-await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault }));
-await writeFile(`${root}/mcp.json`, JSON.stringify({ mcpServers: { "public-fixture": { command: "not-executed-by-this-UI-test", env: { PRIVATE_FIXTURE: "DO_NOT_RENDER_SECRET" } } } }));
-await mkdir(`${root}/public-skills`); await writeFile(`${root}/public-skills/SKILL.md`, "---\nname: public-skill\ndescription: Public fixture\n---\nPUBLIC_SKILL");
+await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault, vaultPurposes: { [vault]: "personal" } }));
 const app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
 const report = { checks: [], errors: [] };
 try {
@@ -38,26 +36,15 @@ try {
     }
   }, captureAuditPrompt);
   await page.getByRole("region", { name: "저널 피드" }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   const selector = page.getByLabel("AI 제공자", { exact: true });
   await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 제공자"]').disabled);
   assert.equal(await page.locator('.ai-extensions').count(), 0);
   await selector.selectOption("codex");
-  await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async (_window, options) => ({ canceled: false, filePaths: [options.properties.includes('openDirectory') ? `${root}/public-skills` : `${root}/mcp.json`] }); }, root);
-  await page.getByText("MCP·스킬", { exact: true }).click();
-  await page.getByRole("button", { name: "MCP 설정 연결", exact: true }).click();
-  await page.locator('.ai-extensions').getByText('public-fixture', { exact: true }).waitFor();
-  await page.getByRole("button", { name: "스킬 폴더 연결", exact: true }).click();
-  await page.locator('.ai-extensions').getByText('public-skills', { exact: true }).waitFor();
-  assert.ok(!(await page.locator('.ai-extensions').textContent()).includes('DO_NOT_RENDER_SECRET'));
-  await page.reload();
-  await page.getByRole("region", { name: "저널 피드" }).waitFor();
-  await page.getByText("MCP·스킬", { exact: true }).click();
-  await page.locator('.ai-extensions').getByText('public-fixture', { exact: true }).waitFor();
-  await page.getByRole("button", { name: "mcp.json 연결 해제", exact: true }).click();
-  await page.getByRole("button", { name: "public-skills 연결 해제", exact: true }).click();
-  await page.getByText("MCP·스킬", { exact: true }).click();
-  report.checks.push("Copilot omits the MCP/skill controls; Codex pickers persist selected sources across reload, omit secret contents, and disconnect");
+  assert.equal(await page.getByText("MCP·스킬", { exact: true }).count(), 0);
+  assert.equal(await page.locator('.ai-extensions').count(), 0);
+  report.checks.push("Provider switching retains the simplified interface without manual MCP/skill controls");
   const image = Buffer.from(await page.evaluate(() => {
     const canvas = document.createElement("canvas"); canvas.width = 500; canvas.height = 200;
     const context = canvas.getContext("2d"); context.fillStyle = "white"; context.fillRect(0, 0, 500, 200);
@@ -68,7 +55,7 @@ try {
   for (const [provider, label] of [["codex", "Codex"], ["claude", "Claude"], ["copilot", "Copilot"]]) {
     await page.getByRole("button", { name: "파일 목록", exact: true }).click();
     await selector.selectOption(provider);
-    assert.equal(await page.locator('.ai-extensions').count(), provider === "codex" ? 1 : 0);
+    assert.equal(await page.locator('.ai-extensions').count(), 0);
     if (provider !== "claude") assert.equal(await page.getByLabel(`${label} 작업`, { exact: true }).inputValue(), "agent");
     const models = page.getByLabel(`${label} 모델`, { exact: true });
     await models.selectOption("vision-2");

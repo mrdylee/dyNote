@@ -12,10 +12,10 @@
   "liveModelResponseVerified": false,
   "liveAccountLoginVerified": false,
   "runtime": {
-    "packaged": false,
+    "packaged": true,
     "platform": "darwin",
     "arch": "arm64",
-    "electron": "44.9.0"
+    "electron": "44.9.1"
   },
   "sdkRuntimeStarted": true,
   "authenticated": false

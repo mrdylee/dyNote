@@ -819,7 +819,7 @@ kbd {
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
   color: #b8afc2;
-  padding: 0 18px;
+  padding: 0 12px;
   font-size: 10px;
 }
 .context-tabs > span {
@@ -944,27 +944,19 @@ kbd {
   color: #ae9ac4;
   margin-left: auto;
 }
-.outline {
-  border-left: 1px solid #e8e1f0;
-  margin-left: 4px;
-}
-.outline button {
-  display: block;
-  color: #aa9cb9;
-  font-size: 10px;
-  text-align: left;
-  padding: 7px 4px;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.outline button:first-child {
-  color: #9076b0;
-}
-.outline button:hover {
-  color: #786092;
-}
+.toc-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 28px 20px 12px; background: #fff; }
+.toc-panel h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 14px; color: #626970; font-size: 12px; font-weight: 500; }
+.toc-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.toc-list { position: relative; list-style: none; padding: 0; margin: 0; }
+.toc-list li { position: relative; color: #747b82; }
+.toc-rail { position: absolute; top: 0; left: 0; width: 56px; height: 100%; pointer-events: none; fill: none; stroke: #e4e7eb; stroke-width: 1; }
+.toc-list button { position: relative; display: block; width: 100%; padding: 7px 4px 7px 24px; text-align: left; font-size: 13px; line-height: 1.65; color: inherit; overflow-wrap: anywhere; }
+.toc-list button:hover { color: #303b46; }
+.toc-list button:focus-visible { outline: 2px solid #0284c7; outline-offset: -2px; border-radius: 4px; }
+.toc-list li.active { color: #0284c7; }
+.toc-list li.active .toc-rail { stroke: #0284c7; stroke-width: 1.5; }
+.toc-empty { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 4px 0; }
+.document-pane .markdown-preview :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top: 52px; }
 .section-description {
   color: #b4a7c2;
   font-size: 9px;

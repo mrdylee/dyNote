@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const root = await mkdtemp(`${tmpdir()}/dynote-ai-connection-`), profile = `${root}/profile`, vault = `${root}/vault`;
 await mkdir(profile); await mkdir(vault); await mkdir("output/playwright", { recursive: true });
-await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault }));
+await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: vault, vaultPurposes: { [vault]: "personal" } }));
 const app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
 const report = { checks: [], errors: [], transport: "controlled IPC authentication, no credentials or inference" };
 try {
@@ -25,6 +25,7 @@ try {
   });
   await page.getByRole("region", { name: "저널 피드" }).waitFor();
   const selector = page.getByRole("combobox", { name: "AI 제공자", exact: true });
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 제공자"]').disabled);
   for (const [provider, label] of [["codex", "Codex"], ["claude", "Claude"]]) {

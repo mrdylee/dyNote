@@ -73,6 +73,7 @@ import GitWorkspace from "./GitWorkspace.jsx";
 import UpdateSettings from "./UpdateSettings.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
 import CopilotDocument, { DocumentPromptSettings } from "./CopilotDocument.jsx";
+import TableOfContents from "./TableOfContents.jsx";
 import useAiSession from "./useAiSession.jsx";
 import useCopilotEdits from "./useCopilotEdits.jsx";
 import { overlayNotes } from "./copilotEdits.mjs";
@@ -296,6 +297,10 @@ export default function App() {
   const wordIndexRequest = useRef(0);
   const journalScope = section === "journal" ? vaults[dailyVaultId] : null;
   const vault = journalScope ?? vaults[attachment?.vaultId ?? focusedVaultId] ?? vaults[selectedVaultId];
+  const hasWorkspace = !!vault;
+  useEffect(() => {
+    if (hasWorkspace) api?.startupStage?.("renderer.workspace-visible");
+  }, [hasWorkspace]);
   const active = vault?.id === focusedVaultId ? focusedPath : null;
   const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
   const displayedPath = showingWord ? attachment.path : active;
@@ -352,7 +357,11 @@ export default function App() {
   const panelLayout = fitPanelWidths(panelWidths, viewportWidth, rightVisible);
   const panelBudget = Math.max(1000, viewportWidth) - 64 - 360 - (rightVisible ? 10 : 5);
   const resizePanel = side => width => setPanelWidths(old => normalizePanelWidths({ ...old, [side]: width }));
-  const [rightTab, setRightTab] = useState("copilot");
+  const [rightTab, setRightTab] = useState(() => {
+    const saved = stored("dynote.rightTab", "outline");
+    return ["outline", "copilot", "info"].includes(saved) ? saved : "outline";
+  });
+  useEffect(() => { persist("dynote.rightTab", rightTab); }, [rightTab]);
   const [editorSelection, setEditorSelection] = useState(null);
   const editorView = useRef(null);
   const [status, setStatus] = useState("saved");
@@ -603,6 +612,7 @@ export default function App() {
       else acceptSnapshot(snapshot, { root, purpose });
     }
     setSpaceWarnings(entries.filter(entry => entry.error).map(entry => `${spaceLabel(entry)} · ${entry.error}`));
+    api.startupStage?.("renderer.spaces-applied");
     return data;
   }, [acceptSnapshot, reconcileScope, removeVault, updateVault, vaultsRef]);
   useEffect(() => {
@@ -675,9 +685,16 @@ export default function App() {
       );
       return;
     }
+    api.startupStage?.("renderer.snapshot-requested");
     invoke(api.snapshot())
-      .then(snapshot => install(snapshot, true))
-      .catch((err) => setError(err.message));
+      .then(snapshot => {
+        api.startupStage?.("renderer.snapshot-received");
+        install(snapshot, true);
+      })
+      .catch(error => {
+        api.startupStage?.("renderer.snapshot-error");
+        setError(error.message);
+      });
     return api.onBeforeClose(async ({ id, mode }) => {
       try {
         if (audioActive.current) {
@@ -1956,6 +1973,13 @@ export default function App() {
                 </div>
               )}
               <IconButton
+                label="목차 열기"
+                active={right && rightTab === "outline"}
+                onClick={() => { setRight(true); setRightTab("outline"); }}
+              >
+                <List size={16} />
+              </IconButton>
+              <IconButton
                 label="AI 채팅 열기"
                 active={right && rightTab === "copilot"}
                 onClick={() => { setRight(true); setRightTab("copilot"); }}
@@ -1963,7 +1987,7 @@ export default function App() {
                 <MessageCircle size={16} />
               </IconButton>
               <IconButton
-                label="문서 정보 패널"
+                label="오른쪽 패널 표시/숨기기"
                 active={right}
                 onClick={() => setRight(!right)}
               >
@@ -2161,13 +2185,15 @@ export default function App() {
           <PanelResize side="right" width={panelLayout.right} max={panelBudget - panelLayout.left} onChange={resizePanel("right")} />
           <aside className={`context-panel ${rightTab === "copilot" ? "with-copilot" : ""}`} style={{ width: panelLayout.right }}>
             <div className="context-tabs" role="tablist" aria-label="오른쪽 패널">
+              <button role="tab" aria-selected={rightTab === "outline"} className={rightTab === "outline" ? "selected" : ""} onClick={() => setRightTab("outline")}><List size={14} />목차</button>
+              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><MessageCircle size={14} />Copilot</button>
               <button role="tab" aria-selected={rightTab === "info"} className={rightTab === "info" ? "selected" : ""} onClick={() => setRightTab("info")}>
-                <List size={14} />
                 문서 정보
               </button>
-              <button role="tab" aria-selected={rightTab === "copilot"} className={rightTab === "copilot" ? "selected" : ""} onClick={() => setRightTab("copilot")}><MessageCircle size={14} />AI 채팅</button>
             </div>
             {together && <div className="context-space" aria-label="현재 문서 공간">{spaceLabel(vault)}</div>}
+            {rightTab === "outline" && <TableOfContents key={`${vault.id}:${note?.path ?? ""}`} note={!["planner", "graph"].includes(section) && mode !== "mindmap" ? note : null} mode={mode}
+              editorRef={editorView} previewRef={preview} onJump={heading => setEditorJump({ path: note.path, heading })} />}
             {Object.values(vaults).map(scope => {
               const id = scope.id;
               const focused = id === vault.id;
@@ -2236,43 +2262,6 @@ export default function App() {
                 </dl>
               </section>
             )}
-            <section className="context-section">
-              <div className="section-label">
-                <List size={14} />
-                <h3>이 문서의 개요</h3>
-              </div>
-              <div className="outline">
-                {note?.headings.map((h, i) => (
-                  <button
-                    key={i}
-                    style={{ paddingLeft: 12 + Math.max(0, h.level - 1) * 12 }}
-                    onClick={() => {
-                      if (mode === "live") {
-                        setEditorJump({ path: note.path, fragment: h.id });
-                        return;
-                      }
-                      if (mode === "edit") setMode("read");
-                      setTimeout(
-                        () =>
-                          [
-                            ...(preview.current?.querySelectorAll(
-                              "h1,h2,h3,h4,h5,h6",
-                            ) ?? []),
-                          ]
-                            .find((node) => node.id === h.id)
-                            ?.scrollIntoView({ behavior: "smooth" }),
-                        30,
-                      );
-                    }}
-                  >
-                    {h.plainText ?? h.text}
-                  </button>
-                ))}
-                {!note?.headings.length && (
-                  <p className="muted">아직 제목이 없습니다.</p>
-                )}
-              </div>
-            </section>
             <section className="context-section">
               <div className="section-label">
                 <Link2 size={14} />

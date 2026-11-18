@@ -54,6 +54,7 @@ try {
   await search.waitFor({ state: "hidden" });
   await page.getByRole("region", { name: "문서 Home.md", exact: true }).waitFor();
   const selector = page.getByRole("combobox", { name: "AI 제공자", exact: true });
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 제공자"]').disabled);
   for (const [provider, label] of [["codex", "Codex"], ["claude", "Claude"]]) {

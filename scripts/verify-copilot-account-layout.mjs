@@ -18,6 +18,7 @@ try {
   ipcMain.removeHandler("notes:copilot-cancel-login");ipcMain.handle("notes:copilot-cancel-login",()=>{globalThis.accountCancelCount++;globalThis.accountEmit("canceled","테스트 로그인 취소");return {ok:true};});
  });
  const refresh=async()=>{await page.getByRole("button",{name:"Copilot 연결 상태 확인",exact:true}).click();await page.waitForFunction(()=>!document.querySelector('[aria-label="Copilot 연결 상태 확인"]').disabled);};
+ await page.getByRole("tab",{name:"Copilot",exact:true}).click();
  await refresh();
  const geometry=()=>page.locator(".copilot-panel").evaluate(el=>{const panel=el.getBoundingClientRect(),heading=el.querySelector(".copilot-chat-heading").getBoundingClientRect();return {gap:heading.top-panel.top,height:heading.height};});
  const before=await geometry();assert.ok(before.gap<=1,`Account controls must share chat header instead of taking extra rows: ${JSON.stringify(before)}`);assert.ok(before.height<=44);

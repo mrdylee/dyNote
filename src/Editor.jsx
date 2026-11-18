@@ -295,7 +295,7 @@ export default function Editor({
     const view = editor.current;
     if (view && lineNumber !== undefined) {
       const line = view.state.doc.line(Math.min(view.state.doc.lines, lineNumber + 1));
-      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 52 }) });
       view.focus();
     }
   }, [jump, note.path]);

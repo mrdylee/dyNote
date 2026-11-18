@@ -52,7 +52,7 @@ try {
 
   const planner = rail.getByRole('button', { name: '개발 플래너', exact: true });
   assert.equal(await planner.locator('svg.lucide-calendar-range').count(), 1);
-  assert.equal(await page.getByRole('tab', { name: 'AI 채팅', exact: true }).locator('svg.lucide-message-circle').count(), 1);
+  assert.equal(await page.getByRole('tab', { name: 'Copilot', exact: true }).locator('svg.lucide-message-circle').count(), 1);
   for (const query of ['저널', 'journal', 'JOURNAL']) {
     await rail.getByRole('button', { name: '파일 목록', exact: true }).click();
     await page.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).getByTitle('Team.md', { exact: true }).click();

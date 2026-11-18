@@ -19,7 +19,7 @@ const launch = () => electron.launch({
 let app = await launch();
 try {
   let page = await app.firstWindow();
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
   await page.evaluate(() => localStorage.setItem("dynote.ai.provider", "codex"));
   await app.evaluate(({ session }) => session.defaultSession.flushStorageData());
   await app.close();
@@ -29,6 +29,7 @@ try {
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   page.on("pageerror", (e) => report.errors.push(e.message));
   assert.equal(await page.evaluate(() => localStorage.getItem("dynote.ai.provider")), "codex");
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   assert.equal(await page.getByLabel("AI 제공자", { exact: true }).inputValue(), "codex");
   await page.getByLabel("AI 제공자", { exact: true }).selectOption("copilot");
   report.checks.push("Provider preference persists; Copilot can be selected for Agent tasks");
@@ -56,7 +57,7 @@ try {
       return { ok: true, value: { requestId: args.requestId } };
     });
   });
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
   await page.getByLabel("Copilot 모델").selectOption("fixture");
   await page.keyboard.press("Meta+k"); await page.getByRole("textbox", { name: "빠른 문서 검색" }).fill("path:Home.md"); await page.keyboard.press("Enter");
@@ -94,7 +95,7 @@ try {
   await mkdir("output/playwright", { recursive: true });
   await page.screenshot({ path: "output/playwright/copilot-agent.png" });
 } finally {
-  await app.evaluate(({ BrowserWindow }) => { setTimeout(() => BrowserWindow.getAllWindows().forEach((w) => w.destroy()), 30); }).catch(() => {});
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); }).catch(() => {});
   await app.close();
   await writeFile("docs/verification/copilot-agent-runtime.json", JSON.stringify(report, null, 2) + "\n");
 }

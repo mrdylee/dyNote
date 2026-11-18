@@ -271,7 +271,7 @@ test("hiding the main window lets an active Copilot edit finish", async () => {
         ipcMain.handle(channel, handler);
       }
     });
-    await main.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+    await main.getByRole("tab", { name: "Copilot", exact: true }).click();
     await main.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
     await main.getByLabel("Copilot 모델").selectOption("fixture");
     await main.keyboard.press("Meta+k");

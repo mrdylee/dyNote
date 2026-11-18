@@ -58,6 +58,7 @@ try{
   ipcMain.removeHandler('notes:copilot-status');ipcMain.handle('notes:copilot-status',()=>({ok:true,value:{authenticated:true,login:'synthetic',models:[{id:'outline-fixture',name:'outline fixture'}]}}));
   ipcMain.removeHandler('notes:copilot-send');ipcMain.handle('notes:copilot-send',(event,args)=>{globalThis.outlineRequest=args;setTimeout(()=>event.sender.send('notes:copilot-event',{type:'done',requestId:args.requestId,content:args.context.content.replace('Decision A','Confirmed decision A')}),30);return {ok:true,value:{requestId:args.requestId}};});
  });
+ await page.getByRole('tab',{name:'Copilot',exact:true}).click();
  await page.getByRole('button',{name:'Copilot 연결 상태 확인',exact:true}).click();await page.getByLabel('Copilot 모델',{exact:true}).selectOption('outline-fixture');await page.getByLabel('Copilot 작업',{exact:true}).selectOption('edit');
  await page.getByLabel('Copilot 질문',{exact:true}).fill('Organize this synthetic journal while retaining project context');await page.getByRole('button',{name:'Copilot 보내기',exact:true}).click();
  await page.getByRole('button',{name:'변경 내용 확인',exact:true}).waitFor();

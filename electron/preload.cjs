@@ -3,6 +3,7 @@ const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
 contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
+    startupStage: stage => ipcRenderer.send("notes:startup-stage", stage),
     snapshot: args => call("snapshot", args),
     workspaceSnapshots: () => call("workspace-snapshots"),
     captureStatus: args => call("capture-status", args),

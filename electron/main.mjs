@@ -33,6 +33,7 @@ import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
 import { ExternalDocuments } from "../core/external-documents.mjs";
+import { createStartupLog } from "./startup-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, "..", "dist");
@@ -52,6 +53,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 if (process.env.OPEN_NOTES_DATA)
   app.setPath("userData", path.resolve(process.env.OPEN_NOTES_DATA));
+const startup = createStartupLog(app.getPath("userData"));
+startup.mark("process.start");
 let window;
 let vault;
 let closePending;
@@ -242,8 +245,8 @@ async function selectVault(root, purpose) {
 
 async function initialVault() {
   try {
-    await registry.load();
-    if (registry.selected) return await Vault.open(registry.selected, recovery);
+    await startup.run("vault.read-registry", () => registry.load());
+    if (registry.selected) return await startup.run("vault.open-selected", () => Vault.open(registry.selected, recovery));
     const demo = path.join(app.getPath("userData"), "처음 만나는 노트");
     for (const [relative, content] of Object.entries(demoNotes)) {
       const file = path.join(demo, relative);
@@ -256,6 +259,7 @@ async function initialVault() {
     await registry.select(selected.root);
     return selected;
   } catch (error) {
+    startup.mark("vault.unavailable", "error");
     vaultError = `보관함을 열지 못했습니다. 설정에서 경로를 확인해 주세요. ${registry.selected ?? ""} · ${error.message}`;
     return null;
   }
@@ -264,21 +268,24 @@ async function initialVault() {
 app
   .whenReady()
   .then(async () => {
+    startup.mark("electron.ready");
     recovery = path.join(app.getPath("userData"), "recovery");
     registry = new VaultRegistry(path.join(app.getPath("userData"), "settings.json"));
-    await mkdir(app.getPath("userData"), { recursive: true });
+    await startup.run("profile.prepare", () => mkdir(app.getPath("userData"), { recursive: true }));
     aiExtensions = new AiExtensions({ file: path.join(app.getPath("userData"), "ai-extensions.json") });
-    await aiExtensions.load().catch(() => {}); // The registry reports its preserved load error in the panel.
-    vault = await initialVault();
+    await startup.run("ai.read-extensions", () => aiExtensions.load()).catch(() => {}); // The registry reports its preserved load error in the panel.
+    vault = await startup.run("vault.initialize", initialVault);
     copilotJournal = new CopilotJournal({file:path.join(app.getPath("userData"),"copilot-journal.json"),sourceRoot:path.join(app.getPath("appData"),"Code","User","workspaceStorage")});
-    await copilotJournal.load().catch(() => {});
+    await startup.run("journal.read-settings", () => copilotJournal.load()).catch(() => {});
     updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),downloadDirectory:app.getPath("downloads"),current:app.getVersion(),
       onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
-    await updates.init();
+    await startup.run("updates.read-settings", () => updates.init());
     if (vault) {
-      const entry = openVaultController(vault);
-      gitBackup = entry.git;
-      await entry.ready;
+      await startup.run("git.initialize", async () => {
+        const entry = openVaultController(vault);
+        gitBackup = entry.git;
+        await entry.ready;
+      });
     }
     const getNotes = async (vaultId) => {
       const target = workspaceVault(vaultId);
@@ -357,6 +364,7 @@ app
       },
       (_details, callback) => callback({ cancel: true }),
     );
+    startup.mark("window.creating");
     window = new BrowserWindow({
       width: 1420,
       height: 940,
@@ -376,6 +384,20 @@ app
         webSecurity: true,
         spellcheck: false,
       },
+    });
+    startup.mark("window.created");
+    window.webContents.once("dom-ready", () => startup.mark("renderer.dom-ready"));
+    const rendererStartupStages = new Set([
+      "renderer.snapshot-requested",
+      "renderer.snapshot-received",
+      "renderer.snapshot-error",
+      "renderer.workspace-visible",
+      "renderer.spaces-applied",
+    ]);
+    ipcMain.on("notes:startup-stage", (event, stage) => {
+      if (!rendererStartupStages.has(stage)) return;
+      try { validateSender(event); } catch { return; }
+      startup.mark(stage, stage === "renderer.snapshot-error" ? "error" : "mark");
     });
     const notifyWindowFocus = () => {
       if (!window.webContents.isDestroyed())
@@ -475,7 +497,7 @@ app
         return selected.canceled ? aiExtensions.snapshot() : aiExtensions.addSkills(selected.filePaths[0]);
       }),
       "ai-remove-extension": args => changeAiExtensions(() => aiExtensions.remove(args)),
-      "copilot-status": () => copilot.status(),
+      "copilot-status": () => startup.run("copilot.status", () => copilot.status()),
       "codex-status": () => codex.status(),
       "codex-login": () => codex.login(),
       "codex-cancel-login": () => codex.cancelLogin(),
@@ -530,7 +552,7 @@ app
         return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.restore(vault,args.trashId);});
       },
       snapshot: (args, vault) => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
-      "workspace-snapshots": workspaceSnapshots,
+      "workspace-snapshots": () => startup.run("vault.read-workspaces", workspaceSnapshots),
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
       "set-vault-purpose": async (args) => { await registry.setPurpose(args?.root, args?.purpose); pruneVaultControllers(); return true; },
       "select-vault": (args) => {
@@ -785,7 +807,9 @@ app
             if (workspaceVault(args.vaultId) !== target || await realpath(target.root) !== target.root)
               throw new Error("보관함 위치가 변경되었습니다. 문서를 다시 열어 주세요.");
           }
-          const value = await action(args, target, entry?.git);
+          const value = await (name === "snapshot" && !scoped
+            ? startup.run("vault.initial-snapshot", () => action(args, target, entry?.git))
+            : action(args, target, entry?.git));
           if (name.startsWith("capture-") && value) {
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
@@ -839,8 +863,8 @@ app
       closePending = { id, mode, timer };
       window.webContents.send("notes:before-close", { id, mode });
     });
-    await window.loadURL("notes://app/index.html");
-    await plugins.activate(vault);
+    await startup.run("window.load", () => window.loadURL("notes://app/index.html"));
+    await startup.run("plugins.activate", () => plugins.activate(vault));
     const stickyController = new StickyNotes({
       directory: path.join(app.getPath("userData"), "sticky-notes"),
       selectRoot: stickyRoot,
@@ -858,7 +882,7 @@ app
       quitReady: () => quitReady,
     });
     try {
-      await stickyController.start();
+      await startup.run("sticky-notes.start", () => stickyController.start());
       stickyNotes = stickyController;
     } catch (error) {
       stickyController.dispose();
@@ -869,8 +893,10 @@ app
     const initialUpdate = setTimeout(checkUpdates,10000);initialUpdate.unref();
     powerMonitor.on("resume",checkUpdates);
     app.once("will-quit",()=>{clearInterval(updateTimer);clearTimeout(initialUpdate);powerMonitor.removeListener("resume",checkUpdates);});
+    startup.mark("main.services-ready");
   })
   .catch((error) => {
+    startup.mark("main.startup-error", "error");
     console.error(error);
     app.exit(1);
   });

@@ -14,7 +14,7 @@ let app = await launch(), page;
 async function setup() {
   page = await app.firstWindow(); page.setDefaultTimeout(12000);
   page.on("pageerror", (e) => report.errors.push(e.message));
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   report.packaged = await app.evaluate(({ app }) => app.isPackaged);
   await app.evaluate(({ ipcMain, app }) => {
@@ -33,7 +33,7 @@ async function setup() {
     ipcMain.removeHandler("notes:copilot-cancel");
     ipcMain.handle("notes:copilot-cancel", () => { globalThis.liveEmit?.("canceled"); return { ok: true }; });
   });
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
   await page.getByLabel("Copilot 모델").selectOption("auto");
 }
@@ -175,14 +175,14 @@ try {
   await resolve("변경 되돌리기");
   report.checks.push("Immediate request flushes unsaved text before live edits; another request waits for pending drafts");
   await ask(); await edit("\nPanel closed draft"); await waitText("Panel closed draft");
-  await page.getByRole("button", { name: "문서 정보 패널", exact: true }).click();
+  await page.getByRole("button", { name: "오른쪽 패널 표시/숨기기", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.equal(await page.getByLabel("Copilot 채팅", { exact: true }).count(), 0);
   await resolve("변경 되돌리기");
   report.checks.push("Closing right panel stops generation while center draft and Undo remain accessible");
   assert.deepEqual(report.errors, []);
 } finally {
-  await app.evaluate(({ BrowserWindow }) => { setTimeout(() => BrowserWindow.getAllWindows().forEach((w) => w.destroy()), 30); }).catch(() => {});
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); }).catch(() => {});
   await app.close();
   await writeFile("docs/verification/copilot-live-edits-runtime.json", JSON.stringify(report, null, 2) + "\n");
 }

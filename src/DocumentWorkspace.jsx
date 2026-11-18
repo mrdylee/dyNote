@@ -36,8 +36,10 @@ function DocumentPane(props) {
   useEffect(()=>{
     const heading=jump?.heading;
     if(!active||mode!=='read'||!heading||jump.path!==note.path)return;
-    const matches=[...(preview.current?.children??[])].filter(node=>node.tagName==='H2'&&node.id===heading.id&&node.textContent===heading.plainText);
-    if(matches.length===1)matches[0].scrollIntoView({block:'start'});
+    const index=note.headings.findIndex(item=>item.line===heading.line);
+    const occurrence=note.headings.slice(0,index).filter(item=>item.id===heading.id).length;
+    const matches=[...(preview.current?.querySelectorAll('h1,h2,h3,h4,h5,h6')??[])].filter(node=>node.id===heading.id&&!node.closest('[data-embed]'));
+    matches[occurrence]?.scrollIntoView({block:'start'});
   },[active,mode,jump,note.path]);
   return <Pane {...props} onFocus={focus}>
     {pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">

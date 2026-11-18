@@ -23,7 +23,8 @@ try {
   page.on("pageerror", (e) => report.errors.push(e.message));
   report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, electron: process.versions.electron }));
   await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1050, 700); });
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), true);
   const first = await page.evaluate(() => window.notes.copilotStatus());
   assert.equal(first.ok, true, first.error);
@@ -33,7 +34,7 @@ try {
   report.checks.push("Real SDK starts from this Electron app and reports authentication state");
   await page.getByRole("tab", { name: "문서 정보", exact: true }).click();
   assert.equal(await page.getByRole("region", { name: "Copilot 채팅" }).isVisible(), false);
-  await page.getByRole("tab", { name: "AI 채팅", exact: true }).click();
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.screenshot({ path: "output/playwright/copilot-connect.png" });
 
   // Only the transport is replaced. Rendering, selection, IPC, save queue,
@@ -103,8 +104,8 @@ try {
   await page.getByRole("button", { name: "편집 보기", exact: true }).click();
   const countBefore = await app.evaluate(() => globalThis.copilotRequests.length);
   await page.getByLabel("Copilot 질문").fill("선택했던 내용을 다듬어 줘");
-  await page.getByRole("button", { name: "Copilot 보내기" }).click();
-  await page.locator(".copilot-error").filter({ hasText: "다시 선택" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), true);
+  assert.match(await page.getByLabel("Copilot 전송 상태", { exact: true }).innerText(), /다시 선택/);
   assert.equal(await app.evaluate(() => globalThis.copilotRequests.length), countBefore);
   report.checks.push("Remounting the editor clears stale selections before any context can be sent");
   await page.getByLabel("Copilot 전달 범위").selectOption("document");
@@ -157,7 +158,7 @@ try {
   // The final conflict check intentionally leaves a dirty draft in this
   // disposable profile. Exit this test process without discarding a real vault.
   await app.evaluate(({ BrowserWindow }) => {
-    setTimeout(() => BrowserWindow.getAllWindows().forEach((window) => window.destroy()), 30);
+    BrowserWindow.getAllWindows().forEach(window => window.destroy());
   }).catch(() => {});
   await app.close();
   await writeFile("docs/verification/copilot-runtime.json", JSON.stringify(report, null, 2) + "\n");

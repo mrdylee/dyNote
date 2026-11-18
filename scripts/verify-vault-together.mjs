@@ -173,7 +173,7 @@ try {
   await page.getByRole('tab', { name: '문서 정보', exact: true }).click();
   await mkdir('output/playwright', { recursive: true });
   await page.screenshot({ path: 'output/playwright/vault-together.png' });
-  await page.getByRole('tab', { name: 'AI 채팅', exact: true }).click();
+  await page.getByRole('tab', { name: 'Copilot', exact: true }).click();
 
   await app.evaluate(({ ipcMain }) => {
     ipcMain.removeHandler('notes:copilot-status');

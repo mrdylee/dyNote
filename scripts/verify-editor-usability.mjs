@@ -111,9 +111,9 @@ try {
   await page.getByRole("separator",{name:"왼쪽 패널 너비"}).press("ArrowLeft");
   const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem("dynote.panelWidths")));
   assert.equal(saved.left,left-10);assert.equal(saved.right,right);
-  await page.getByRole("button",{name:"문서 정보 패널",exact:true}).click();
+  await page.getByRole("button",{name:"오른쪽 패널 표시/숨기기",exact:true}).click();
   assert.equal(await page.getByRole("separator",{name:"오른쪽 패널 너비"}).count(),0);
-  await page.getByRole("button",{name:"문서 정보 패널",exact:true}).click();
+  await page.getByRole("button",{name:"오른쪽 패널 표시/숨기기",exact:true}).click();
   assert.equal(Number(await page.getByRole("separator",{name:"오른쪽 패널 너비"}).getAttribute("aria-valuenow")),right);
   const handle=page.getByRole("separator",{name:"왼쪽 패널 너비"});
   const handleBox=await handle.boundingBox();await page.mouse.move(handleBox.x+2,handleBox.y+100);await page.mouse.down();
