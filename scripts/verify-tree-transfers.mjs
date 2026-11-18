@@ -127,12 +127,17 @@ try {
     await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
   };
   await row(personalTree,"Archive/Plan.md").click();
-  await renameEntry(personalTree,"Archive/Plan.md","내 계획.md");
+  const renameWithF2=async (tree,from,name)=>{
+    await row(tree,from).press("F2");
+    await renameDialog.getByLabel("새 이름",{exact:true}).fill(name);
+    await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
+  };
+  await renameWithF2(personalTree,"Archive/Plan.md","내 계획.md");
   await row(personalTree,"Archive/내 계획.md").waitFor();
   await pane("Archive/내 계획.md").waitFor();
   assert.match(await readFile(path.join(personal,"Reference.md"),"utf8"),/Archive\/%EB%82%B4%20%EA%B3%84%ED%9A%8D.md/);
   await row(teamTree,"Shared/Reference.md").click();
-  await renameEntry(teamTree,"Shared","Taken");
+  await renameWithF2(teamTree,"Shared","Taken");
   await renameDialog.getByRole("alert").filter({hasText:"같은 이름"}).waitFor();
   await renameDialog.getByLabel("새 이름",{exact:true}).fill("공유 문서");
   await renameDialog.getByRole("button",{name:"이름 바꾸기",exact:true}).click();
@@ -148,8 +153,11 @@ try {
   await row(personalTree,"Journal").click({button:"right"});
   assert.equal(await menu.getByRole("menuitem",{name:"이름 바꾸기",exact:true}).isDisabled(),true);
   await page.keyboard.press("Escape");
+  await row(personalTree,"Journal").press("F2");
+  await page.getByText("앱에서 사용하는 기본 폴더입니다.",{exact:true}).waitFor();
+  assert.equal(await renameDialog.count(),0);
   assert.deepEqual(errors, []);
-  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries with links intact.");
+  console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
 } finally {
   await app?.close();
   await rm(root, { recursive: true, force: true });
