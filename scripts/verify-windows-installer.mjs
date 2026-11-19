@@ -3,7 +3,7 @@ import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import {createReadStream, existsSync} from 'node:fs';
-import {mkdir, mkdtemp, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -26,7 +26,7 @@ const uninstallEntry = async () => (await run('reg.exe', ['query', uninstallKey]
 }))?.stdout;
 assert.ok(!existsSync(appDir) && !existsSync(shortcut) && !await uninstallEntry(), 'Use a Windows test profile without a Dynote installation.');
 
-const root = await mkdtemp(path.join(tmpdir(), 'dynote-installer-'));
+const root = await realpath(await mkdtemp(path.join(tmpdir(), 'dynote-installer-')));
 const profile = path.join(root, 'Open Notes');
 const vault = path.join(root, 'Vault');
 const downloads = path.join(root, 'Downloads');
@@ -75,7 +75,8 @@ const uninstall = async () => {
   assert.ok(!existsSync(installed) && !existsSync(shortcut) && !await uninstallEntry(), 'Uninstall should remove the app, shortcut and uninstall registration.');
 };
 try {
-  await run('tar.exe', ['-xf', base + '.zip', '-C', root], {timeout: 180000});
+  const tar = path.join(process.env.SystemRoot, 'System32', 'tar.exe');
+  await run(tar, ['-xf', base + '.zip', '-C', root], {timeout: 180000});
   const portable = path.join(root, 'Dynote-win32-x64', 'Dynote.exe');
   await launch(portable);
   console.log('PASS ZIP app opened the existing note and settings');

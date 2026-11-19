@@ -21,8 +21,9 @@ execFileSync(iscc, [`/DAppVersion=${version}`, `/DPackageDir=${packageDir}`, `/O
 
 const base = `Dynote-${version}-windows-x64`;
 const zip = path.join(output, base + '.zip');
+const tar = path.join(process.env.SystemRoot, 'System32', 'tar.exe');
 await rm(zip, {force: true});
-execFileSync('tar.exe', ['-a', '-cf', zip, '-C', output, packageName], {stdio: 'inherit'});
+execFileSync(tar, ['-a', '-cf', zip, '-C', output, packageName], {stdio: 'inherit'});
 
 const sums = [];
 for (const name of [base + '.zip', base + '-Setup.exe']) {
