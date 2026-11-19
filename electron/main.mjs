@@ -541,7 +541,7 @@ app
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
         if (args.checkOnly === true) return copilotJournal.sync(vault,args.dailyOptions,false,{checkOnly:true});
-        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{sessionIds:args.sessionIds,allSessions:args.allSessions});});
+        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds});});
       },
       "capture-trash": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 삭제해 주세요.");

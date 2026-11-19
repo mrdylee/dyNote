@@ -777,7 +777,7 @@ export default function App() {
       if (!vaultsRef.current[id]) return;
       if (manual && action === "sync") {
         const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
-          ? "기록 폴더의 대화를 개인 노트에 가져왔습니다." : "기록 폴더에 새로 가져올 완료된 대화가 없습니다.";
+          ? "대화를 개인 노트에 가져왔습니다." : "새로 가져올 완료된 대화가 없습니다.";
         setCaptureImportResult({ vaultId: id, notice });
       }
       updateCaptureState(id, () => result.status);
@@ -2806,7 +2806,7 @@ export default function App() {
               return state;
             }}
             onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}
-            onImport={()=>captureAction("sync",true,{allSessions:true},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
+            onImport={projectIds=>captureAction("sync",true,{allSessions:true,projectIds},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "document-prompts" && <DocumentPromptSettings prompts={documentPrompts} onSave={value => {
             try { localStorage.setItem(documentPromptsKey, JSON.stringify(value)); }
             catch { throw new Error("프롬프트 설정을 저장하지 못했습니다."); }

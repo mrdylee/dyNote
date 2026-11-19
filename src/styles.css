@@ -2134,6 +2134,7 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .capture-delete:hover { color:#a32d41; }
 .capture-project, .capture-toggle { display:flex!important; align-items:center; gap:8px; }
 .capture-project input, .capture-toggle input { width:auto; }
+.capture-settings fieldset:not(:disabled) .capture-project { cursor:pointer; }
 .capture-project small { display:block; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 .capture-source-path { display:block; overflow-wrap:anywhere; font-size:12px; padding:8px; }
 .capture-settings fieldset { border:1px solid var(--border); border-radius:6px; margin:12px 0; }
