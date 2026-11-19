@@ -1,0 +1,79 @@
+name: Publish Dynote beta v0.23.7
+on:
+  push:
+    branches: [release/dynote-v0.23.7]
+permissions:
+  contents: read
+concurrency:
+  group: release-dynote-v0.23.7
+  cancel-in-progress: false
+jobs:
+  windows:
+    uses: ./.github/workflows/build-windows-distribution.yml
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=moderate
+      - run: npm run package:mac
+      - run: node scripts/verify-release-package.mjs darwin-arm64
+      - name: Verify the Mac app and create distribution files
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
+          node scripts/verify-journal-release.mjs
+          node scripts/package-mac-distribution.mjs
+          hdiutil verify release/v0.23.7/Dynote-0.23.7-macos-arm64.dmg
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dynote-macos-arm64
+          path: |
+            release/v0.23.7/Dynote-0.23.7-macos-arm64.dmg
+            release/v0.23.7/Dynote-0.23.7-macos-arm64.zip
+            release/v0.23.7/SHA256SUMS-macos-arm64.txt
+          if-no-files-found: error
+          compression-level: 0
+  publish:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: dynote-*
+          merge-multiple: true
+          path: release/v0.23.7
+      - name: Check artifacts and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(node -p "require('./package.json').version")" = 0.23.7
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          if gh release view v0.23.7 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; inspect it before retrying.' >&2
+            exit 1
+          fi
+          cd release/v0.23.7
+          sha256sum --check SHA256SUMS-macos-arm64.txt SHA256SUMS-windows-x64.txt
+          gh release create v0.23.7 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+            --title 'Dynote v0.23.7 — Windows 설치 프로그램' \
+            --notes-file ../../docs/RELEASE-NOTES-0.23.7.md \
+            Dynote-0.23.7-windows-x64-Setup.exe Dynote-0.23.7-windows-x64.zip \
+            Dynote-0.23.7-macos-arm64.dmg Dynote-0.23.7-macos-arm64.zip \
+            SHA256SUMS-windows-x64.txt SHA256SUMS-macos-arm64.txt
+          gh release edit v0.23.7 --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
