@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Dynote · 두 PC의 Journal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f4f1;color:#272b30;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+main{max-width:1280px;margin:0 auto;padding:32px clamp(16px,5vw,72px)}
+h1,h2,h3,p{margin:0}button,select{font:inherit;color:inherit}button{cursor:pointer}
+button:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #245b9f;outline-offset:3px}
+.controls,.bar,.tools,.scope,.section-head,.choice,.actions{display:flex;align-items:center;gap:10px}
+.controls{justify-content:space-between;margin-bottom:22px;flex-wrap:wrap}.controls small{color:#625f59}.controls h1{font-size:clamp(24px,3vw,34px);letter-spacing:-.045em}
+.selector{background:#e8e7e2;border:1px solid #dddbd5;border-radius:10px;padding:3px;display:flex}
+.selector button{border:0;background:transparent;border-radius:7px;padding:5px 14px;font-size:13px}.selector [aria-pressed=true]{background:white;box-shadow:0 1px 4px #272b3026;font-weight:650}
+#window{--wash:#f4f8fd;--accent:#426eb4;border:1px solid #d5d7d9;background:#fff;border-radius:15px;overflow:hidden;box-shadow:0 12px 38px #3438470e}
+.bar{padding:12px 17px;background:var(--wash);border-bottom:1px solid #dbe0e4;flex-wrap:wrap}
+.brand{letter-spacing:-.075em;font-size:20px;font-weight:780;margin-right:7px}.brand i{color:var(--accent);font-style:normal}
+.scope{gap:7px;font-weight:650;font-size:13px;color:var(--accent)}.scope span:first-child{font-size:21px;line-height:1}
+.vault{font-size:13px;border-left:1px solid #bfc7ce;padding-left:12px}
+.tools{margin-left:auto;gap:10px;font-size:12px}.local,.status{color:#505962}.status{border-left:1px solid #c4cbd0;padding-left:10px}
+.act,.push{padding:5px 12px;border:1px solid #bdc4ca;border-radius:7px;font-weight:650;background:white;font-size:13px;white-space:nowrap}
+.act{background:var(--accent);color:white;border-color:var(--accent)}.actions{gap:5px}.conflict .act{background:#88531c;border-color:#88531c}.conflict .status{color:#77440a}
+.layout{display:grid;grid-template-columns:180px 1fr;min-height:350px}
+aside{background:var(--wash);border-right:1px solid #e1e4e5;padding:24px 14px;color:#505962}
+aside p{padding:6px 10px;font-size:13px}.navlabel{font-size:11px;font-weight:650;margin-bottom:8px}
+.active{background:color-mix(in srgb,var(--accent) 13%,var(--wash));color:var(--accent);border-radius:6px;font-weight:700}
+article{padding:clamp(22px,3.5vw,48px)}.breadcrumb{font-size:12px;color:#666e74;margin-bottom:8px}article h2{font-size:clamp(25px,3vw,35px);letter-spacing:-.05em}
+.notes{padding-left:20px;line-height:1.9}.section-head{margin-top:22px;border-top:1px solid #e1e4e5;padding-top:15px}.section-head h3{font-size:15px}.section-head small{color:#687177}
+.record{padding:8px 0;border-bottom:1px solid #edf0f1;display:flex;gap:13px;align-items:center}.record time{font-size:12px;color:#59646e;font-variant-numeric:tabular-nums}.record b{font-weight:520;font-size:14px}
+.inspector{display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-top:20px}.inspector label,.inspector legend{font-size:12px;font-weight:650;color:#494e54}
+fieldset{padding:0;margin:0;border:0}legend{margin-bottom:5px}.choice{gap:6px;flex-wrap:wrap}
+.choice button,select{background:white;border:1px solid #cdcfcf;border-radius:7px;padding:6px 10px;font-size:13px}
+.choice button{display:flex;align-items:center;gap:6px}.choice button:before{content:'';width:10px;height:10px;border-radius:50%;background:var(--dot)}.choice [aria-pressed=true]{outline:2px solid #4d5359;outline-offset:-2px}
+select{display:block;margin-top:5px}.caption{margin-top:16px;color:#65686d;font-size:12px}
+@media(max-width:840px){.local{display:none}.status{border:0;padding:0}.tools{flex-wrap:wrap}.layout{grid-template-columns:140px 1fr}}
+@media(max-width:640px){main{padding:18px 12px}.controls{gap:10px;margin-bottom:12px}.bar{gap:8px;padding:10px 12px}.tools{width:100%;justify-content:space-between}.layout{display:block}aside{display:none}.inspector{gap:12px}.act,.push{padding:4px 9px}}
+</style>
+<main>
+ <div class="controls">
+  <div><small>Dynote 디자인 시안</small><h1>두 PC의 Journal</h1></div>
+  <div class="selector" role="group" aria-label="미리 볼 PC"><button data-device="cloud" aria-pressed="true">☁ Cloud PC</button><button data-device="local" aria-pressed="false">▣ Local PC</button></div>
+ </div>
+ <section id="window" aria-label="Dynote 창 예시">
+  <div class="bar"><b class="brand">Dy<i>Note</i></b><div class="scope"><span id="icon" aria-hidden="true">☁</span><span id="device-name">Cloud PC</span></div><span class="vault">개인 노트</span>
+   <div class="tools"><span class="local">기기에 저장됨</span><span class="status" id="status" aria-live="polite">올릴 커밋 2개</span><div class="actions"><span class="act" id="action">↻ 동기화</span><span class="push" id="push">↑ Push</span></div></div>
+  </div>
+  <div class="layout">
+   <aside><p class="navlabel">개인 노트</p><p class="active">Journal</p><p>모든 노트</p><p>Copilot Note</p></aside>
+   <article><p class="breadcrumb">개인 노트　/　Journal</p><h2>11월 20일 금요일</h2><ul class="notes"><li>오전에 정리한 회의록을 오후 작업에 반영한다.</li></ul>
+    <div class="section-head"><h3>Copilot 대화</h3><small>2건</small></div>
+    <div class="record"><time>09:12</time><b>회의록에서 결정 사항 정리</b></div><div class="record"><time>10:36</time><b>다음 배포의 검증 항목</b></div>
+   </article>
+  </div>
+ </section>
+ <div class="inspector">
+  <fieldset><legend>이 PC의 테마</legend><div class="choice" id="palette">
+   <button data-theme="blue" style="--dot:#426eb4" aria-pressed="true">Cloud Blue</button><button data-theme="sage" style="--dot:#47745d" aria-pressed="false">Sage Green</button>
+   <button data-theme="lavender" style="--dot:#735cc2" aria-pressed="false">Soft Lavender</button><button data-theme="sand" style="--dot:#8c633c" aria-pressed="false">Warm Sand</button>
+  </div></fieldset>
+  <label>상단 바 미리보기<select id="scenario"><option value="ahead">업로드 대기</option><option value="synced">동기화 완료</option><option value="behind">원격 변경</option><option value="conflict">충돌</option><option value="offline">오프라인</option></select></label>
+ </div>
+ <p class="caption">PC·테마·상태를 바꾸어 비교할 수 있습니다. 상단의 Git 동작은 화면 예시입니다.</p>
+</main>
+<script>
+const themes={blue:['#f4f8fd','#426eb4'],sage:['#f4f8f5','#47745d'],lavender:['#f8f5fc','#735cc2'],sand:['#fbf7f0','#8c633c']};
+const devices={cloud:{name:'Cloud PC',icon:'☁',theme:'blue',state:'ahead'},local:{name:'Local PC',icon:'▣',theme:'sage',state:'behind'}};
+const states={ahead:['올릴 커밋 2개','↻ 동기화'],synced:['원격과 일치 · 10:42 확인','↻ 동기화'],behind:['받을 커밋 1개','↻ 동기화'],conflict:['충돌 1건','충돌 검토'],offline:['오프라인 · 09:42 마지막 확인','다시 확인']};
+const byId=id=>document.getElementById(id);
+let selected='cloud';
+function render(){
+ const device=devices[selected],panel=byId('window'),[wash,accent]=themes[device.theme];
+ panel.style.setProperty('--wash',wash);panel.style.setProperty('--accent',accent);
+ panel.classList.toggle('conflict',device.state==='conflict');
+ byId('device-name').textContent=device.name;byId('icon').textContent=device.icon;
+ byId('status').textContent=states[device.state][0];byId('action').textContent=states[device.state][1];
+ byId('push').style.opacity=device.state==='ahead'?'1':'0.45';byId('scenario').value=device.state;
+ document.querySelectorAll('[data-device]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.device===selected)));
+ document.querySelectorAll('[data-theme]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.theme===device.theme)));
+}
+document.querySelectorAll('[data-device]').forEach(btn=>btn.onclick=()=>{selected=btn.dataset.device;render()});
+document.querySelectorAll('[data-theme]').forEach(btn=>btn.onclick=()=>{devices[selected].theme=btn.dataset.theme;render()});
+byId('scenario').onchange=event=>{devices[selected].state=event.target.value;render()};
+render();
+</script>
+</html>
