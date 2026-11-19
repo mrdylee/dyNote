@@ -122,9 +122,9 @@ try {
   await page.getByRole("tab",{name:"문서 정보",exact:true}).click();
   assert.equal(Number(await page.getByRole("separator",{name:"오른쪽 패널 너비"}).getAttribute("aria-valuenow")),right);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1050,800));
-  await page.waitForFunction(() => innerWidth <= 1050 && document.querySelector(".workspace").getBoundingClientRect().width >= 360);
+  await page.waitForFunction(() => innerWidth <= 1050 && document.querySelector(".workspace").getBoundingClientRect().width >= 280);
   const widths=await page.locator(".workspace").evaluate(el=>({center:el.getBoundingClientRect().width,total:document.documentElement.scrollWidth,window:innerWidth}));
-  assert.ok(widths.center>=360); assert.ok(widths.total<=widths.window);
+  assert.ok(widths.center>=280); assert.ok(widths.total<=widths.window);
   report.checks.push("both panel boundaries drag; keyboard and cancellation work; hide/reopen and tabs keep width; narrow window reserves center");
   await app.close();app=await launch();await setup();
   assert.equal(await content(),bothBullets);

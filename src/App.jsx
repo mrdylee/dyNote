@@ -367,12 +367,12 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [panelWidths, setPanelWidths] = useState(() => normalizePanelWidths(stored("dynote.panelWidths", null)));
-  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
+  const [viewportWidth, setViewportWidth] = useState(() => document.documentElement.clientWidth);
   useEffect(() => { persist("dynote.panelWidths", panelWidths); }, [panelWidths]);
   useEffect(() => {
-    const resize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    const observer = new ResizeObserver(() => setViewportWidth(document.documentElement.clientWidth));
+    observer.observe(document.documentElement);
+    return () => observer.disconnect();
   }, []);
   const rightVisible = right;
   const panelLayout = fitPanelWidths(panelWidths, viewportWidth, rightVisible);

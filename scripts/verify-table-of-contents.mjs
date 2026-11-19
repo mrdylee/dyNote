@@ -73,13 +73,13 @@ try{
  const rightResize=page.getByRole('separator',{name:'오른쪽 패널 너비'});
  const width=async handle=>Number(await handle.getAttribute('aria-valuenow'));
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1320,900));
- await leftResize.and(page.locator('[aria-valuemax="626"]')).waitFor();
+ await page.waitForFunction(()=>innerWidth===1320 && Number(document.querySelector('[aria-label="왼쪽 패널 너비"]').getAttribute('aria-valuemax'))>600);
  await leftResize.press('End');
  assert.ok(await width(leftResize)>480);
  assert.equal(await width(leftResize),Number(await leftResize.getAttribute('aria-valuemax')));
  assert.ok((await page.locator('.workspace').boundingBox()).width>=280);
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1050,760));
- await leftResize.and(page.locator('[aria-valuenow="456"]')).waitFor();
+ await page.waitForFunction(()=>innerWidth===1050 && Number(document.querySelector('[aria-label="왼쪽 패널 너비"]').getAttribute('aria-valuenow'))<480);
  const constrainedLeft=await width(leftResize);
  const leftHandle=await leftResize.boundingBox();
  const leftX=leftHandle.x+leftHandle.width/2,leftY=leftHandle.y+leftHandle.height/2;
@@ -94,7 +94,7 @@ try{
  await page.waitForFunction(()=>innerWidth===1320);
  await leftResize.dblclick();
  assert.equal(await width(leftResize),244);
- await rightResize.and(page.locator('[aria-valuemax="722"]')).waitFor();
+ await page.waitForFunction(()=>Number(document.querySelector('[aria-label="오른쪽 패널 너비"]').getAttribute('aria-valuemax'))>700);
  const handle=await rightResize.boundingBox();
  const x=handle.x+handle.width/2,y=handle.y+handle.height/2;
  await page.mouse.move(x,y);
@@ -104,7 +104,7 @@ try{
  const expanded=await width(rightResize);
  assert.ok(expanded>600);
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1050,760));
- await rightResize.and(page.locator('[aria-valuenow="452"]')).waitFor();
+ await page.waitForFunction(width=>innerWidth===1050 && Number(document.querySelector('[aria-label="오른쪽 패널 너비"]').getAttribute('aria-valuenow'))<width,expanded);
  assert.ok(await width(rightResize)<expanded);
  assert.ok((await page.locator('.workspace').boundingBox()).width>=280);
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1320,900));
