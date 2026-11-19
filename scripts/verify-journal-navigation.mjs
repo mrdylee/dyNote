@@ -22,6 +22,18 @@ try {
     vaultRoot: team, vaults: [team, personal], vaultPurposes: { [team]: 'team', [personal]: 'personal' },
   }));
   await writeFile(path.join(team, 'Team.md'), '# Team document');
+  await mkdir(path.join(personal, 'Journal'));
+  for (const date of ['2024-01-01', '2025-12-31'])
+    await writeFile(path.join(personal, 'Journal', `${date}.md`), `# ${date}\n\n- 이전 기록`);
+  await mkdir(path.join(personal, 'Daily'));
+  for (const name of ['31-12-2024', '01-01-2025'])
+    await writeFile(path.join(personal, 'Daily', `${name}.md`), `# ${name}\n`);
+  await mkdir(path.join(personal, 'Other'));
+  for (const name of ['Alpha', 'Zulu'])await writeFile(path.join(personal, 'Other', `${name}.md`), `# ${name}\n`);
+  for (const date of ['2024/12/31', '2025/01/01', '2025/12/02', '2025/12/01']) {
+    const file=path.join(personal,'Nested',`${date}.md`);
+    await mkdir(path.dirname(file),{recursive:true});await writeFile(file,`# ${date}\n`);
+  }
   app = await launch(profile);
   const page = await app.firstWindow();
   page.setDefaultTimeout(8000);
@@ -35,6 +47,10 @@ try {
   const personalTree = page.getByRole('region', { name: '개인 노트 · Personal', exact: true });
   await personalTree.getByTitle('Journal', { exact: true }).waitFor();
   await personalTree.getByTitle(todayPath, { exact: true }).waitFor();
+  assert.deepEqual(await personalTree.locator('.file-row[title^="Journal/"]').evaluateAll(rows => rows.map(row => row.title)),
+    [todayPath, 'Journal/2025-12-31.md', 'Journal/2024-01-01.md'], 'journal files must appear newest first');
+  assert.deepEqual(await personalTree.locator('.file-row[title^="Other/"]').evaluateAll(rows => rows.map(row => row.title)),
+    ['Other/Alpha.md', 'Other/Zulu.md'], 'ordinary folders keep alphabetical ordering');
   assert.equal(await readFile(path.join(personal, todayPath), 'utf8'), `# ${localDate()}\n\n- `);
   await assert.rejects(readFile(path.join(team, todayPath)), { code: 'ENOENT' });
   await journal.waitFor();
@@ -44,7 +60,7 @@ try {
   await page.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).getByTitle('Team.md', { exact: true }).click();
   await calendar.click();
   await feed.locator(`article[data-vault-id="${personalId}"]`).first().waitFor();
-  assert.equal(await feed.locator(`article:not([data-vault-id="${personalId}"])`).count(), 0, 'calendar also keeps journals in personal notes');
+  assert.equal(await feed.locator(`.journal-entry:not([data-vault-id="${personalId}"])`).count(), 0, 'calendar also keeps journals in personal notes');
   await journal.click();
   await feed.locator(`article[data-vault-id="${personalId}"]`).first().waitFor();
   assert.doesNotMatch(await calendar.getAttribute('class'), /active/);
@@ -105,6 +121,18 @@ try {
   assert.match(await singleRail.getByRole('button', { name: '저널', exact: true }).getAttribute('class'), /active/);
   assert.doesNotMatch(await singleRail.getByRole('button', { name: '달력과 일지', exact: true }).getAttribute('class'), /active/);
   assert.doesNotMatch(await singleRail.getByRole('button', { name: '파일 목록', exact: true }).getAttribute('class'), /active/);
+  await single.evaluate(personalId => localStorage.setItem(`dynote.journal.${personalId}`, JSON.stringify({daily:{folder:'Daily',format:'DD-MM-YYYY'}})), personalId);
+  await single.reload();
+  await single.locator('.navigator').getByTitle('Daily/01-01-2025.md', { exact: true }).waitFor();
+  const customDates=await single.locator('.file-row[title^="Daily/"]').evaluateAll(rows => rows.map(row => row.title));
+  assert.ok(customDates.indexOf('Daily/01-01-2025.md')<customDates.indexOf('Daily/31-12-2024.md'), 'custom journal formats sort by date instead of filename');
+  const rootFolders=await single.locator('.folder-row').evaluateAll(rows=>rows.map(row=>row.title).filter(title=>!title.includes('/')));
+  await single.evaluate(personalId => localStorage.setItem(`dynote.journal.${personalId}`, JSON.stringify({daily:{folder:'Nested',format:'YYYY/MM/DD'}})), personalId);
+  await single.reload();
+  await single.locator('.navigator').getByTitle('Nested/2025/12/02.md',{exact:true}).waitFor();
+  assert.deepEqual(await single.locator('.file-row[title^="Nested/"]').evaluateAll(rows=>rows.map(row=>row.title).filter(title=>/^Nested\/202[45]\//.test(title))),
+    ['Nested/2025/12/02.md','Nested/2025/12/01.md','Nested/2025/01/01.md','Nested/2024/12/31.md'], 'nested journal folders must also put the newest dates first');
+  assert.deepEqual(await single.locator('.folder-row').evaluateAll(rows=>rows.map(row=>row.title).filter(title=>!title.includes('/'))),rootFolders,'journal sorting must not reorder unrelated root folders');
   await app.close();
   for (const hasPersonal of [true, false]) {
     const fixture = path.join(root, hasPersonal ? 'unclassified-current' : 'team-only');

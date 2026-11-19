@@ -137,8 +137,17 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
 
 const copilotSessionPath = /^(?:Copilot Note|AI Conversations)\/[a-f0-9]{20}\/[a-f0-9]{20}\.md$/;
 
-function FileTree({ notes, folders, captureEntries, active, reveal, onOpen, onContext, onRename, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
+function FileTree({ notes, folders, journalPreferences, captureEntries, active, reveal, onOpen, onContext, onRename, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
   const [closed, setClosed] = useState(new Set());
+  const journalDates = new Map();
+  const journalFolder = journalPreferences?.daily?.folder?.trim() || "";
+  for (const note of periodicEntries(notes, "daily", { ...journalPreferences?.daily, locale: journalPreferences?.locale })) {
+    let path = note.path;
+    while (path && path !== journalFolder) {
+      if (note.date > (journalDates.get(path) ?? "")) journalDates.set(path, note.date);
+      path = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    }
+  }
   useEffect(() => {
     if (!reveal?.folder) return;
     setClosed(old => {
@@ -171,10 +180,11 @@ function FileTree({ notes, folders, captureEntries, active, reveal, onOpen, onCo
         const path = prefix + name;
         const capture = captureEntries?.get(path);
         const label = capture?.label ?? (copilotSessionPath.test(path) ? item.note?.title : undefined);
-        return { name, item, path, label, lastActivity: capture?.lastActivity ?? 0 };
+        return { name, item, path, label, journalDate: journalDates.get(path) ?? "", lastActivity: capture?.lastActivity ?? 0 };
       })
       .sort(
         (a, b) => Number(!!b.item.children) - Number(!!a.item.children) ||
+          b.journalDate.localeCompare(a.journalDate) ||
           b.lastActivity - a.lastActivity ||
           (a.label ?? a.name).localeCompare(b.label ?? b.name, "ko") || a.name.localeCompare(b.name, "ko"),
       )
@@ -747,14 +757,16 @@ export default function App() {
       else {
         setBusy(true);
         setCaptureImportResult(null);
-        await flush();
+        const targetEdits = editsRef.current.forVault(id);
+        if (targetEdits.blocked() || targetEdits.working) throw new Error("개인 노트의 Copilot 변경을 먼저 검토해 주세요. 설정에서 미확정 변경 문서를 열 수 있습니다.");
+        await flush(true);
       }
       const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
         ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
       if (!vaultsRef.current[id]) return;
       if (manual && action === "sync") {
         const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
-          ? "선택한 세션의 대화를 개인 노트에 가져왔습니다." : "선택한 세션에 새로 가져올 대화가 없습니다.";
+          ? "기록 폴더의 대화를 개인 노트에 가져왔습니다." : "기록 폴더에 새로 가져올 완료된 대화가 없습니다.";
         setCaptureImportResult({ vaultId: id, notice });
       }
       updateCaptureState(id, () => result.status);
@@ -1590,6 +1602,7 @@ export default function App() {
   };
   const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles)]}
     folders={scope.folders ?? emptyFiles}
+    journalPreferences={scope.journalPreferences}
     captureEntries={captureTreeEntries.get(scope.id)}
     active={vault.id === scope.id ? displayedPath : null}
     disabled={busy} onOpen={path => openFile(path, scope.id)}
@@ -2686,7 +2699,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "저널 자동기록"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
@@ -2718,6 +2731,9 @@ export default function App() {
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
             destination={captureVault?.name} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
+            pendingEdits={editState.drafts[captureVaultId] ?? emptyFiles}
+            importBlocked={editState.blocked(captureVaultId) || editState.forVault(captureVaultId).working}
+            onReviewEdit={path => { setModal(null); openNote(path, captureVaultId); }}
             onRefresh={async () => { const state = await invoke(api.captureStatus({ vaultId: captureVaultId })); updateCaptureState(captureVaultId, () => state); return state; }}
             onSource={async (wsl = false) => {
               const state = await invoke(api.pickCaptureSource({ vaultId: captureVaultId, wsl }));
@@ -2728,8 +2744,7 @@ export default function App() {
               return state;
             }}
             onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}
-            onSessions={projects=>invoke(api.captureSessions({vaultId:captureVaultId,projects}))}
-            onImport={sessionIds=>captureAction("sync",true,{sessionIds},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
+            onImport={()=>captureAction("sync",true,{allSessions:true},captureVaultId)} onManageSpaces={()=>setSettingsTab("vault")}/>}
           {settingsTab === "document-prompts" && <DocumentPromptSettings prompts={documentPrompts} onSave={value => {
             try { localStorage.setItem(documentPromptsKey, JSON.stringify(value)); }
             catch { throw new Error("프롬프트 설정을 저장하지 못했습니다."); }

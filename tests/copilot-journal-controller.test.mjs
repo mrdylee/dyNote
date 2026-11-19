@@ -10,14 +10,14 @@ import {localDate} from '../core/periodic-notes.mjs';
 import {captureId,captureLink,renderCapture} from '../core/copilot-journal.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 async function fixture(t){
- const root=await mkdtemp(path.join(tmpdir(),'dynote-capture-unit-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await realpath(await mkdtemp(path.join(tmpdir(),'dynote-capture-unit-')));t.after(()=>rm(root,{recursive:true,force:true}));
  const source=path.join(root,'workspaceStorage'),profile=path.join(root,'profile');
  for(const p of ['vault/Journal','workspaceStorage/project/chatSessions','workspaceStorage/other/chatSessions','profile'])await mkdir(path.join(root,p),{recursive:true});
  await writeFile(path.join(source,'project/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(root,'Work')).href}));
  await writeFile(path.join(source,'other/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(root,'Other')).href}));
  const vault=await Vault.open(path.join(root,'vault'),path.join(root,'recovery'));
  let clock=new Date(2026,10,4,12).getTime();
- const controller=new CopilotJournal({file:path.join(profile,'capture.json'),sourceRoot:source,now:()=>clock});await controller.load();
+ const controller=new CopilotJournal({file:path.join(profile,'capture.json'),sourceRoot:source,sessionRoot:path.join(root,'.copilot/session-state'),now:()=>clock});await controller.load();
  const date=localDate(clock),journal=`Journal/${date}.md`;
  await writeFile(path.join(vault.root,journal),'# Today\n\n직접 작성한 기록\n');
  const sourceFile=path.join(source,'project/chatSessions/session.json');
@@ -25,6 +25,109 @@ async function fixture(t){
  const configure=enabled=>controller.configure(vault,{enabled,projects:['project']},true);
  return {root,source,profile,vault,controller,date,journal,put,configure,sourceFile,now:()=>clock,advance:value=>clock+=value};
 }
+async function putAgent(f,{sessionId='session',directory=sessionId,questions=['Agent 질문']}={}){
+ const folder=path.join(f.controller.sessionRoot,directory);await mkdir(folder,{recursive:true});
+ await writeFile(path.join(folder,'workspace.yaml'),`cwd: ${JSON.stringify(path.join(f.root,'Work'))}\nclient_name: vscode-agent-host\n`);
+ const events=[{type:'session.start',data:{sessionId}}];
+ for(const [index,content] of questions.entries()){
+  const timestamp=new Date(f.now()+index+1).toISOString();
+  events.push({type:'user.message',id:`u${index}`,timestamp,data:{content}},
+   {type:'assistant.message',id:`a${index}`,timestamp,data:{content:'Agent 답변'}},{type:'assistant.turn_end',data:{}});
+ }
+ await writeFile(path.join(folder,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
+}
+test('snapshot and Agent Host copies use one source per native session ID',async t=>{
+ const f=await fixture(t);await f.configure(false);await f.put('q','화면 원문');
+ await rename(f.sourceFile,path.join(f.source,'project/chatSessions/snapshot-copy.json'));
+ await putAgent(f,{questions:['Agent 별도 원문','Agent 최신 제목']});
+ const available=await f.controller.listSessions(f.vault,['project']);
+ assert.deepEqual(available.sessions.map(session=>session.title),['검토 대화']);
+ const result=await f.controller.sync(f.vault,{},true,{sessionIds:available.sessions.map(session=>session.id)});
+ assert.equal(result.status.error,'');
+ assert.equal(result.status.records[0].sessions.length,1);
+ const content=await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8');
+ assert.match(content,/화면 원문/);assert.doesNotMatch(content,/Agent 별도 원문/);
+});
+test('an imported Agent Host session keeps its source when a snapshot later appears',async t=>{
+ const f=await fixture(t);await f.configure(false);await putAgent(f);
+ const available=await f.controller.listSessions(f.vault,['project']),selection={sessionIds:available.sessions.map(session=>session.id)};
+ const first=await f.controller.sync(f.vault,{},true,selection);
+ await f.put('q','중복 화면 원문');await putAgent(f,{questions:['Agent 질문','Agent 추가 질문']});
+ assert.equal((await f.controller.listSessions(f.vault,['project'])).sessions[0].title,'Agent 질문');
+ const result=await f.controller.sync(f.vault,{},true,selection);
+ assert.equal(result.changed,true);assert.equal(result.status.error,'');
+ const content=await readFile(path.join(f.vault.root,first.status.records[0].sessions[0].path),'utf8');
+ assert.equal(content.match(/Agent 질문/g).length,2); // Title and the original user message.
+ assert.match(content,/Agent 추가 질문/);assert.doesNotMatch(content,/중복 화면 원문/);
+ assert.equal((await f.controller.sync(f.vault,{},true,selection)).changed,false);
+});
+test('different native session IDs remain importable when their storage names collide',async t=>{
+ const f=await fixture(t);await f.configure(false);await f.put();
+ await putAgent(f,{directory:'session',sessionId:'different-session'});
+ const available=await f.controller.listSessions(f.vault,['project']);
+ assert.equal(available.sessions.length,2);
+ const result=await f.controller.sync(f.vault,{},true,{sessionIds:available.sessions.map(session=>session.id)});
+ assert.equal(result.status.records[0].sessions.length,2);assert.equal(result.status.error,'');
+ const record=result.status.records[0],snapshot=record.sessions.find(session=>session.title==='검토 대화');
+ await f.controller.trash(f.vault,{id:record.id,sessionId:snapshot.id});await rm(f.sourceFile);
+ const remaining=await f.controller.listSessions(f.vault,['project']);
+ assert.deepEqual(remaining.sessions.map(session=>session.title),['Agent 질문']);
+ await putAgent(f,{directory:'session',sessionId:'different-session',questions:['Agent 질문','삭제와 무관한 새 질문']});
+ const continued=await f.controller.sync(f.vault,{},true,{sessionIds:[remaining.sessions[0].id]});
+ assert.equal(continued.changed,true);assert.equal(continued.status.records[0].sessions.length,1);
+});
+test('whole-folder import includes every project and date and preserves deletion exclusions',async t=>{
+ const f=await fixture(t);await f.configure(false);
+ await f.put('old','지난 프로젝트 대화',f.now()-86400000);
+ await f.put('other','다른 프로젝트의 과거 대화',f.now()-2*86400000,path.join(f.source,'other/chatSessions/other.json'));
+ await writeFile(path.join(f.source,'other/chatSessions/bad.json'),JSON.stringify({version:99,requests:[]}));
+ const options={allSessions:true},result=await f.controller.sync(f.vault,{},true,options);
+ assert.equal(result.status.records.length,2);assert.match(result.status.error,/일부/);
+ for(const record of result.status.records){
+  assert.ok(record.sessions[0].path.startsWith('Copilot Note/'));
+  assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,record.journalPath),'utf8')).length,1);
+ }
+ assert.equal((await f.controller.sync(f.vault,{},true,options)).changed,false);
+ const deleted=result.status.records[0];
+ await f.controller.trash(f.vault,{id:deleted.id,sessionId:deleted.sessions[0].id});
+ assert.equal((await f.controller.sync(f.vault,{},true,options)).status.records.length,1);
+ await assert.rejects(readFile(path.join(f.vault.root,deleted.sessions[0].path)),{code:'ENOENT'});
+});
+test('automatic whole-folder capture discovers new projects after activation',async t=>{
+ const f=await fixture(t);
+ const status=await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
+ assert.equal(status.allProjects,true);assert.ok(status.projects.every(project=>project.selected));
+ await mkdir(path.join(f.source,'new/chatSessions'),{recursive:true});
+ await writeFile(path.join(f.source,'new/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(f.root,'New')).href}));
+ await f.put('old','켜기 전 대화',f.now()-1,path.join(f.source,'new/chatSessions/old.json'));
+ await f.put('new','새 프로젝트의 새 대화',f.now()+1,path.join(f.source,'new/chatSessions/new.json'));
+ const result=await f.controller.sync(f.vault,{});
+ assert.equal(result.status.records.length,1);assert.equal(result.status.records[0].label,'New');
+ const content=await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8');
+ assert.match(content,/새 프로젝트의 새 대화/);assert.doesNotMatch(content,/켜기 전 대화/);
+});
+test('saving whole-folder settings preserves the activation time for newly discovered projects',async t=>{
+ const f=await fixture(t);await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
+ const activated=f.now();f.advance(1000);
+ await mkdir(path.join(f.source,'new/chatSessions'),{recursive:true});
+ await writeFile(path.join(f.source,'new/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(f.root,'New')).href}));
+ await f.put('new','활성화 후 설정 저장 전 대화',activated+1,path.join(f.source,'new/chatSessions/new.json'));
+ await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
+ const result=await f.controller.sync(f.vault,{});
+ assert.equal(result.status.records.length,1);
+ assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/활성화 후 설정 저장 전 대화/);
+});
+test('whole-folder import recovers an interrupted batch and continues with newly discovered sessions',async t=>{
+ const f=await fixture(t);await f.configure(false);await f.put();
+ const persist=f.controller.persist.bind(f.controller);
+ f.controller.persist=async(vault,config)=>{if(config.sessionLayout&&!config.pendingCapture)throw new Error('Interrupted final write');return persist(vault,config);};
+ await assert.rejects(f.controller.sync(f.vault,{},true,{allSessions:true}),/Interrupted/);
+ f.controller.persist=persist;
+ await f.put('other','복구 후 다른 프로젝트',f.now()-86400000,path.join(f.source,'other/chatSessions/other.json'));
+ const result=await f.controller.sync(f.vault,{},true,{allSessions:true});
+ assert.equal(result.status.records.length,2);
+ assert.equal((await f.controller.sync(f.vault,{},true,{allSessions:true})).changed,false);
+});
 test('automatic collection starts at activation, groups new sessions and keeps unrelated journal text',async t=>{
  const f=await fixture(t);await f.put('old','과거',f.now()-1);await f.configure(true);
  assert.equal((await f.controller.sync(f.vault,{})).changed,false);
@@ -238,7 +341,7 @@ test('existing daily records and links migrate once and later imports only add n
  assert.equal(restored.status.records.length,2);
  assert.equal(await readFile(document,'utf8'),content);
 });
-test('manual legacy migration writes only existing conversations until a new session is selected',async t=>{
+for(const allSessions of [false,true])test(`legacy migration ${allSessions?'also imports all folder conversations':'waits for explicit session selection'}`,async t=>{
  const f=await fixture(t);await f.configure(false);
  const key=captureId(pathToFileURL(path.join(f.root,'Work')).href),date=localDate(f.now()-86400000);
  const sessionId=captureId(key,'legacy');
@@ -250,11 +353,16 @@ test('manual legacy migration writes only existing conversations until a new ses
  await writeFile(path.join(f.vault.root,record.journalPath),captureLink(record));
  await f.controller.persist(f.vault,{...f.controller.config(f.vault),records:{[record.id]:record}});
  await f.put('new','선택하지 않은 오늘 대화');
- const migrated=await f.controller.sync(f.vault,{},true);
+ const migrated=await f.controller.sync(f.vault,{},true,{allSessions});
  assert.equal(migrated.migrated,true);
- assert.deepEqual(migrated.status.records.flatMap(record=>record.sessions.map(session=>session.title)),['기존 대화']);
  assert.equal(await readFile(path.join(f.vault.root,record.path),'utf8'),legacyText);
- assert.doesNotMatch(await readFile(path.join(f.vault.root,f.journal),'utf8'),/dynote:copilot/);
+ if(allSessions){
+  assert.equal(migrated.status.records.length,2);
+  assert.match(await readFile(path.join(f.vault.root,f.journal),'utf8'),/dynote:copilot/);
+ }else{
+  assert.deepEqual(migrated.status.records.flatMap(record=>record.sessions.map(session=>session.title)),['기존 대화']);
+  assert.doesNotMatch(await readFile(path.join(f.vault.root,f.journal),'utf8'),/dynote:copilot/);
+ }
  const {sessions}=await f.controller.listSessions(f.vault,['project']);
  const selected=await f.controller.sync(f.vault,{},true,{sessionIds:[sessions[0].id]});
  assert.equal(selected.status.records.length,2);
@@ -268,7 +376,7 @@ test('an interrupted save resumes the same session and link after restart',async
   return persist(vault,config);
  };
  await assert.rejects(f.controller.sync(f.vault,{}),/Interrupted final write/);
- const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,now:f.now});
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,sessionRoot:f.controller.sessionRoot,now:f.now});
  await restarted.load();
  await f.put('q2','다음 질문',f.now()+2);
  const recovered=await restarted.sync(f.vault,{});
@@ -289,7 +397,7 @@ test('a selected session is imported after completing an interrupted earlier imp
   return persist(vault,config);
  };
  await assert.rejects(f.controller.sync(f.vault,{}),/Interrupted final write/);
- const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,now:f.now});
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,sessionRoot:f.controller.sessionRoot,now:f.now});
  await restarted.load();
  await f.put('b','새로 선택한 세션',f.now()+2,path.join(f.source,'project/chatSessions/second.json'));
  const {sessions}=await restarted.listSessions(f.vault,['project']);
@@ -317,6 +425,47 @@ test('WSL projects in VS Code workspaceStorage can be selected and imported',asy
  assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/WSL 질문/);
  assert.ok((await readFile(path.join(f.vault.root,f.journal),'utf8')).includes(result.status.records[0].sessions[0].path));
  assert.equal((await f.controller.sync(f.vault,{},true)).changed,false);
+});
+test('an unavailable local Agent Host folder does not prevent saved settings from loading',async t=>{
+ const f=await fixture(t);await f.configure(true);await f.put();
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,sessionRoot:path.join(f.sourceFile,'session-state'),now:f.now});
+ await restarted.load();
+ assert.equal((await restarted.status(f.vault)).enabled,true);
+ const available=await restarted.listSessions(f.vault,['project']);
+ assert.equal(available.sessions.length,1);
+ assert.match(available.error,/로컬 Copilot 기록 폴더에 접근할 수 없습니다/);
+});
+test('local VS Code Agent Host sessions are listed and imported only for the selected project',async t=>{
+ const f=await fixture(t),sessionRoot=path.join(f.root,'.copilot/session-state');
+ const put=async(id,cwd,client,complete=true)=>{
+  const folder=path.join(sessionRoot,id);await mkdir(folder,{recursive:true});
+  await writeFile(path.join(folder,'workspace.yaml'),`cwd: ${JSON.stringify(cwd)}\nclient_name: ${client}\n`);
+  const timestamp=new Date(f.now()-86400000).toISOString();
+  await writeFile(path.join(folder,'events.jsonl'),[
+   {type:'session.start',data:{sessionId:id}},
+   {type:'user.message',id:'u',timestamp,data:{content:`질문 ${id}`}},
+   {type:'assistant.message',id:'a',timestamp,data:{content:'로컬 답변',reasoningText:'PRIVATE REASONING'}},
+   ...(complete?[{type:'assistant.turn_end',data:{}}]:[]),
+  ].map(event=>JSON.stringify(event)).join('\n')+'\n');
+ };
+ await put('selected',path.join(f.root,'Work'),'vscode-agent-host');
+ await put('unselected',path.join(f.root,'Other'),'vscode-agent-host');
+ await put('cli',path.join(f.root,'Work'),'github/cli');
+ await put('unfinished',path.join(f.root,'Work'),'vscode-agent-host',false);
+ await f.configure(false);
+ const available=await f.controller.listSessions(f.vault,['project']);
+ assert.deepEqual(available.sessions.map(session=>session.title),['질문 selected']);
+ assert.equal(available.error,'');
+ const selection={sessionIds:available.sessions.map(session=>session.id)};
+ const result=await f.controller.sync(f.vault,{},true,selection);
+ assert.equal(result.changed,true);
+ const [record]=result.status.records;
+ assert.ok(record.sessions[0].path.startsWith('Copilot Note/'));
+ const content=await readFile(path.join(f.vault.root,record.sessions[0].path),'utf8');
+ assert.match(content,/질문 selected/);
+ assert.doesNotMatch(content,/PRIVATE REASONING|unselected|cli|unfinished/);
+ assert.ok((await readFile(path.join(f.vault.root,record.journalPath),'utf8')).includes(record.sessions[0].path));
+ assert.equal((await f.controller.sync(f.vault,{},true,selection)).changed,false);
 });
 test('a selected WSL project imports its own VS Code Agent Host history from session-state',async t=>{
  const f=await fixture(t),wslRoot=path.join(await realpath(f.root),'session-state');
@@ -363,7 +512,7 @@ test('title trash removes the source copy and journal link, stays excluded acros
  await assert.rejects(readFile(path.join(f.vault.root,record.sessions[0].path)),{code:'ENOENT'});
  assert.doesNotMatch(await readFile(path.join(f.vault.root,f.journal),'utf8'),/dynote:copilot /);
  assert.doesNotMatch(await readFile(path.join(f.profile,'capture.json'),'utf8'),/질문/);
- const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,now:f.now});await restarted.load();
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,sessionRoot:f.controller.sessionRoot,now:f.now});await restarted.load();
  assert.equal((await restarted.sync(f.vault,{},true)).status.records.length,0);
  const restored=await restarted.restore(f.vault,deleted.trashId);assert.equal(restored.status.records.length,1);
  assert.match(await readFile(path.join(f.vault.root,record.sessions[0].path),'utf8'),/질문/);

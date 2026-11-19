@@ -57,7 +57,7 @@ try {
   report.checks.push("The DyNote wordmark and app mark render, and the version button opens About");
   await page.getByRole("button", { name: "설정", exact: true }).click();
   await page.getByRole("button", { name: "백업·복원", exact: true }).click();
-  assert.deepEqual(await page.locator(".settings-tabs button").allTextContents(), ["시작 화면", "보관함", "글꼴", "단축키", "플러그인", "저널 자동기록", "문서 프롬프트", "백업·복원", "업데이트"]);
+  assert.deepEqual(await page.locator(".settings-tabs button").allTextContents(), ["시작 화면", "보관함", "글꼴", "단축키", "플러그인", "Copilot 대화 자동 저장", "문서 프롬프트", "백업·복원", "업데이트"]);
   assert.equal(await page.getByRole("button", { name: "자동 백업", exact: true }).getAttribute("aria-pressed"), "true");
   assert.equal(await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).inputValue(), "");
   assert.equal(await page.getByRole("button", { name: "연결하고 백업 시작", exact: true }).isDisabled(), true);

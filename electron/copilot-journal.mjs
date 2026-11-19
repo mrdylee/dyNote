@@ -1,6 +1,7 @@
 import {readFile,writeFile,mkdir,rename,readdir,lstat,realpath,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
+import {homedir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {parseDocument} from 'yaml';
@@ -9,6 +10,7 @@ import {localDate,periodicNote} from '../core/periodic-notes.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const directoryName=value=>/^[\w-]{1,128}$/.test(value);
 const linuxFolder=value=>path.posix.normalize(value).replace(/\/+$/,'')||'/';
+const localFolder=value=>process.platform==='win32'?path.normalize(value).replace(/\\+$/,'').toLowerCase():linuxFolder(value);
 const wslDistro=value=>{
  const unc=path.win32.normalize(value).replace(/^\\\\\?\\UNC\\/i,'\\\\');
  return /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)\\/i.exec(unc)?.[1].toLowerCase();
@@ -65,11 +67,12 @@ async function sourceFile(root,relative,maxBytes=64*1024*1024){
  }finally{await handle.close();}
 }
 export class CopilotJournal{
- constructor({file,sourceRoot,now=()=>Date.now()}){Object.assign(this,{file,sourceRoot,now});this.data={vaults:{}};this.failure='';}
+ constructor({file,sourceRoot,sessionRoot=path.join(process.env.COPILOT_HOME||path.join(homedir(),'.copilot'),'session-state'),now=()=>Date.now()}){Object.assign(this,{file,sourceRoot,sessionRoot,now});this.data={vaults:{}};this.failure='';}
  async load(){
   this.sourceRoot=await realpath(this.sourceRoot).catch(error=>{if(error.code==='ENOENT')return this.sourceRoot;throw error;});
+  this.sessionRoot=await realpath(this.sessionRoot).catch(()=>this.sessionRoot);
   try{const data=JSON.parse(await readFile(this.file,'utf8'));if(!data?.vaults||typeof data.vaults!=='object'||Array.isArray(data.vaults))throw new Error('shape');this.data=data;}
-  catch(error){if(error.code!=='ENOENT'){this.failure='저널 자동기록 설정을 읽지 못했습니다. 기존 설정 파일을 확인해 주세요.';throw new Error(this.failure);}}
+  catch(error){if(error.code!=='ENOENT'){this.failure='Copilot 대화 자동 저장 설정을 읽지 못했습니다. 기존 설정 파일을 확인해 주세요.';throw new Error(this.failure);}}
  }
  config(vault){
   if(this.failure)throw new Error(this.failure);
@@ -109,7 +112,7 @@ export class CopilotJournal{
  async status(vault){
   const config=this.config(vault);let projects=[],error='';
   try{projects=await this.projects(config.sourceRoot);}catch(e){error=e.message;}
-  return {sourceRoot:config.sourceRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,projects:projects.map(p=>({...p,selected:Object.hasOwn(config.projects,p.id)})),error,
+  return {sourceRoot:config.sourceRoot,sessionRoot:this.sessionRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,allProjects:config.allProjects===true,projects:projects.map(p=>({...p,selected:config.allProjects===true||Object.hasOwn(config.projects,p.id)})),error,
    needsMigration:legacyLayout(config),pendingCapture:!!config.pendingCapture,
    records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,journalPath:r.journalPath,
     projectKey:path.posix.basename(path.posix.dirname(r.path)),projectFolder:path.posix.dirname(r.path),
@@ -131,12 +134,14 @@ export class CopilotJournal{
   return this.status(vault);
  }
  async configure(vault,input,personal){
-  if(!personal)throw new Error('저널 자동기록은 개인 노트 공간에서 설정해 주세요.');
+  if(!personal)throw new Error('Copilot 대화 자동 저장은 개인 노트 공간에서 설정해 주세요.');
   const previous=this.config(vault),projects=await this.projects(previous.sourceRoot);
-  if(typeof input?.enabled!=='boolean'||!Array.isArray(input.projects)||input.projects.some(id=>!projects.some(p=>p.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
-  if(input.enabled&&!input.projects.length)throw new Error('자동 기록할 프로젝트를 선택해 주세요.');
-  const config=clone(previous);config.enabled=input.enabled;
-  config.projects=Object.fromEntries(input.projects.map(id=>[id,{since:input.enabled&&(!previous.enabled||!Object.hasOwn(previous.projects,id))?this.now():previous.projects[id]?.since??this.now()}]));
+  const allProjects=input?.allProjects===true,projectIds=allProjects?projects.map(project=>project.id):input?.projects;
+  if(typeof input?.enabled!=='boolean'||!Array.isArray(projectIds)||projectIds.some(id=>!projects.some(p=>p.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
+  if(input.enabled&&!allProjects&&!projectIds.length)throw new Error('자동 기록할 프로젝트를 선택해 주세요.');
+  const config=clone(previous);config.enabled=input.enabled;config.allProjects=allProjects;
+  if(allProjects)config.since=input.enabled&&(!previous.enabled||!previous.allProjects)?this.now():previous.since??this.now();
+  config.projects=Object.fromEntries(projectIds.map(id=>[id,{since:allProjects?config.since:input.enabled&&(!previous.enabled||!Object.hasOwn(previous.projects,id))?this.now():previous.projects[id]?.since??this.now()}]));
   await this.persist(vault,config);return this.status(vault);
  }
  async sources(root,workspace,errors){
@@ -159,47 +164,60 @@ export class CopilotJournal{
   }
   return [...sessions].map(([id,pair])=>{const source=pair.chat?.messages.length?pair.chat:pair.transcript??pair.chat;return {id,...source,title:pair.chat?.title||source.title};});
  }
- async wslSources(source,projects){
+ async agentSources(source,projects){
   const sessions=new Map();
   if(!source)return {sessions};
   const {root,distro}=source;
-  const matches=projects.filter(project=>project.wsl?.distro===distro);
+  const matches=projects.filter(project=>distro?project.wsl?.distro===distro:!project.wsl);
   if(!matches.length)return {sessions};
   let error='';
+  const label=distro?'WSL':'로컬 Copilot';
   try{
-   if(await realpath(root)!==root)throw new Error('WSL 기록 경로가 바뀌었습니다.');
+   if(await realpath(root)!==root)throw new Error(`${label} 기록 경로가 바뀌었습니다.`);
    for(const entry of await readdir(root,{withFileTypes:true})){
     if(!entry.isDirectory()||!directoryName(entry.name))continue;
     try{
      const metadata=parseDocument(await sourceFile(root,`${entry.name}/workspace.yaml`,16*1024));
      if(metadata.errors.length||!['vscode-agent-host','vscode'].includes(metadata.get('client_name')))continue;
      const cwd=metadata.get('cwd');
-     if(typeof cwd!=='string'||!path.posix.isAbsolute(cwd))continue;
-     const folder=linuxFolder(cwd);
-     const project=matches.find(candidate=>candidate.wsl.folder===folder);
+     if(typeof cwd!=='string'||!(distro?path.posix:path).isAbsolute(cwd))continue;
+     const project=matches.find(candidate=>distro?candidate.wsl.folder===linuxFolder(cwd):localFolder(candidate.path)===localFolder(cwd));
      if(!project)continue;
      const parsed=parseChatSource(await sourceFile(root,`${entry.name}/events.jsonl`),entry.name);
      if(!sessions.has(project.id))sessions.set(project.id,[]);
      sessions.get(project.id).push({id:entry.name,...parsed});
     }catch(failure){
-     if(failure.code!=='ENOENT')error='WSL 대화 일부를 읽지 못했습니다. 기록 폴더를 확인해 주세요.';
+     if(failure.code!=='ENOENT')error=`${label} 대화 일부를 읽지 못했습니다. 기록 폴더를 확인해 주세요.`;
     }
    }
-  }catch{
-   error='WSL 기록 폴더에 접근할 수 없습니다. WSL과 기록 폴더를 확인해 주세요.';
+  }catch(failure){
+   if(distro||failure.code!=='ENOENT')error=`${label} 기록 폴더에 접근할 수 없습니다. 기록 폴더를 확인해 주세요.`;
   }
   return {sessions,error};
  }
  async projectSessions(config,projects,isolateErrors=false){
-  const wsl=await this.wslSources(config.wslSource,projects),sessions=[];
+  const localAgent=await this.agentSources({root:this.sessionRoot},projects);
+  const wsl=await this.agentSources(config.wslSource,projects),sessions=[];
   const errors=isolateErrors?[]:undefined;
+  const saved=new Map([...sessionRecords(config.records)].map(([id,session])=>[session.sourceKey??id,session]));
   for(const project of projects){
    const local=await this.sources(config.sourceRoot,project.id,errors);
-   const localIds=new Set(local.filter(source=>source.messages.length).map(source=>source.id));
-   const remote=(wsl.sessions.get(project.id)??[]).filter(source=>!localIds.has(source.id));
-   for(const source of [...local,...remote])sessions.push({project,source});
+   const candidates=new Map();
+   for(const source of [...local,...(localAgent.sessions.get(project.id)??[]),...(wsl.sessions.get(project.id)??[])]){
+    if(!candidates.has(source.sessionId))candidates.set(source.sessionId,[]);
+    candidates.get(source.sessionId).push(source);
+   }
+   for(const [id,choices] of candidates){
+    const previous=saved.get(captureId(project.key,id));
+    const priority=source=>source.messages.length?1+Number(!!previous&&compatibleSource(previous,source)):0;
+    const activity=source=>source.messages.reduce((latest,message)=>Math.max(latest,message.at),0);
+    const format=previous?.format??choices.find(source=>source.messages.length&&source.format==='snapshot')?.format??choices[0].format;
+    // Preserve imported message IDs; otherwise prefer the displayed VS Code transcript.
+    choices.sort((a,b)=>priority(b)-priority(a)||Number(b.format===format)-Number(a.format===format)||activity(b)-activity(a));
+    sessions.push({project,source:choices[0]});
+   }
   }
-  const error=[wsl.error,errors?.length&&'VS Code 대화 일부를 읽지 못해 목록에서 제외했습니다. 원본 기록 파일을 확인해 주세요.'].filter(Boolean).join(' · ');
+  const error=[localAgent.error,wsl.error,errors?.length&&'VS Code 대화 일부를 읽지 못해 가져오기에서 제외했습니다. 원본 기록 파일을 확인해 주세요.'].filter(Boolean).join(' · ');
   return {sessions,error};
  }
  async listSessions(vault,projectIds){
@@ -209,12 +227,15 @@ export class CopilotJournal{
   const sources=await this.projectSessions(config,projects,true),sessions=new Map();
   const saved=sessionRecords(config.records);
   const aliases=new Map([...saved].map(([id,session])=>[session.sourceKey??id,id]));
+  const nativeKeys=new Set(sources.sessions.map(({project,source})=>captureId(project.key,source.sessionId)));
+  for(const session of saved.values())if(session.sourceKey)nativeKeys.add(session.sourceKey);
   for(const {project,source} of sources.sessions){
    const messages=source.messages.filter(message=>!config.blocked.includes(`g:${captureId(project.key,localDate(message.at))}`));
    if(!messages.length)continue;
    const id=captureId(project.key,source.sessionId),fileId=captureId(project.key,source.id);
-   const previousId=aliases.get(id)??(saved.has(fileId)?fileId:id);
-   if([id,fileId,previousId].some(key=>config.blocked.includes(`s:${key}`)))continue;
+   const legacyId=aliases.has(id)||nativeKeys.has(fileId)?id:fileId;
+   const previousId=aliases.get(id)??(saved.has(legacyId)?legacyId:id);
+   if([id,legacyId,previousId].some(key=>config.blocked.includes(`s:${key}`)))continue;
    const lastActivity=messages.reduce((latest,message)=>Math.max(latest,message.at),0);
    if((sessions.get(id)?.lastActivity??-1)>=lastActivity)continue;
    sessions.set(id,{id,projectId:project.id,projectLabel:project.label,projectPath:project.path,title:source.title||'대화',lastActivity});
@@ -276,36 +297,39 @@ export class CopilotJournal{
   const previous=this.config(vault),{pendingCapture,...config}=previous;
   if(pendingCapture)return this.commit(vault,previous,{...config,...pendingCapture});
  }
- async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds}={}){
+ async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
-  const migrating=legacyLayout(previous);
-  if(!previous.pendingCapture&&!migrating&&!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 저널 자동기록에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
+  const migrating=legacyLayout(previous),importAll=manual&&allSessions===true;
+  if(!previous.pendingCapture&&!migrating&&!importAll&&!previous.allProjects&&!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 Copilot 대화 자동 저장에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
   const today=localDate(this.now());
   if(manual&&sessionIds!==undefined&&(!Array.isArray(sessionIds)||!sessionIds.length||sessionIds.some(id=>typeof id!=='string'||!/^[a-f0-9]{20}$/.test(id))))throw new Error('가져올 세션을 선택해 주세요.');
   const selected=manual&&sessionIds!==undefined?new Set(sessionIds):null;
   if(previous.pendingCapture){
    if(checkOnly)return {pending:true};
    const recovered=await this.finishPending(vault);
-   if(!selected)return recovered;
-   const imported=await this.sync(vault,daily,manual,{sessionIds});
+   if(!selected&&!importAll)return recovered;
+   const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions});
    return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
-  if(manual&&migrating&&!selected)return this.commit(vault,previous,clone(previous));
+  if(manual&&migrating&&!selected&&!importAll)return this.commit(vault,previous,clone(previous));
   const next=clone(previous);
   // Keep sessions in the same folder across dates until their saved paths are moved.
   const folder=Object.values(previous.records).some(record=>record.path.startsWith('AI Conversations/'))?'AI Conversations':COPILOT_NOTE_FOLDER;
   const sessions=sessionRecords(next.records),updated=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
-  const projects=(await this.projects(previous.sourceRoot)).filter(project=>Object.hasOwn(previous.projects,project.id));
-  const sources=await this.projectSessions(previous,projects,selected!==null),matched=new Set();
+  const projects=(await this.projects(previous.sourceRoot)).filter(project=>importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
+  const sources=await this.projectSessions(previous,projects,selected!==null||importAll),matched=new Set();
+  const nativeKeys=new Set(sources.sessions.map(({project,source})=>captureId(project.key,source.sessionId)));
+  for(const session of sessions.values())if(session.sourceKey)nativeKeys.add(session.sourceKey);
   for(const {project,source} of sources.sessions){
     const sourceKey=captureId(project.key,source.sessionId),fileKey=captureId(project.key,source.id);
     if(selected&&!selected.has(sourceKey))continue;
     matched.add(sourceKey);
-    const legacy=sessions.get(fileKey);
-    const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?fileKey:sourceKey);
-    if([sourceKey,fileKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
+    const legacyKey=sourceKeys.has(sourceKey)||nativeKeys.has(fileKey)?sourceKey:fileKey;
+    const legacy=sessions.get(legacyKey);
+    const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?legacyKey:sourceKey);
+    if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
     const seen=existing?.messages??new Map();
     let compatible;
@@ -318,8 +342,8 @@ export class CopilotJournal{
      }
     }
     for(const message of source.messages){
-     if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<previous.projects[project.id].since))continue;
-     const date=localDate(message.at);if(manual&&!selected&&date!==today)continue;
+     if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<(previous.projects[project.id]?.since??previous.since??this.now())))continue;
+     const date=localDate(message.at);if(manual&&!selected&&!importAll&&date!==today)continue;
      const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      compatible??=compatibleSource(existing,source);
      if(!compatible){incompatible=true;break;}
@@ -332,11 +356,11 @@ export class CopilotJournal{
      session.messages.push(message);
      updated.add(session);
      session.format=source.format;
-     if(sessionId!==sourceKey)session.sourceKey=sourceKey;
+     session.sourceKey=sourceKey;
      if(source.title)session.title=source.title;
      seen.set(message.id,message);
      if(!existing){
-      existing={messages:seen,format:source.format,entries:[session]};
+      existing={messages:seen,format:source.format,sourceKey,entries:[session]};
       sessions.set(sessionId,existing);
       sourceKeys.set(sourceKey,sessionId);
      }
