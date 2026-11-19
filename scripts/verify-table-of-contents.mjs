@@ -7,6 +7,8 @@ await mkdir(profile);await mkdir(vaultRoot);await mkdir('output/playwright',{rec
 const filler=Array.from({length:18},(_,i)=>`본문 ${i+1}: 목차에서 제목을 선택해 문서를 탐색합니다.\n`).join('\n');
 const content=`---\ntags: [outline]\n---\n# 목차 디자인\n\n${filler}\n## **시작하기**\n\n${filler}\n### 같은 제목\n\n${filler}\n### 같은 제목\n\n${filler}\n## 긴 제목도 잘리지 않고 여러 줄로 표시되어 문서 구조를 쉽게 파악할 수 있습니다\n\n${filler}\n###### 깊은 제목\n\n${filler}\n\`\`\`md\n# 코드 안 제목\n\`\`\`\n`;
 await writeFile(`${vaultRoot}/Outline.md`,content);await writeFile(`${vaultRoot}/Empty.md`,'제목 없는 문서');
+const longOutline=Array.from({length:50},(_,index)=>`${'#'.repeat(1+index%6)} 제목 ${index+1}`).join('\n');
+await writeFile(`${vaultRoot}/Long.md`,`${longOutline}\n###### ${'LongUnbrokenHeading'.repeat(8)}\n`);
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot}));
 const report={checks:[],errors:[]};
 const executablePath=process.env.DYNOTE_EXECUTABLE;
@@ -67,8 +69,35 @@ try{
  const layout=await page.locator('.context-panel').evaluate(panel=>({width:panel.clientWidth,scroll:panel.scrollWidth,tabs:[...panel.querySelectorAll('[role=tab]')].map(el=>({width:el.clientWidth,scroll:el.scrollWidth}))}));
  assert.ok(layout.scroll<=layout.width);assert.ok(layout.tabs.every(tab=>tab.scroll<=tab.width));
  report.checks.push('All three panel choices fit at the minimum window width');
+ await page.evaluate(()=>localStorage.setItem('dynote.panelWidths',JSON.stringify({left:244,right:240})));
+ await page.reload();
+ await file('Long.md');
+ await rows.last().waitFor();
+ const scrollLayout=await toc.evaluate(panel=>{
+  const list=panel.querySelector('.toc-scroll'), title=panel.querySelector('h3');
+  const tabs=panel.closest('.context-panel').querySelector('.context-tabs');
+  const titleTop=title.getBoundingClientRect().top, tabsTop=tabs.getBoundingClientRect().top;
+  list.scrollTop=list.scrollHeight;
+  return {
+   panelWidth:panel.closest('.context-panel').getBoundingClientRect().width,
+   scrollTop:list.scrollTop,
+   hasOverflow:list.scrollWidth>list.clientWidth,
+   headingWraps:list.querySelector('li:last-child button').offsetHeight>list.querySelector('button').offsetHeight,
+   headerFixed:title.getBoundingClientRect().top===titleTop && tabs.getBoundingClientRect().top===tabsTop,
+  };
+ });
+ assert.ok(Math.abs(scrollLayout.panelWidth-240)<1, `outline panel width: ${scrollLayout.panelWidth}`);
+ assert.ok(scrollLayout.scrollTop>0);
+ assert.equal(scrollLayout.hasOverflow,false);
+ assert.equal(scrollLayout.headingWraps,true);
+ assert.equal(scrollLayout.headerFixed,true);
+ report.checks.push('At 240 px, the outline scrolls independently and long headings wrap without horizontal overflow');
+ await page.evaluate(()=>localStorage.removeItem('dynote.panelWidths'));
+ await page.reload();
+ await file('Outline.md');await mode('읽기 보기');await rows.nth(1).click();
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1320,900));
- await page.screenshot({path:'output/playwright/table-of-contents.png'});
+ await page.mouse.move(660,210);
+ await page.screenshot({path:'output/playwright/table-of-contents.png',animations:'disabled'});
  assert.deepEqual(report.errors,[]);assert.equal(await readFile(`${vaultRoot}/Outline.md`,'utf8'),content);
  report.checks.push('Navigation leaves the Markdown file unchanged; no renderer errors');
  await writeFile('output/playwright/table-of-contents.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

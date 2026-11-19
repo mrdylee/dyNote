@@ -64,11 +64,11 @@ export default function TableOfContents({ note, mode, editorRef, previewRef, onJ
         {headings.map((heading, index) => {
           const x = 8.5 + depth(heading) * 8;
           const previous = index ? 8.5 + depth(headings[index - 1]) * 8 : x;
-          return <li key={`${heading.line}:${index}`} className={current === index ? "active" : ""}>
+          return <li key={`${heading.line}:${index}`} className={current === index ? "active" : ""} style={{ "--toc-indent": `${16 + depth(heading) * 8}px` }}>
             <svg className="toc-rail" viewBox="0 0 56 100" preserveAspectRatio="none" aria-hidden="true">
               <path d={`M${previous} 0 C${previous} 10 ${x} 8 ${x} 20 L${x} 100`} vectorEffect="non-scaling-stroke" />
             </svg>
-            <button style={{ paddingLeft: 24 + depth(heading) * 8 }} aria-current={current === index ? "location" : undefined}
+            <button aria-current={current === index ? "location" : undefined}
               onClick={() => { setCurrent(index); onJump(heading); }}>{heading.plainText || heading.text || "제목 없음"}</button>
           </li>;
         })}
