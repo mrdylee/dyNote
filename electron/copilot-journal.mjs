@@ -1,4 +1,4 @@
-import {readFile,writeFile,mkdir,rename,readdir,lstat,realpath,open} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,rename,readdir,lstat,stat,realpath,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {homedir} from 'node:os';
@@ -191,7 +191,10 @@ export class CopilotJournal{
     }
    }
   }catch(failure){
-   if(distro||failure.code!=='ENOENT')error=`${label} 기록 폴더에 접근할 수 없습니다. 기록 폴더를 확인해 주세요.`;
+   // Windows can report ENOENT when the parent exists but is a file.
+   const absentOptionalFolder=!distro&&failure.code==='ENOENT'
+    &&await stat(path.dirname(root)).then(parent=>parent.isDirectory(),error=>error.code==='ENOENT');
+   if(!absentOptionalFolder)error=`${label} 기록 폴더에 접근할 수 없습니다. 기록 폴더를 확인해 주세요.`;
   }
   return {sessions,error};
  }
