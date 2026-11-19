@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-dynote-v0.23.7
+  group: publish-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   windows:
@@ -64,6 +64,7 @@ jobs:
         run: |
           test "$(node -p "require('./package.json').version")" = 0.23.7
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          test "$(git rev-parse origin/release/dynote-v0.23.7)" = "$GITHUB_SHA"
           if gh release view v0.23.7 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Release already exists; inspect it before retrying.' >&2
             exit 1
