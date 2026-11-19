@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {execFile} from 'node:child_process';
+import {execFile, execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import {createReadStream, existsSync} from 'node:fs';
@@ -57,9 +57,22 @@ const launch = async (executable, verify) => {
     }
   }
 };
-const install = async (file, step) => {
+const runSetup = async (file, step, options = []) => {
   const log = path.join(root, step + '.log');
-  await run(file, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${log}`], {timeout: 480000});
+  console.log(`Running Windows installer check: ${step}`);
+  try {
+    execFileSync(file, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${log}`, ...options],
+      {stdio: 'ignore', timeout: 180000});
+  } catch (error) {
+    const details = await readFile(log, 'utf8').catch(() => '');
+    console.error(details.trimEnd().split(/\r?\n/).slice(-20).join('\n'));
+    throw error;
+  }
+  return log;
+};
+const install = async (file, step) => {
+  // The test closes Electron first, so Setup does not need to enlist Restart Manager.
+  const log = await runSetup(file, step, ['/NOCLOSEAPPLICATIONS']);
   assert.match(await readFile(log, 'utf8'), /Administrative install mode: No/);
   assert.ok(existsSync(installed) && existsSync(shortcut));
   assert.match(await uninstallEntry(), /DisplayName\s+REG_SZ\s+Dynote\b/);
@@ -70,7 +83,7 @@ const hash = async file => {
   return digest.digest('hex');
 };
 const uninstall = async () => {
-  await run(uninstaller, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${path.join(root, 'uninstall.log')}`], {timeout: 120000});
+  await runSetup(uninstaller, 'uninstall');
   for (let i = 0; i < 60 && (existsSync(installed) || existsSync(shortcut) || await uninstallEntry()); i++) await delay(1000);
   assert.ok(!existsSync(installed) && !existsSync(shortcut) && !await uninstallEntry(), 'Uninstall should remove the app, shortcut and uninstall registration.');
 };
@@ -122,6 +135,7 @@ try {
   console.log('PASS installed app opened the same note and settings, downloaded Setup and verified SHA-256');
 
   await install(downloaded, 'reinstall');
+  console.log('PASS reinstall completed from the downloaded Setup');
   await launch(installed);
   await uninstall();
   assert.equal(await readFile(note, 'utf8'), original);

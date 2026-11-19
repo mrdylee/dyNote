@@ -27,6 +27,7 @@ jobs:
       - run: node scripts/package-windows-distribution.mjs
       - name: Verify installer and in-app update on Windows
         shell: bash
+        timeout-minutes: 12
         run: |
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
           export DYNOTE_PLAYWRIGHT_MODULE="$(node --input-type=module -e 'import {pathToFileURL} from "node:url";console.log(pathToFileURL(process.env.RUNNER_TEMP+"/dynote-ui-tools/node_modules/playwright/index.mjs").href)')"
