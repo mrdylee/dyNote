@@ -19,15 +19,21 @@ function compare(a,b) {
   }
   return 0;
 }
+export function matchesUpdateAsset(name, {platform, arch, installed}) {
+  if (!/^Dynote-[a-z0-9._-]{1,150}$/i.test(name)) return false;
+  if (platform === 'win32' && installed) {
+    return arch === 'x64' && /-windows-x64-Setup\.exe$/i.test(name);
+  }
+  const platforms = {darwin: 'mac|macos|darwin', win32: 'windows|win32', linux: 'linux'};
+  return !!platforms[platform] && ['x64', 'arm64'].includes(arch)
+    && new RegExp(`-(?:${platforms[platform]})-${arch}\\.zip$`, 'i').test(name);
+}
 function safeAssets(item,target) {
   return (Array.isArray(item.assets)?item.assets:[]).flatMap(asset=>{
     try {
       const url=new URL(asset.browser_download_url),name=String(asset.name||'배포 파일').slice(0,200);
       if(url.origin!=='https://github.com'||!url.pathname.startsWith('/mrdylee/dyNote/releases/download/')||url.username||url.password)return [];
-      if(target) {
-        const platforms={darwin:'mac|macos|darwin',win32:'windows|win32',linux:'linux'};
-        if(!platforms[target.platform]||!['x64','arm64'].includes(target.arch)||!/^Dynote-[a-z0-9._-]+$/i.test(name)||!new RegExp(`-(?:${platforms[target.platform]})-${target.arch}\\.zip$`,'i').test(name))return [];
-      }
+      if (target && !matchesUpdateAsset(name, target)) return [];
       return [{name,url:url.href,size:Number.isSafeInteger(asset.size)&&asset.size>0?asset.size:null,digest:/^sha256:[a-f0-9]{64}$/i.test(asset.digest||'')?asset.digest.toLowerCase():null}];
     }catch{return [];}
   });

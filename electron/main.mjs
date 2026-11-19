@@ -11,6 +11,7 @@ import {
   clipboard,
   powerMonitor,
 } from "electron";
+import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -277,7 +278,9 @@ app
     vault = await startup.run("vault.initialize", initialVault);
     copilotJournal = new CopilotJournal({file:path.join(app.getPath("userData"),"copilot-journal.json"),sourceRoot:path.join(app.getPath("appData"),"Code","User","workspaceStorage")});
     await startup.run("journal.read-settings", () => copilotJournal.load()).catch(() => {});
-    updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),downloadDirectory:app.getPath("downloads"),current:app.getVersion(),
+    const installed = process.platform === "win32" && app.isPackaged
+      && existsSync(path.join(path.dirname(process.execPath), "dynote-installed"));
+    updates = new UpdateManager({directory:path.join(app.getPath("userData"),"updates"),downloadDirectory:app.getPath("downloads"),current:app.getVersion(),installed,
       onChange: state => {if(window&&!window.webContents.isDestroyed())window.webContents.send("notes:update-status",state);}});
     await startup.run("updates.read-settings", () => updates.init());
     if (vault) {

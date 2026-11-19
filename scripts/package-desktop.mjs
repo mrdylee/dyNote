@@ -51,7 +51,7 @@ const outputs = await packager({
   } : undefined,
   extendInfo: platform === "darwin" ? { CFBundleIconFile: "dynote.icns", NSMicrophoneUsageDescription: "선택한 보관함에 음성을 녹음하려면 마이크 사용을 허용해 주세요." } : undefined,
   asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi}/**" },
-  ignore: /^\/(?:(src|public|branding|tests|docs|release|assembly|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
+  ignore: /^\/(?:(src|public|branding|tests|docs|release|assembly|installer|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
   afterPrune: [async ({ buildPath }) => {
     await installTargetRuntime(buildPath);
     if (platform === "darwin") await rm(path.join(buildPath, "..", "electron.icns"), { force: true });

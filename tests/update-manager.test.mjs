@@ -167,3 +167,35 @@ test('a failed newer download preserves the previously verified installer locati
  assert.equal(manager.state.phase,'error');assert.equal(manager.state.downloadedPath,file);
  assert.equal(await manager.readyPath(),file);assert.deepEqual(await readFile(file),bytes);
 });
+
+test('Windows update selection keeps Setup and ZIP on their own distribution paths', () => {
+ const zip = 'Dynote-2.0.0-windows-x64.zip';
+ const setup = 'Dynote-2.0.0-windows-x64-Setup.exe';
+ const windows = { platform: 'win32', arch: 'x64' };
+ const feed = [
+  release('v3.0.0', 'Dynote-3.0.0-windows-arm64-Setup.exe'),
+  { tag_name: 'v2.0.0', assets: [asset(zip), asset(setup)] },
+ ];
+ assert.deepEqual(releaseInformation(feed, '1.0.0', false, windows).latest.assets.map(a => a.name), [zip]);
+ assert.deepEqual(releaseInformation(feed, '1.0.0', false, { ...windows, installed: true }).latest.assets.map(a => a.name), [setup]);
+});
+
+test('installed Windows app verifies its Setup download and restores it on restart', async t => {
+ const name = 'Dynote-2.0.0-windows-x64-Setup.exe';
+ const windows = { platform: 'win32', arch: 'x64', installed: true };
+ const feed = [release('v2.0.0', name)];
+ const { manager, directory } = await fixture(t, {
+  ...windows,
+  check: async () => releaseInformation(feed, '1.0.0', false, windows),
+ });
+ await manager.check(true);
+ assert.equal(manager.state.phase, 'ready');
+ const file = await manager.readyPath();
+ assert.ok(file.endsWith(name));
+ assert.deepEqual(await readFile(file), bytes);
+ const restored = new tools.UpdateManager({ directory, current: '1.0.0', ...windows });
+ await restored.init();
+ assert.equal(await restored.readyPath(), file);
+ await writeFile(file, Buffer.alloc(bytes.length));
+ await assert.rejects(restored.readyPath(), /검증/);
+});

@@ -2,15 +2,16 @@ import {mkdir,readFile,writeFile,rename,rm,open,stat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
-import {checkReleaseInformation,releaseInformation} from './update-information.mjs';
+import {checkReleaseInformation,matchesUpdateAsset,releaseInformation} from './update-information.mjs';
 const WEEK=7*86400000,HOUR=3600000,MAX_SIZE=2*1024*1024*1024;
 function preferences(value={},downloadDirectory) {
   return {enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
 }
 export class UpdateManager {
-  constructor({directory,downloadDirectory=directory,current,platform=process.platform,arch=process.arch,now=Date.now,fetcher=(...args)=>fetch(...args),check,onChange=()=>{}}) {
-    Object.assign(this,{directory,current,platform,arch,now,fetcher,onChange});
-    this.lookup=check??(()=>checkReleaseInformation(current,this.state.preferences.includePrerelease,{platform,arch}));
+  constructor({directory,downloadDirectory=directory,current,platform=process.platform,arch=process.arch,installed=false,now=Date.now,fetcher=(...args)=>fetch(...args),check,onChange=()=>{}}) {
+    Object.assign(this,{directory,current,now,fetcher,onChange});
+    this.target = {platform, arch, installed};
+    this.lookup=check??(()=>checkReleaseInformation(current,this.state.preferences.includePrerelease,this.target));
     this.defaultDownloadDirectory=downloadDirectory;
     this.state={preferences:preferences({},downloadDirectory),lastCheckedAt:0,lastAttemptAt:0,retryAt:0,phase:'idle',result:null,message:'',progress:0,downloadedPath:null};
     this.pending=null;this.cached=null;
@@ -28,10 +29,13 @@ export class UpdateManager {
       for(const key of ['lastCheckedAt','lastAttemptAt','retryAt'])this.state[key]=Number.isFinite(saved[key])?saved[key]:0;
       if(saved.cached){
         const c=saved.cached;
-        const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,{platform:this.platform,arch:this.arch});
+        const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,this.target);
         if(result.available){
           this.cached={tag:result.latest.tag,asset:result.latest.assets[0],directory:typeof c.directory==='string'&&path.isAbsolute(c.directory)?c.directory:this.directory};
           try{const file=await this.verify(this.cached.asset,this.cached.directory);this.emit({phase:'ready',result,downloadedPath:file,message:'다운로드 검증 완료 · 직접 설치할 수 있습니다.'});}catch{this.cached=null;this.state.lastCheckedAt=0;}
+        } else if (c.asset?.name && !matchesUpdateAsset(c.asset.name, this.target)) {
+          this.state.lastCheckedAt = 0;
+          this.state.retryAt = 0;
         }
       }
     }
@@ -68,7 +72,7 @@ export class UpdateManager {
     return this.state;
   }
   cachePath(asset,directory=this.state.preferences.downloadDirectory){
-    if(!asset?.digest||!/^sha256:[a-f0-9]{64}$/.test(asset.digest)||!/^Dynote-[a-z0-9._-]{1,150}\.zip$/i.test(asset.name))throw new Error('공식 배포 파일의 검증 정보가 없습니다. 릴리스 페이지에서 다운로드해 주세요.');
+    if(!asset?.digest||!/^sha256:[a-f0-9]{64}$/.test(asset.digest)||!matchesUpdateAsset(asset.name,this.target))throw new Error('공식 배포 파일의 검증 정보가 없습니다. 릴리스 페이지에서 다운로드해 주세요.');
     return path.join(directory,asset.digest.slice(7)+'-'+asset.name);
   }
   async verify(asset,directory=this.state.preferences.downloadDirectory){
