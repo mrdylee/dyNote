@@ -1,24 +1,29 @@
 import { useRef } from "react";
-import { defaultPanelWidths, panelBounds } from "../core/panel-widths.mjs";
+import { defaultPanelWidths, minimumPanelWidths } from "../core/panel-widths.mjs";
 
 export default function PanelResize({ side, width, max, onChange }) {
   const drag = useRef(null);
-  const [min, limit] = panelBounds[side];
-  const update = value => onChange(Math.round(Math.max(min, Math.min(max, limit, value))));
+  const min = minimumPanelWidths[side];
+  const update = (value, maxWidth = max) => onChange(Math.round(Math.max(min, Math.min(maxWidth, value))));
   const finish = event => {
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   return <div className="panel-resize" role="separator" tabIndex={0} aria-orientation="vertical"
-    aria-label={`${side === "left" ? "왼쪽" : "오른쪽"} 패널 너비`} aria-valuemin={min} aria-valuemax={Math.min(max, limit)} aria-valuenow={width}
+    aria-label={`${side === "left" ? "왼쪽" : "오른쪽"} 패널 너비`} aria-valuemin={min} aria-valuemax={max} aria-valuenow={width}
     title="드래그 또는 ← →로 너비 조절 · 두 번 클릭하여 초기화"
     onPointerDown={event => {
       if (event.button !== 0) return;
       event.preventDefault(); event.currentTarget.focus();
-      drag.current = { x: event.clientX, width };
+      drag.current = { x: event.clientX, width, max };
       event.currentTarget.setPointerCapture(event.pointerId);
     }}
-    onPointerMove={event => { if (drag.current) update(drag.current.width + (event.clientX - drag.current.x) * (side === "left" ? 1 : -1)); }}
+    onPointerMove={event => {
+      const start = drag.current;
+      if (!start) return;
+      const delta = (event.clientX - start.x) * (side === "left" ? 1 : -1);
+      update(start.width + delta, start.max);
+    }}
     onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={() => { drag.current = null; }}
     onDoubleClick={() => update(defaultPanelWidths[side])}
     onKeyDown={event => {

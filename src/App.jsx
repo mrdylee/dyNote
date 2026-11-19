@@ -64,7 +64,7 @@ import { version } from "../package.json";
 import { STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 import PanelResize from "./PanelResize.jsx";
 import SpaceTrees from "./SpaceTrees.jsx";
-import { normalizePanelWidths, fitPanelWidths } from "../core/panel-widths.mjs";
+import { normalizePanelWidths, fitPanelWidths, panelWidthBudget } from "../core/panel-widths.mjs";
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
@@ -347,6 +347,17 @@ export default function App() {
   },[]);
   const [startup, setStartup] = useState(() => stored("dynote.startup", "journal"));
   const [tabs, setTabs] = useState([]);
+  const [tabMenu, setTabMenu] = useState(null);
+  const tabMenuRef = useRef(null);
+  const tabMenuIndex = tabs.indexOf(tabMenu?.key);
+  useEffect(() => {
+    if (tabMenuIndex < 0) return;
+    const menu = tabMenuRef.current;
+    menu.querySelector("button")?.focus();
+    const dismiss = event => { if (!menu.contains(event.target)) setTabMenu(null); };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [tabMenu, tabMenuIndex]);
   const [today, setToday] = useState(localDate);
   const [checkedJournal, setCheckedJournal] = useState(null);
   const completedJournal = useRef(null);
@@ -365,7 +376,7 @@ export default function App() {
   }, []);
   const rightVisible = right;
   const panelLayout = fitPanelWidths(panelWidths, viewportWidth, rightVisible);
-  const panelBudget = Math.max(1000, viewportWidth) - 64 - 360 - (rightVisible ? 10 : 5);
+  const panelBudget = panelWidthBudget(viewportWidth, rightVisible);
   const resizePanel = side => width => setPanelWidths(old => normalizePanelWidths({ ...old, [side]: width }));
   const [rightTab, setRightTab] = useState(() => {
     const saved = stored("dynote.rightTab", "outline");
@@ -834,6 +845,28 @@ export default function App() {
   const openWorkspaceKey = key => {
     const target = documentRef(key, vault?.id);
     openNote(target.path, target.vaultId);
+  };
+  const closeTabs = (keys, anchor) => {
+    if (busy || !keys.length) return;
+    const closing = new Set(keys);
+    const paths = workspace.paths.filter(key => !closing.has(key));
+    const next = tabs.filter(key => !closing.has(key));
+    setTabs(old => old.filter(key => !closing.has(key)));
+    workspace.dispatch({ type: "reconcile", paths });
+    if (!paths.length && closing.has(workspace.active) && next.length) {
+      workspace.setActive(next.includes(anchor) ? anchor : next.at(-1));
+    }
+  };
+  const showTabMenu = (event, key) => {
+    event.preventDefault();
+    if (busy) return;
+    const origin = event.currentTarget.querySelector(".tab-label");
+    const rect = origin.getBoundingClientRect();
+    setTabMenu({
+      key, origin,
+      x: Math.max(4, Math.min(event.clientX || rect.left, window.innerWidth - 194)),
+      y: event.clientY || rect.bottom,
+    });
   };
   const addPane = (key, side = "right", anchor = workspace.active) => {
     const anchorScope = documentRef(anchor, vault?.id).vaultId;
@@ -1861,7 +1894,11 @@ export default function App() {
                 const scope = vaults[vaultId];
                 if (!scope) return null;
                 const label = together ? spaceLabel(scope) : null;
-                return <div className={`tab ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}>
+                return <div className={`tab ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
+                  onContextMenu={event => showTabMenu(event, key)}
+                  onKeyDown={event => {
+                    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
+                  }}>
                   <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
                     draggable={!busy && /\.md$/i.test(path)}
                     onDragStart={event => { event.dataTransfer.setData(DOCUMENT_DRAG, key); event.dataTransfer.effectAllowed = "copy"; }}
@@ -1872,12 +1909,7 @@ export default function App() {
                       {label && <small className="tab-space">{label}</small>}
                     </span>
                   </button>
-                  <button className="tab-close" aria-label={`${path} 탭 닫기`} disabled={busy} onClick={() => {
-                    const next = tabs.filter(value => value !== key);
-                    setTabs(next);
-                    workspace.dispatch({ type: "close", path: key });
-                    if (workspace.paths.length === 1 && workspace.active === key && next.length) workspace.setActive(next.at(-1));
-                  }}><X size={12} /></button>
+                  <button className="tab-close" aria-label={`${path} 탭 닫기`} disabled={busy} onClick={() => closeTabs([key])}><X size={12} /></button>
                 </div>;
               })}
               {section === "graph" && (
@@ -2388,6 +2420,36 @@ export default function App() {
         </>
         )}
       </div>
+      {tabMenuIndex >= 0 && <div ref={tabMenuRef} className="file-tree-menu" role="menu" aria-label="문서 탭 작업" style={{ left: tabMenu.x, top: tabMenu.y }}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setTabMenu(null); }}
+        onKeyDown={event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            setTabMenu(null);
+            tabMenu.origin.focus();
+          }
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const items = [...event.currentTarget.querySelectorAll("button:not(:disabled)")];
+            const step = event.key === "ArrowDown" ? 1 : -1;
+            items[(items.indexOf(event.target) + step + items.length) % items.length]?.focus();
+          }
+        }}>
+        {[
+          ["이 탭 닫기", [tabMenu.key]],
+          ["다른 탭 모두 닫기", tabs.filter(key => key !== tabMenu.key)],
+          ["왼쪽 탭 닫기", tabs.slice(0, tabMenuIndex)],
+          ["오른쪽 탭 닫기", tabs.slice(tabMenuIndex + 1)],
+        ].map(([label, keys]) => <button key={label} role="menuitem" tabIndex={-1} disabled={busy || !keys.length} onClick={() => {
+          setTabMenu(null);
+          closeTabs(keys, tabMenu.key);
+          requestAnimationFrame(() => {
+            const target = document.querySelector(".tabs .tab.active .tab-label") ?? document.querySelector('.tabbar button[aria-label="새 문서"]');
+            target?.focus();
+          });
+        }}>{label}</button>)}
+      </div>}
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
         <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>
