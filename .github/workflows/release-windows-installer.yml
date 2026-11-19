@@ -6,7 +6,7 @@ permissions:
   contents: read
 concurrency:
   group: release-dynote-v0.23.7
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   windows:
     uses: ./.github/workflows/build-windows-distribution.yml
