@@ -61,7 +61,7 @@ After refreshing `origin`, all 32 remote branches were also ancestors of upstrea
 
 - `dynote-main`: incorporated the right-hand table of contents, source-line/heading navigation, startup stage logging, and their tests. The update download directory and Sticky Note changes already matched upstream.
 - `dynote-session-import`: the tracked pending patch passed a reverse-apply check against upstream; the untracked development launcher was byte-identical to upstream. No duplicate implementation was added.
-- `dynote-main/output/dynote-toc-install`: incorporated the packaged-app option from the outline verification script and made its development executable platform-aware. The four `* 2` source copies match earlier committed source and are not application inputs. They remain in the original checkout.
+- `dynote-main/output/dynote-toc-install`: incorporated the packaged-app option from the outline verification script and made its development executable platform-aware. The four `* 2` source copies match earlier committed source and are not application inputs. They are preserved in the recovery stash below.
 - Workspace Copilot instructions: included `.github/copilot-instructions.md` in the repository so a clone also discovers the Mermaid explanation rules. The rule concerns development Copilot sessions.
 
 ## Review fixes
@@ -84,3 +84,31 @@ After refreshing `origin`, all 32 remote branches were also ancestors of upstrea
 - Publication is gated by fresh unit tests, dependency audits, packaged-source checks, native macOS/Windows scenarios, and archive/checksum verification in the release workflow. CI reports are attached to the release artifacts.
 
 Native checks use isolated synthetic profiles. AI scenario checks use controlled provider events; they do not establish paid-provider availability. Windows acceptance is performed by the release workflow on its Windows runner.
+
+## Worktree handoff and recovery
+
+The normal `dynote-main` checkout now uses `main`. All 17 existing worktrees were clean after integration. Three stale worktree registrations were left intact; no feature branches or worktrees were deleted.
+
+The original pending work was saved before switching the normal checkout. Tracked patches and every untracked file were compared byte-for-byte with the corresponding stash contents:
+
+| Original checkout | Recovery stash commit |
+| --- | --- |
+| `dynote-main` | `22804efd1da84050b261b3944ac48ef85a841bce` |
+| `dynote-session-import` | `845697587631b1c2e5cc56bb63bb493142914d52` |
+| `dynote-main/output/dynote-toc-install` | `c0c4911c548ead085b9e5bafc41eafcfd6af8b83` |
+
+These stashes belong to the shared local Git repository and retain their original bases. They should only be restored deliberately into a suitable separate worktree; their implemented changes are already included in `main`.
+
+## Published release acceptance
+
+- Published [v0.23.5](https://github.com/mrdylee/dyNote/releases/tag/v0.23.5) as a public prerelease at `2026-11-19T00:10:37Z`.
+- Release source, tag, and release branch: `f93a58224755840c63311ebf3cd11be5ee2b58e7`. Subsequent handoff documentation does not change the application source.
+- [GitHub Actions run 44425363876](https://github.com/mrdylee/dyNote/actions/runs/44425363876): macOS build, Windows build, and publication all succeeded.
+- macOS: 487 unit tests passed; 29 native package scenarios and 7 Sticky Note tests passed.
+- Windows: 485 unit tests passed, 2 platform-conditional tests skipped, zero failures; 25 native package scenarios and 7 Sticky Note tests passed.
+- Both platforms passed dependency audits and source/package comparison of 294 files. Distribution archives were verified before publication.
+- Confirmed seven public assets: Mac DMG and ZIP, Windows ZIP, two SHA-256 lists, and two package-verification reports. Downloaded the small reports/checksum lists, checked their GitHub asset digests, and matched all published binary checksums against GitHub's SHA-256 asset digests.
+
+The package-verification JSON files describe the pre-UI source/package check and retain `windowsRuntimeTested: false`. The later native Windows run above supplies the runtime evidence. This release does not establish live paid-model availability, Windows ARM acceptance, Apple notarization, or installation on the user's machine.
+
+During the final post-publication status check, concurrent new edits appeared in the normal checkout for local Copilot Agent Host capture and journal ordering, including a new capture-drafts UI script. Those changes arrived after the reviewed release snapshot and were left untouched. They are not covered by v0.23.5 or the clean-worktree checkpoint above.
