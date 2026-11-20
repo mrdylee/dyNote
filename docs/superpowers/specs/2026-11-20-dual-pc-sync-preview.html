@@ -18,7 +18,7 @@ button:focus-visible,select:focus-visible,summary:focus-visible{outline:3px soli
 .bar{padding:12px 17px;background:var(--wash);border-bottom:1px solid #dbe0e4;flex-wrap:wrap}
 .brand{letter-spacing:-.075em;font-size:20px;font-weight:780;margin-right:7px}.brand i{color:var(--accent);font-style:normal}
 .scope{gap:7px;font-weight:650;font-size:13px;color:var(--accent)}.scope span:first-child{font-size:21px;line-height:1}
-.vault{font-size:13px;border-left:1px solid #bfc7ce;padding-left:12px}
+.bar .vault{display:inline-block;margin:0;font-size:13px;max-width:100%;padding:3px 6px}
 .tools{margin-left:auto;gap:10px;font-size:12px}.local,.status{color:#505962}.status{border-left:1px solid #c4cbd0;padding-left:10px}
 .act,.push{padding:5px 12px;border:1px solid #bdc4ca;border-radius:7px;font-weight:650;background:white;font-size:13px;white-space:nowrap}
 .act{background:var(--accent);color:white;border-color:var(--accent)}.actions{gap:5px}.conflict .act{background:#88531c;border-color:#88531c}.conflict .status{color:#77440a}
@@ -43,15 +43,17 @@ select{display:block;margin-top:5px}.caption{margin-top:16px;color:#65686d;font-
   <div class="selector" role="group" aria-label="미리 볼 PC"><button data-device="cloud" aria-pressed="true">☁ Cloud PC</button><button data-device="local" aria-pressed="false">▣ Local PC</button></div>
  </div>
  <section id="window" aria-label="Dynote 창 예시">
-  <div class="bar"><b class="brand">Dy<i>Note</i></b><div class="scope"><span id="icon" aria-hidden="true">☁</span><span id="device-name">Cloud PC</span></div><span class="vault">개인 노트</span>
+  <div class="bar"><b class="brand">Dy<i>Note</i></b><div class="scope"><span id="icon" aria-hidden="true">☁</span><span id="device-name">Cloud PC</span></div><select class="vault" id="vault" aria-label="보관함"><option value="personal">개인 · 개인 노트</option><option value="team">팀 · 설계팀 노트</option></select>
    <div class="tools"><span class="local">기기에 저장됨</span><span class="status" id="status" aria-live="polite">올릴 커밋 2개</span><div class="actions"><span class="act" id="action">↻ 동기화</span><span class="push" id="push">↑ Push</span></div></div>
   </div>
   <div class="layout">
-   <aside><p class="navlabel">개인 노트</p><p class="active">Journal</p><p>모든 노트</p><p>Copilot Note</p></aside>
-   <article><p class="breadcrumb">개인 노트　/　Journal</p><h2>11월 20일 금요일</h2><ul class="notes"><li>오전에 정리한 회의록을 오후 작업에 반영한다.</li></ul>
+   <aside id="personal-nav"><p class="navlabel">개인 노트</p><p class="active">Journal</p><p>모든 노트</p><p>Copilot Note</p></aside>
+   <aside id="team-nav" hidden><p class="navlabel">설계팀 노트</p><p class="active">회의록</p></aside>
+   <article id="personal-article"><p class="breadcrumb">개인 노트　/　Journal</p><h2>11월 20일 금요일</h2><ul class="notes"><li>오전에 정리한 회의록을 오후 작업에 반영한다.</li></ul>
     <div class="section-head"><h3>Copilot 대화</h3><small>2건</small></div>
     <div class="record"><time>09:12</time><b>회의록에서 결정 사항 정리</b></div><div class="record"><time>10:36</time><b>다음 배포의 검증 항목</b></div>
    </article>
+   <article id="team-article" hidden><p class="breadcrumb">설계팀 노트　/　회의록</p><h2>설계 검토 회의</h2><ul class="notes"><li>다음 검토에 올릴 변경 사항을 정리한다.</li></ul></article>
   </div>
  </section>
  <div class="inspector">
@@ -59,29 +61,36 @@ select{display:block;margin-top:5px}.caption{margin-top:16px;color:#65686d;font-
    <button data-theme="blue" style="--dot:#426eb4" aria-pressed="true">Cloud Blue</button><button data-theme="sage" style="--dot:#47745d" aria-pressed="false">Sage Green</button>
    <button data-theme="lavender" style="--dot:#735cc2" aria-pressed="false">Soft Lavender</button><button data-theme="sand" style="--dot:#8c633c" aria-pressed="false">Warm Sand</button>
   </div></fieldset>
-  <label>상단 바 미리보기<select id="scenario"><option value="ahead">업로드 대기</option><option value="synced">동기화 완료</option><option value="behind">원격 변경</option><option value="conflict">충돌</option><option value="offline">오프라인</option></select></label>
+  <label>상단 바 미리보기<select id="scenario"><option value="ahead">업로드 대기</option><option value="synced">동기화 완료</option><option value="behind">원격 변경</option><option value="diverged">받을 커밋과 올릴 커밋</option><option value="localOnly">로컬 커밋 전용</option><option value="conflict">충돌</option><option value="offline">오프라인</option></select></label>
  </div>
  <p class="caption">PC·테마·상태를 바꾸어 비교할 수 있습니다. 상단의 Git 동작은 화면 예시입니다.</p>
 </main>
 <script>
 const themes={blue:['#f4f8fd','#426eb4'],sage:['#f4f8f5','#47745d'],lavender:['#f8f5fc','#735cc2'],sand:['#fbf7f0','#8c633c']};
-const devices={cloud:{name:'Cloud PC',icon:'☁',theme:'blue',state:'ahead'},local:{name:'Local PC',icon:'▣',theme:'sage',state:'behind'}};
-const states={ahead:['올릴 커밋 2개','↻ 동기화'],synced:['원격과 일치 · 10:42 확인','↻ 동기화'],behind:['받을 커밋 1개','↻ 동기화'],conflict:['충돌 1건','충돌 검토'],offline:['오프라인 · 09:42 마지막 확인','다시 확인']};
+const devices={cloud:{name:'Cloud PC',icon:'☁',theme:'blue',states:{personal:'ahead',team:'synced'}},local:{name:'Local PC',icon:'▣',theme:'sage',states:{personal:'behind',team:'synced'}}};
+const states={localOnly:['로컬 커밋 전용','로컬 커밋'],diverged:['받을 커밋 1개 · 올릴 커밋 2개','↻ 동기화'],ahead:['올릴 커밋 2개','↻ 동기화'],synced:['원격과 일치 · 10:42 확인','↻ 동기화'],behind:['받을 커밋 1개','↻ 동기화'],conflict:['충돌 1건','충돌 검토'],offline:['오프라인 · 09:42 마지막 확인','다시 확인']};
 const byId=id=>document.getElementById(id);
 let selected='cloud';
+const activeVault=()=>byId('vault').value;
 function render(){
  const device=devices[selected],panel=byId('window'),[wash,accent]=themes[device.theme];
+ const vault=activeVault(), state=device.states[vault];
+ for(const name of ['personal','team']){
+  byId(name+'-nav').hidden=name!==vault;
+  byId(name+'-article').hidden=name!==vault;
+ }
  panel.style.setProperty('--wash',wash);panel.style.setProperty('--accent',accent);
- panel.classList.toggle('conflict',device.state==='conflict');
+ panel.classList.toggle('conflict',state==='conflict');
  byId('device-name').textContent=device.name;byId('icon').textContent=device.icon;
- byId('status').textContent=states[device.state][0];byId('action').textContent=states[device.state][1];
- byId('push').style.opacity=device.state==='ahead'?'1':'0.45';byId('scenario').value=device.state;
+ byId('status').textContent=states[state][0];byId('action').textContent=states[state][1];
+ byId('push').style.opacity=state==='ahead'?'1':'0.45';byId('scenario').value=state;
  document.querySelectorAll('[data-device]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.device===selected)));
  document.querySelectorAll('[data-theme]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.theme===device.theme)));
 }
 document.querySelectorAll('[data-device]').forEach(btn=>btn.onclick=()=>{selected=btn.dataset.device;render()});
 document.querySelectorAll('[data-theme]').forEach(btn=>btn.onclick=()=>{devices[selected].theme=btn.dataset.theme;render()});
-byId('scenario').onchange=event=>{devices[selected].state=event.target.value;render()};
+byId('vault').onchange=render;
+byId('scenario').onchange=event=>{devices[selected].states[activeVault()]=event.target.value;render()};
 render();
 </script>
 </html>
