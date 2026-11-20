@@ -123,7 +123,7 @@ try {
   let installerJob, installingPid;
   const previousRuns = new Set((await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).run));
   await launch(installed, async (app, page) => {
-    installingPid = app.process().pid;
+    installingPid = await app.evaluate(() => process.pid);
     await app.evaluate(({shell, dialog}, {feed, name, setup}) => {
       shell.showItemInFolder = file => {globalThis.shownUpdate = file;};
       dialog.showErrorBox = (title, message) => console.error('Installer app error:', title, message);

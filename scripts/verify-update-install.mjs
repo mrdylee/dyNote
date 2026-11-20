@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,7 +77,8 @@ try {
   const child = app?.process();
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = once(child, 'exit', { signal: AbortSignal.timeout(10000) });
-    child.kill('SIGKILL');
+    if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', timeout: 10000 });
+    else child.kill('SIGKILL');
     await exited;
   }
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
