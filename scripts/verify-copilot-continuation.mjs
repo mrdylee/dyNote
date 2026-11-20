@@ -1,0 +1,179 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Vault } from "../core/vault.mjs";
+const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
+const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-continuation-")));
+const profile = path.join(root, "profile"), personal = path.join(root, "personal"), team = path.join(root, "team");
+const original = "# Home\n\n" + Array.from({ length: 100 }, (_, i) => `Paragraph ${i + 1}: original document text.\n`).join("\n");
+const report = { checks: [], errors: [], transport: "synthetic IPC; real note tools, draft state, editor and vault", liveModelVerified: false };
+let app;
+try {
+  for (const directory of [profile, personal, team]) await mkdir(directory);
+  await writeFile(path.join(personal, "Home.md"), original);
+  await writeFile(path.join(personal, "Ref.md"), "# Reference\n");
+  await writeFile(path.join(team, "Team.md"), "# Team\n");
+  await writeFile(path.join(profile, "settings.json"), JSON.stringify({ vaultRoot: personal, vaults: [personal, team], vaultPurposes: { [personal]: "personal", [team]: "team" } }));
+  const personalVault = await Vault.open(personal, profile), teamVault = await Vault.open(team, profile);
+  const teamNote = (await teamVault.documentSnapshot()).notes[0];
+  const teamDraft = { path: teamNote.path, kind: "edit", original: teamNote.content, content: teamNote.content + "Pending team text\n", aiContent: teamNote.content + "Pending team text\n", revision: teamNote.revision, userEdited: false };
+  app = await electron.launch({ executablePath: path.resolve("node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"), args: ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
+  const page = await app.firstWindow(); page.setDefaultTimeout(12000);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 900));
+  page.on("pageerror", error => report.errors.push(error.message));
+  await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
+  await app.evaluate(({ ipcMain, app }, { profile, roots }) => {
+    const require = process.getBuiltinModule("module").createRequire(`${app.getAppPath()}/package.json`);
+    const { noteTools } = require(`${app.getAppPath()}/core/copilot-agent.mjs`);
+    const { Vault } = require(`${app.getAppPath()}/core/vault.mjs`);
+    globalThis.continuationRequests = [];
+    ipcMain.removeHandler("notes:copilot-status");
+    ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: "auto", name: "Auto" }] } }));
+    ipcMain.removeHandler("notes:copilot-send");
+    ipcMain.handle("notes:copilot-send", (event, args) => {
+      globalThis.continuationRequests.push(args);
+      globalThis.continuationEmit = (type, data = {}) => event.sender.send("notes:copilot-event", { requestId: args.requestId, type, ...data });
+      globalThis.continuationTools = noteTools({ args, emit: globalThis.continuationEmit, canceled: () => false,
+        getNotes: async id => (await (await Vault.open(roots[id], profile)).documentSnapshot()).notes });
+      return { ok: true, value: { requestId: args.requestId } };
+    });
+    ipcMain.removeHandler("notes:copilot-cancel");
+    ipcMain.handle("notes:copilot-cancel", () => { globalThis.continuationEmit?.("canceled"); return { ok: true }; });
+  }, { profile, roots: { [personalVault.id]: personal, [teamVault.id]: team } });
+  await page.evaluate(({ id, draft }) => localStorage.setItem(`dynote.copilot.drafts.${id}`, JSON.stringify([draft])), { id: teamVault.id, draft: teamDraft });
+  await page.reload();
+  await page.getByRole("button", { name: "파일 목록", exact: true }).click();
+  const open = async name => page.locator(`.file-row[title="${name}"]`).click();
+  await open("Home.md");
+  await page.getByRole("tab", { name: "Copilot", exact: true }).click();
+  await page.getByRole("button", { name: "Copilot 연결 상태 확인", exact: true }).click();
+  const panel = page.locator(".copilot-panel:visible");
+  await panel.getByLabel("Copilot 모델").selectOption("auto");
+  const drafts = async id => page.evaluate(id => JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`) || "[]"), id);
+  const ask = async () => {
+    await panel.getByLabel("Copilot 질문").fill("Continue the current work");
+    await panel.getByRole("button", { name: "Copilot 보내기", exact: true }).click();
+    await panel.getByRole("button", { name: "Copilot 응답 중지", exact: true }).waitFor();
+  };
+  const call = async (name, args) => app.evaluate((_, { name, args }) => globalThis.continuationTools.find(tool => tool.name === `dynote_${name}`).handler(args), { name, args });
+  const edit = async (path, content) => {
+    assert.equal((await call("read_note", { path })).resultType, "success");
+    assert.equal((await call("edit_note", { path, operation: "append", content })).resultType, "success");
+    await page.waitForFunction(({ id, path, content }) => JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`) || "[]").some(draft => draft.path === path && draft.content.includes(content)), { id: personalVault.id, path, content });
+  };
+  const done = async () => {
+    await app.evaluate(() => globalThis.continuationEmit("done", { content: "Draft ready for review." }));
+    await panel.getByRole("button", { name: "Copilot 응답 중지", exact: true }).waitFor({ state: "hidden" });
+    await page.waitForFunction(() => [...document.querySelectorAll('.copilot-live-actions button')].filter(button => button.textContent === "변경 유지").every(button => !button.disabled));
+  };
+  await ask(); await done();
+  assert.deepEqual(await drafts(teamVault.id), [teamDraft]);
+  report.checks.push("Agent conversation starts with another vault's pending draft untouched");
+  await ask(); await edit("Home.md", "\nFIRST DRAFT"); await done();
+  const first = (await drafts(personalVault.id))[0];
+  await ask(); await edit("Home.md", "\nSECOND DRAFT"); await edit("Home.md", "\nTHIRD BATCH"); await done();
+  const refined = (await drafts(personalVault.id))[0];
+  assert.equal(refined.original, original); assert.equal(refined.revision, first.revision);
+  assert.equal(refined.content, original + "\nFIRST DRAFT\nSECOND DRAFT\nTHIRD BATCH");
+  assert.equal(await readFile(path.join(personal, "Home.md"), "utf8"), original);
+  report.checks.push("Multiple Agent turns and tool batches refine the same draft without saving or losing the original");
+
+  const pane = page.locator('.document-pane[data-document-path="Home.md"]');
+  for (const mode of ["읽기 보기", "편집 보기", "분할 보기"]) {
+    await page.getByRole("button", { name: mode, exact: true }).click();
+    await pane.hover(); await page.mouse.wheel(0, 2400);
+    await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"]').scrollTop > 300);
+    const position = await pane.evaluate(pane => {
+      const viewport = pane.getBoundingClientRect(), heading = pane.querySelector('.pane-heading').getBoundingClientRect();
+      const buttons = [...pane.querySelectorAll('.copilot-live-actions button')].map(button => {
+        const r = button.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, hit: button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
+      });
+      return { top: viewport.top, bottom: viewport.bottom, headingBottom: heading.bottom, buttons };
+    });
+    assert.ok(position.buttons.every(button => button.top >= position.headingBottom && button.bottom <= position.bottom && button.hit), `${mode}: review controls must remain visible and clickable after wheel scrolling: ${JSON.stringify(position)}`);
+    await pane.evaluate(pane => { pane.scrollTop = 0; });
+  }
+  report.checks.push("Keep/Undo/Compare remain visible and clickable below the title while scrolling in read/edit/split views");
+  await pane.getByRole("button", { name: "원본·초안 비교", exact: true }).click();
+  await pane.locator(".copilot-live-comparison").waitFor();
+  const transfer = await page.evaluateHandle(() => { const data = new DataTransfer(); data.setData("application/x-dynote-document", "Ref.md"); return data; });
+  const bounds = await pane.boundingBox();
+  await pane.dispatchEvent("drop", { dataTransfer: transfer, clientX: bounds.x + bounds.width - 2 });
+  await transfer.dispose();
+  await page.locator('.document-pane[data-document-path="Ref.md"]').waitFor();
+  await pane.hover(); await page.mouse.wheel(0, 1800);
+  await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"]').scrollTop > 300);
+  assert.equal(await pane.getByRole("button", { name: "변경 유지", exact: true }).evaluate(button => {
+    const r = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }), true);
+  assert.equal(await page.locator('.document-pane[data-document-path="Ref.md"]').evaluate(pane => pane.scrollTop), 0);
+  await mkdir("output/playwright", { recursive: true });
+  await page.screenshot({ path: "output/playwright/copilot-fixed-review.png" });
+  await page.getByRole("button", { name: "Ref.md 영역 닫기", exact: true }).click();
+  await pane.getByRole("button", { name: "원본·초안 비교", exact: true }).click();
+  report.checks.push("Review stays in its own pane with comparison open while a second document retains independent scrolling");
+  await page.getByRole("button", { name: "편집 보기", exact: true }).click();
+  await pane.getByRole("button", { name: "변경 되돌리기", exact: true }).click();
+  await pane.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
+  assert.equal(await readFile(path.join(personal, "Home.md"), "utf8"), original);
+
+  await ask();
+  assert.equal((await call("create_note", { path: "Created.md", content: "# Created draft" })).resultType, "success");
+  await page.locator('.document-pane[data-document-path="Created.md"]').waitFor(); await done();
+  await ask(); await edit("Created.md", "\nRefined before saving"); await done();
+  const created = (await drafts(personalVault.id))[0];
+  assert.equal(created.kind, "create"); assert.equal(created.original, ""); assert.equal(created.revision, null);
+  await page.getByRole("button", { name: "변경 유지", exact: true }).click();
+  await page.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
+  assert.equal(await readFile(path.join(personal, "Created.md"), "utf8"), "# Created draft\nRefined before saving");
+  report.checks.push("A new unsaved note remains a create draft across turns; Keep saves its final content");
+
+  await open("Home.md"); await ask(); await edit("Home.md", "\nAI BEFORE USER"); await done();
+  const editor = pane.locator(".cm-content");
+  await editor.click(); await editor.press("ControlOrMeta+End"); await page.keyboard.insertText(" USER TEXT");
+  await ask(); await edit("Home.md", "\nAI AFTER USER"); await done();
+  assert.match((await drafts(personalVault.id))[0].content, /USER TEXT\nAI AFTER USER/);
+  assert.equal(await pane.getByRole("button", { name: "변경 되돌리기", exact: true }).isDisabled(), true);
+  await pane.getByRole("button", { name: "변경 유지", exact: true }).click();
+  await pane.getByLabel("AI 실시간 변경").waitFor({ state: "hidden" });
+  assert.match(await readFile(path.join(personal, "Home.md"), "utf8"), /USER TEXT\nAI AFTER USER/);
+  report.checks.push("An explicit follow-up includes manual edits; destructive Undo stays disabled and Keep preserves them");
+
+  await ask(); await edit("Home.md", "\nPENDING HOME"); await done();
+  await open("Ref.md");
+  await panel.getByRole("checkbox", { name: "보관함 검색·읽기 허용" }).check();
+  await ask();
+  assert.match((await call("search_notes", { query: "PENDING HOME" })).textResultForLlm, /Home.md/);
+  assert.match((await call("read_note", { path: "Home.md" })).textResultForLlm, /PENDING HOME/);
+  await edit("Home.md", "\nREFINED FROM OTHER NOTE"); await done();
+  report.checks.push("Permitted vault search/read/edit uses the latest draft even when another document is open");
+  await ask();
+  await writeFile(path.join(personal, "Home.md"), "# External change\n");
+  await call("read_note", { path: "Home.md" });
+  await call("edit_note", { path: "Home.md", operation: "append", content: "\nCONFLICTING AI" });
+  await page.waitForFunction(id => JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`) || "[]").find(draft => draft.path === "Home.md")?.conflict, personalVault.id);
+  await panel.locator(".copilot-pending-list").getByRole("button", { name: "Home.md", exact: true }).click();
+  await pane.getByRole("alert").waitFor();
+  await edit("Ref.md", "\nUnaffected document"); await done();
+  assert.equal(await readFile(path.join(personal, "Home.md"), "utf8"), "# External change\n");
+  assert.ok((await drafts(personalVault.id)).find(draft => draft.path === "Home.md").conflict);
+  assert.match((await drafts(personalVault.id)).find(draft => draft.path === "Ref.md").content, /Unaffected document/);
+  assert.deepEqual(await drafts(teamVault.id), [teamDraft]);
+  report.checks.push("An external conflict protects the affected file while another document can still receive a draft");
+  await ask(); await edit("Ref.md", "\nBEFORE TYPING");
+  const referenceEditor = page.locator('.document-pane[data-document-path="Ref.md"] .cm-content');
+  await referenceEditor.click(); await referenceEditor.press("ControlOrMeta+End"); await page.keyboard.insertText(" LOCAL TEXT");
+  await call("edit_note", { path: "Ref.md", operation: "append", content: "\nLATE AI" });
+  assert.equal((await call("create_note", { path: "Unrelated.md", content: "# Unaffected work" })).resultType, "success");
+  await page.locator('.document-pane[data-document-path="Unrelated.md"]').waitFor(); await done();
+  const typed = (await drafts(personalVault.id)).find(draft => draft.path === "Ref.md");
+  assert.match(typed.content, /LOCAL TEXT/); assert.doesNotMatch(typed.content, /LATE AI/); assert.ok(typed.conflict);
+  report.checks.push("Typing during generation blocks later batches only for that document; unrelated work still completes");
+  assert.deepEqual(report.errors, []);
+  await mkdir("output/playwright", { recursive: true });
+  await page.screenshot({ path: "output/playwright/copilot-continuation.png" });
+  await writeFile("output/playwright/copilot-continuation.json", JSON.stringify(report, null, 2) + "\n");
+  console.log(JSON.stringify(report, null, 2));
+} finally { await app?.close(); await rm(root, { recursive: true, force: true }); }

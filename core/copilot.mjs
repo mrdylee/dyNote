@@ -72,6 +72,18 @@ export function prepareRequest(args) {
     return { path, content };
   });
   if (referenceBytes > 131072) throw new Error("첨부 문서 합계는 128 KiB까지 가능합니다.");
+  if (!Array.isArray(args.drafts ?? []) || (args.drafts?.length ?? 0) > 5) throw new Error("미확정 초안은 최대 5개까지 가능합니다.");
+  const draftPaths = new Set();
+  let draftBytes = 0;
+  const drafts = (args.drafts ?? []).map(item => {
+    const path = bounded(item?.path, 2048, "초안 경로를 확인해 주세요.");
+    const content = bounded(item?.content, 2 * 1024 * 1024, "초안이 너무 큽니다.");
+    if (draftPaths.has(path)) throw new Error("중복 초안 경로입니다.");
+    draftPaths.add(path);
+    draftBytes += bytes(content);
+    return { path, content };
+  });
+  if (draftBytes > 2 * 1024 * 1024) throw new Error("초안 합계는 2 MiB까지 가능합니다.");
   if (!Array.isArray(args.history) || args.history.length > 40) throw new Error("새 대화를 시작해 주세요.");
   let historyBytes = 0;
   const history = args.history.map((item) => {
@@ -90,7 +102,7 @@ export function prepareRequest(args) {
       throw new Error('이미지는 PNG/JPEG/WebP, 최대 6MB로 보내 주세요.');
     image = { mimeType: value.mimeType, data: value.data };
   }
-  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, vaultAccess: args.vaultAccess === true, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}), ...(image ? { image } : {}) };
+  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, drafts, vaultAccess: args.vaultAccess === true, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}), ...(image ? { image } : {}) };
 }
 
 export function sessionOptions(model, mode, tools = [], reasoningEffort) {

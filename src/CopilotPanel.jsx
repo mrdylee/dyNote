@@ -117,7 +117,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
   const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || session.activity.planner || otherChatRunning, applying, running, label,
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || liveEdits.running || liveEdits.working || session.activity.planner || otherChatRunning, applying, running, label,
     vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
@@ -132,10 +132,11 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         if (!found) throw new Error(`첨부 문서가 없어졌습니다: ${path}`);
         return { path, content: found.content };
       });
-      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt, mode, context, references: attached, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
+      const drafts = mode === "agent" ? latest.current.liveEdits.drafts.map(({ path, content }) => ({ path, content })) : [];
+      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       pending.current = { ...args, target, inputPrompt: prompt };
-      if (mode === "agent") await latest.current.onBeginLive(requestId);
+      if (mode === "agent") await latest.current.onBeginLive(requestId, () => ai.cancel({ requestId }));
       if (!mounted.current) { latest.current.liveEdits.stop(); await latest.current.liveEdits.finish(requestId); return; }
       setMessages((old) => [...old,
         { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },

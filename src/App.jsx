@@ -2246,9 +2246,9 @@ export default function App() {
               const contextNote = focused ? (section === "graph" || attachment || structured ? null : note)
                 : models.get(id).notes.find(n => n.path === chatPaths.current.get(id));
               return <CopilotPanel key={id ?? "missing"} api={api} session={aiSession} vaultId={id}
-                note={contextNote} notes={scope.notes} liveEdits={scopeEdits}
+                note={contextNote} notes={models.get(id).notes} liveEdits={scopeEdits}
                 onOpenVault={() => { setSettingsTab("vault"); setModal("settings"); }}
-                onBeginLive={async requestId => { await flush(); scopeEdits.begin(requestId); }}
+                onBeginLive={async (requestId, cancel) => { await flush(true); editsRef.current.forVault(id).begin(requestId, cancel); }}
                 selection={focused && note && mode !== "read" ? editorSelection : null}
                 busy={busy || !focused} visible={focused && rightTab === "copilot"}
                 onReview={path => {

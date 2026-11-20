@@ -5,7 +5,7 @@ import {DOCUMENT_DRAG} from '../core/document-workspace.mjs';
 import Editor from './Editor.jsx';
 import DiagramPreview from './DiagramPreview.jsx';
 
-function Pane({note, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, limited, disabled, children}) {
+function Pane({note, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, limited, disabled, review, children}) {
   const [edge,setEdge]=useState(null);
   useEffect(()=>{const clear=()=>setEdge(null);window.addEventListener('dragend',clear);window.addEventListener('drop',clear);return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);};},[]);
   const side=e=>e.clientX < e.currentTarget.getBoundingClientRect().x + e.currentTarget.clientWidth / 2 ? 'left' : 'right';
@@ -14,10 +14,10 @@ function Pane({note, docKey, vault, scopeLabel, active, mode, onFocus, onClose, 
     onDragOverCapture={e=>{if(disabled || !e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect=limited?'none':'copy';setEdge(side(e));}}
     onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setEdge(null);}}
     onDropCapture={e=>{if(!e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();setEdge(null);if(!disabled)onDrop(e.dataTransfer.getData(DOCUMENT_DRAG),side(e));}}>
-    <div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
+    <div className="pane-header"><div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
       {scopeLabel && <small className="pane-space" title={scopeLabel}>{scopeLabel}</small>}
       <span title={note.path}>{note.path}</span>
-    </span><button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div>
+    </span><button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div>{review}</div>
     <div className={`document-content ${mode}`}>{children}</div>
     {edge&&<div className={`pane-drop-target ${edge}`} aria-live="polite">{limited?'최대 3개 문서까지 비교할 수 있습니다':`${edge==='left'?'왼쪽':'오른쪽'}에 문서 열기`}</div>}
   </section>;
@@ -41,13 +41,12 @@ function DocumentPane(props) {
     const matches=[...(preview.current?.querySelectorAll('h1,h2,h3,h4,h5,h6')??[])].filter(node=>node.id===heading.id&&!node.closest('[data-embed]'));
     matches[occurrence]?.scrollIntoView({block:'start'});
   },[active,mode,jump,note.path]);
-  return <Pane {...props} onFocus={focus}>
-    {pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+  return <Pane {...props} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
-      {pending.userEdited&&<p>직접 편집하여 AI 추가 반영을 멈췄습니다.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
+      {pending.userEdited&&<p>직접 편집한 내용이 포함되어 있습니다. 유지하거나 복구본을 저장해 주세요.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
-      {compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
-    </section>}
+    </section>}>
+    {pending&&compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
     <div className="editor-preview">
       {mode!=='read'&&<Editor note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
       {(mode==='read'||mode==='split')&&<DiagramPreview previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/>}

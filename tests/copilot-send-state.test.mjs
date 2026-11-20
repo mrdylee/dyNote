@@ -8,9 +8,11 @@ test("current-note prompt becomes sendable; missing vault has an actionable reas
   assert.equal(sendBlock({...ready,vaultId:null}).code,"vault");
   assert.match(sendBlock({...ready,note:null}).message,/현재.*노트|Markdown/);
 });
-test("Ask can read current note with pending drafts while writing modes remain protected",()=>{
+test("Agent and Ask can continue with drafts; Edit still requires review and Agent requires recovery readiness",()=>{
   assert.equal(sendBlock({...ready,mode:"chat",blocked:true,ready:false}),null);
-  for(const mode of ["agent","edit"])assert.equal(sendBlock({...ready,mode,blocked:true}).code,"drafts");
+  assert.equal(sendBlock({...ready,mode:"agent",blocked:true}),null);
+  assert.equal(sendBlock({...ready,mode:"edit",blocked:true}).code,"drafts");
+  assert.equal(sendBlock({...ready,mode:"agent",blocked:true,ready:false}).code,"ready");
 });
 test("missing/stale model, expired auth and transitional states explain disabled send",()=>{
   assert.equal(sendBlock({...ready,model:"stale"}).code,"model");

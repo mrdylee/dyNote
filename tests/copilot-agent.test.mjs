@@ -99,3 +99,24 @@ test("new note can be read and extended before acceptance without becoming an ex
   assert.equal(f.events.filter((e) => e.type === "proposal").at(-1).proposal.kind, "create");
   assert.equal((await f.call("create_note", { path: "New.md", content: "duplicate" })).resultType, "failure");
 });
+test("vault tools read and search pending snapshots without granting access when vault search is off", async () => {
+  const drafts = [{ path: "Other.md", content: "latest pending text" }, { path: "New.md", content: "unsaved new note" }];
+  const f = fixture({ vaultAccess: true, drafts });
+  assert.match((await f.call("search_notes", { query: "latest pending" })).textResultForLlm, /Other.md/);
+  assert.match((await f.call("read_note", { path: "Other.md" })).textResultForLlm, /latest pending/);
+  assert.match((await f.call("read_note", { path: "New.md" })).textResultForLlm, /unsaved new/);
+  const restricted = fixture({ drafts });
+  assert.equal((await restricted.call("read_note", { path: "Other.md" })).resultType, "failure");
+  assert.doesNotMatch((await restricted.call("search_notes", { query: "latest pending" })).textResultForLlm, /Other.md/);
+  const selection = fixture({ vaultAccess: true, drafts: [{ path: current.path, content: "private full draft" }], context: { ...current, kind: "selection", content: "selected" } });
+  assert.doesNotMatch((await selection.call("read_note", { path: current.path })).textResultForLlm, /private/);
+  assert.doesNotMatch((await selection.call("search_notes", { query: "private" })).textResultForLlm, /private/);
+});
+test("pending snapshots are bounded and existing pending paths cannot be recreated or exceed the pending-note limit", async () => {
+  assert.throws(() => request({ drafts: [{ path: "A.md", content: 42 }] }), /초안/);
+  assert.throws(() => request({ drafts: [{ path: "A.md", content: "a" }, { path: "A.md", content: "b" }] }), /중복/);
+  assert.throws(() => request({ drafts: Array.from({ length: 6 }, (_, i) => ({ path: `${i}.md`, content: "a" })) }), /초안/);
+  const f = fixture({ drafts: Array.from({ length: 5 }, (_, i) => ({ path: `${i}.md`, content: "a" })) });
+  assert.equal((await f.call("create_note", { path: "0.md", content: "overwrite" })).resultType, "failure");
+  assert.equal((await f.call("create_note", { path: "sixth.md", content: "new" })).resultType, "failure");
+});

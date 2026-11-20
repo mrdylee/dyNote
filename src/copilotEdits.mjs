@@ -1,17 +1,20 @@
 import { applyProposal } from "../core/copilot.mjs";
 
-export function previewEdit(proposal, source, diskRevision, requestId, previous) {
-  if (previous?.userEdited) throw new Error("직접 편집하여 AI 추가 반영을 중지했습니다.");
+export function previewEdit(proposal, source, diskRevision, requestId, previous, baseline = source) {
+  const continuing = previous?.requestId === requestId;
+  if ((previous?.userEdited && !baseline?.userEdited) ||
+      (previous?.content ?? source?.content) !== (continuing ? previous.aiContent : baseline?.content))
+    throw new Error("요청 후 직접 편집한 내용이 있어 AI 추가 반영을 중지했습니다.");
   if (proposal.kind === "create") {
-    if (source || diskRevision) throw new Error("같은 이름의 문서가 이미 존재합니다.");
+    if (source || diskRevision || (previous && !continuing)) throw new Error("같은 이름의 문서가 이미 존재합니다.");
   } else {
-    if (!source || (previous && previous.revision !== diskRevision) || (!previous && source.revision !== diskRevision))
+    if (!baseline || (previous ? previous.revision : source?.revision) !== diskRevision)
       throw new Error("외부에서 문서가 변경되었습니다. 초안을 확인해 주세요.");
   }
-  const content = proposal.kind === "create" ? proposal.content : applyProposal(proposal.target, { ...source, vaultId: proposal.target.vaultId }, proposal.content);
-  return { id: proposal.id, requestId, path: proposal.path, kind: proposal.kind,
+  const content = proposal.kind === "create" ? proposal.content : applyProposal(proposal.target, { ...baseline, vaultId: proposal.target.vaultId }, proposal.content);
+  return { id: previous?.id ?? proposal.id, requestId, path: proposal.path, kind: previous?.kind ?? proposal.kind,
     original: previous?.original ?? source?.content ?? "", revision: previous?.revision ?? diskRevision,
-    content, aiContent: content, userEdited: false, conflict: "" };
+    content, aiContent: content, userEdited: previous?.userEdited ?? false, conflict: "" };
 }
 
 export function overlayNotes(notes, drafts) {

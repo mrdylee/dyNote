@@ -39,29 +39,36 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
   const stop = id => {
     if (!job.current || (id && job.current.vaultId !== id)) return;
     job.current.stopped = true;
-    api.copilotCancel({ requestId: job.current.id }).catch(() => {});
+    job.current.cancel().catch(() => {});
   };
-  const begin = (id, requestId) => {
-    if (readDrafts(id).length || job.current || !entries.current.has(id)) throw new Error("진행 중인 Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
-    job.current = { id: requestId, vaultId: id, stopped: false };
+  const begin = (id, requestId, cancel = () => api.copilotCancel({ requestId })) => {
+    if (job.current || resolving.current) throw new Error("진행 중인 AI 작업이 끝난 뒤 다시 요청해 주세요.");
+    if (!entries.current.has(id)) throw new Error("AI 복구 초안을 확인해 주세요.");
+    const notes = new Map([...latest.current.vaults[id].notes, ...readDrafts(id)].map(note => [note.path, note]));
+    job.current = { id: requestId, vaultId: id, stopped: false, notes, conflicts: new Set(), cancel };
     setRunning(id);
   };
   const stage = (proposal, requestId) => {
     serial.current = serial.current.then(async () => {
       const active = job.current;
-      if (!active || active.id !== requestId || active.stopped) return;
+      if (!active || active.id !== requestId || active.stopped || active.conflicts.has(proposal.path)) return;
       const id = active.vaultId;
       const snapshot = await invoke(api.snapshot({ vaultId: id }));
       if (active.stopped || active !== job.current || snapshot.id !== id || !latest.current.vaults[id]) return;
       const source = latest.current.vaults[id].notes.find(n => n.path === proposal.path);
       const disk = snapshot.notes.find(n => n.path === proposal.path);
       const previous = readDrafts(id).find(d => d.path === proposal.path);
+      if (!previous && readDrafts(id).length >= 5) {
+        active.conflicts.add(proposal.path);
+        latest.current.onError("미확정 문서가 5개입니다. 기존 변경을 먼저 검토해 주세요.");
+        return;
+      }
       try {
-        const draft = previewEdit(proposal, source, disk?.revision ?? null, requestId, previous);
+        const draft = previewEdit(proposal, source, disk?.revision ?? null, requestId, previous, active.notes.get(proposal.path));
         update(id, [...readDrafts(id).filter(d => d.path !== draft.path), draft]);
         if (!previous) latest.current.onOpen(id, draft.path);
       } catch (error) {
-        stop(id);
+        active.conflicts.add(proposal.path);
         if (previous) update(id, readDrafts(id).map(d => d.path === proposal.path ? { ...d, conflict: error.message } : d));
         else {
           const original = proposal.target?.original ?? "";
@@ -81,8 +88,10 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
   };
   const edit = (id, path, content) => {
     if (!readDrafts(id).some(d => d.path === path)) return false;
-    stop(id);
-    try { update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, userEdited: true } : d)); }
+    const active = job.current?.vaultId === id && !job.current.stopped;
+    if (active) job.current.conflicts.add(path);
+    try { update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, userEdited: true,
+      ...(active ? { conflict: "요청 후 직접 편집하여 이 문서의 AI 추가 반영을 멈췄습니다." } : {}) } : d)); }
     catch (error) { latest.current.onError(error.message); }
     return true;
   };
@@ -125,7 +134,7 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
     forVault: id => ({
       drafts: drafts[id] ?? empty, running: !!id && running === id, working: !!id && working === id,
       ready: Object.hasOwn(drafts, id), blocked: () => blocked(id),
-      begin: requestId => begin(id, requestId), stage, finish, edit: (path, content) => edit(id, path, content),
+      begin: (requestId, cancel) => begin(id, requestId, cancel), stage, finish, edit: (path, content) => edit(id, path, content),
       stop: () => stop(id), resolve: (path, action) => resolve(id, path, action),
     }),
     close: async () => {

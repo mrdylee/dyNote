@@ -2062,7 +2062,9 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .document-pane { position:relative; height:100%; overflow:auto; border-top:2px solid transparent; }
 .document-pane.focused { border-top-color:#8e70bc; }
 .document-pane .document-content { padding:24px; min-height:calc(100% - 36px); }
-.pane-heading { position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--surface,#faf8fc); font-size:11px; border-bottom:1px solid var(--border); }
+.pane-header { position:sticky; top:0; z-index:3; background:var(--surface,#faf8fc); }
+.pane-header .copilot-live-banner { margin:0; border-radius:0; border-left:0; border-right:0; }
+.pane-heading { display:flex; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--surface,#faf8fc); font-size:11px; border-bottom:1px solid var(--border); }
 .pane-heading span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:grab; }
 .pane-heading button { border:0; background:none; }
 .pane-heading .pane-title { display:flex; flex-direction:column; gap:3px; min-width:0; }

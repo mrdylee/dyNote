@@ -7,6 +7,7 @@ import { MAX_ANSWER } from "./copilot.mjs";
 export function noteTools({ args, getNotes, emit, canceled }) {
   const supplied = new Map(args.references.map((note) => [note.path, note]));
   if (args.context.path) supplied.set(args.context.path, args.context);
+  const pending = new Map((args.drafts ?? []).map(note => [note.path, note]));
   const read = new Map(), proposed = new Map();
   let snapshot, calls = 0, readBytes = 0, draftBytes = 0;
   const active = () => { if (canceled()) throw new Error("요청이 중지되었습니다."); };
@@ -20,7 +21,7 @@ export function noteTools({ args, getNotes, emit, canceled }) {
     snapshot ??= Promise.resolve(getNotes(args.vaultId));
     const disk = await snapshot;
     active();
-    return [...new Map([...disk, ...supplied.values()].map((note) => [note.path, note])).values()];
+    return [...new Map([...disk, ...pending.values(), ...supplied.values()].map((note) => [note.path, note])).values()];
   };
   const tool = (name, description, properties, required, handler) => ({
     name: `dynote_${name}`, description, defer: "never", skipPermission: true,
@@ -42,6 +43,8 @@ export function noteTools({ args, getNotes, emit, canceled }) {
     active();
     if (typeof content !== "string" || !content.trim() || Buffer.byteLength(content) > MAX_ANSWER) throw new Error("수정안은 비어 있지 않은 128 KiB 이내의 Markdown이어야 합니다.");
     const previous = proposed.get(path);
+    if (!pending.has(path) && !previous && new Set([...pending.keys(), ...proposed.keys()]).size >= 5)
+      throw new Error("미확정 문서가 5개입니다. 기존 변경을 유지하거나 되돌린 뒤 새 문서를 수정해 주세요.");
     if ((!previous && proposed.size >= 5) || draftBytes + Buffer.byteLength(content) > 262144) throw new Error("한 요청의 수정안 한도에 도달했습니다.");
     draftBytes += Buffer.byteLength(content);
     const proposal = { id: previous?.id ?? randomUUID(), kind: previous?.kind ?? kind, path, content, ...((previous?.target ?? target) ? { target: previous?.target ?? target } : {}) };
@@ -92,7 +95,7 @@ export function noteTools({ args, getNotes, emit, canceled }) {
       path: pathSchema, content: { type: "string" },
     }, ["path", "content"], ({ path, content }) => {
       pathOf(path);
-      if (supplied.has(path) || read.has(path)) throw new Error("기존 문서는 edit_note로 수정해 주세요.");
+      if (supplied.has(path) || read.has(path) || pending.has(path)) throw new Error("기존 문서는 edit_note로 수정해 주세요.");
       return stage("create", path, content);
     }),
   ];

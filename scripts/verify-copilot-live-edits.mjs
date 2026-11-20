@@ -99,14 +99,14 @@ try {
   report.checks.push("Live selection edit cannot overwrite unshared prefix/suffix");
   await ask(); await edit("\nDraft before typing"); await waitText("Draft before typing");
   await editor.click(); await editor.press("ControlOrMeta+End"); await editor.pressSequentially(" USER");
-  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor({ state: "hidden" });
-  assert.equal(await page.getByRole("button", { name: "변경 되돌리기", exact: true }).isDisabled(), true);
   await edit("\nLATE AI");
+  await done();
+  assert.equal(await page.getByRole("button", { name: "변경 되돌리기", exact: true }).isDisabled(), true);
   assert.doesNotMatch(await editor.innerText(), /LATE AI/);
   await resolve("변경 유지");
   const userVersion = selected + "\r\nDraft before typing USER";
   assert.equal(await readFile(`${vaultRoot}/Home.md`, "utf8"), userVersion);
-  report.checks.push("Typing stops further AI application; destructive Undo disabled; Keep preserves user edits; late tool output ignored");
+  report.checks.push("Typing stops further AI application to that document; destructive Undo disabled; Keep preserves user edits; late tool output ignored");
   await ask(); await edit("\nRecover after restart"); await waitText("Recover after restart"); await done();
   await page.locator('.file-row[title="Ref.md"]').click();
   assert.equal(await page.getByLabel("AI 실시간 변경").count(), 0);
@@ -142,6 +142,7 @@ try {
   await writeFile(`${vaultRoot}/Created.md`, "# External before first batch");
   await edit("\nFirst batch conflict");
   await page.getByLabel("AI 실시간 변경").getByRole("alert").waitFor();
+  await done();
   await page.getByRole("button", { name: "변경 유지", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
   assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# External before first batch");
@@ -153,6 +154,7 @@ try {
   await writeFile(`${vaultRoot}/Collision.md`, "# Created externally");
   await app.evaluate(() => globalThis.liveTools.find((t) => t.name === "dynote_create_note").handler({ path: "Collision.md", content: "# AI collision draft" }));
   await page.getByLabel("AI 실시간 변경").getByRole("alert").waitFor();
+  await done();
   await resolve("복구본 저장");
   assert.equal(await readFile(`${vaultRoot}/Collision.md`, "utf8"), "# Created externally");
   assert.ok((await page.evaluate(() => window.notes.snapshot())).value.notes.some((n) => n.path.startsWith("Copilot 복구") && n.content.includes("# AI collision draft")));
@@ -170,10 +172,10 @@ try {
   await ask(); await edit("\nAfter flush"); await waitText("After flush"); await done();
   assert.match((await app.evaluate(() => globalThis.liveRequests.at(-1))).context.content, /DIRTY$/);
   assert.equal(await readFile(`${vaultRoot}/Created.md`, "utf8"), "# External before first batch DIRTY");
-  await page.getByLabel("Copilot 질문").fill("must wait");
-  assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), true);
+  await page.getByLabel("Copilot 질문").fill("continue refining");
+  assert.equal(await page.getByRole("button", { name: "Copilot 보내기" }).isDisabled(), false);
   await resolve("변경 되돌리기");
-  report.checks.push("Immediate request flushes unsaved text before live edits; another request waits for pending drafts");
+  report.checks.push("Immediate request flushes unsaved text before live edits; pending drafts allow another Agent request");
   await ask(); await edit("\nPanel closed draft"); await waitText("Panel closed draft");
   await page.getByRole("button", { name: "오른쪽 패널 표시/숨기기", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="AI 실시간 변경"] button')?.disabled);
