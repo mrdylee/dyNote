@@ -77,7 +77,7 @@ try{
  await leftResize.press('End');
  assert.ok(await width(leftResize)>480);
  assert.equal(await width(leftResize),Number(await leftResize.getAttribute('aria-valuemax')));
- assert.ok((await page.locator('.workspace').boundingBox()).width>=280);
+ await page.waitForFunction(()=>document.querySelector('.workspace').getBoundingClientRect().width>=280);
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1050,760));
  await page.waitForFunction(()=>innerWidth===1050 && Number(document.querySelector('[aria-label="왼쪽 패널 너비"]').getAttribute('aria-valuenow'))<480);
  const constrainedLeft=await width(leftResize);
