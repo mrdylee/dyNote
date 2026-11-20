@@ -13,6 +13,7 @@ import {
 } from "electron";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
+import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault, validFilePath, validNotePath } from "../core/vault.mjs";
@@ -24,6 +25,7 @@ import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
 import { GitWorkspace } from "../core/git-workspace.mjs";
 import { UpdateManager } from "../core/update-manager.mjs";
+import { stageUpdate, launchUpdate } from "./update-installer.mjs";
 import { GitController } from "./git-controller.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { PluginController } from "./plugin-controller.mjs";
@@ -62,6 +64,7 @@ let closePending;
 let closeRequestId = 0;
 let quitRequested = false;
 let quitReady = false;
+let finishingQuit = false;
 let stickyNotes;
 let recovery;
 let registry;
@@ -76,6 +79,7 @@ let codex, claude;
 let aiExtensions, aiExtensionsChanging = false;
 let plugins;
 let updates;
+let updateInstallation;
 let copilotJournal;
 let temporaryDocuments;
 
@@ -163,18 +167,38 @@ function showMainWindow() {
 }
 
 async function finishQuit() {
+  if (finishingQuit) return;
+  finishingQuit = true;
+  let quitError = "작업을 저장하지 못해 업데이트를 연기했습니다. 다시 시도해 주세요.";
   try {
     if (stickyNotes && !await stickyNotes.flushForQuit()) return;
     await plugins?.close();
     if (stickyNotes && !await stickyNotes.flushForQuit()) return;
     await temporaryDocuments?.dispose();
+    if (updateInstallation) {
+      if (activeMutations || restoring) throw new Error("저장 작업이 진행 중이어서 업데이트를 연기했습니다.");
+      await launchUpdate(await updateInstallation);
+    }
     quitReady = true;
     app.quit();
   } catch (error) {
+    quitError = error.message;
     dialog.showErrorBox("Dynote", error.message);
   } finally {
-    if (!quitReady) quitRequested = false;
+    if (!quitReady) {
+      finishingQuit = false;
+      quitRequested = false;
+      await cancelUpdateInstallation(quitError);
+    }
   }
+}
+
+async function cancelUpdateInstallation(message) {
+  if (!updateInstallation) return;
+  const pending = updateInstallation;
+  updateInstallation = null;
+  await pending.catch(() => {});
+  await updates.cancelInstall(message).catch(error => dialog.showErrorBox("Dynote", error.message));
 }
 
 function pruneVaultControllers() {
@@ -469,7 +493,9 @@ app
       onStatus: value => { if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-status", value); },
       onOpen: value => { if (value.created) gitBackup.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
+    const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const scopedActions = new Set([
+      "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
@@ -479,6 +505,20 @@ app
       "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
+      "document-drafts": () => documentDrafts.list(),
+      "write-document-draft": args => documentDrafts.write(args),
+      "remove-document-draft": args => documentDrafts.remove(args.id),
+      "create-folder": (args, vault) => { checkVault(args, vault); return vault.createFolder(args.path); },
+      "move-across-vaults": async (args, target) => {
+        checkVault(args, target);
+        const source = workspaceVault(args.sourceVaultId);
+        await openedVaults.get(source.id)?.ready;
+        if (source === target || workspaceVault(source.id) !== source || await realpath(source.root) !== source.root)
+          throw new Error("원본 보관함을 다시 확인해 주세요.");
+        const result = await source.moveDocumentTo(args.from, args.folder, args.revision, target);
+        openedVaults.get(source.id)?.git.markDirty(source.id);
+        return result;
+      },
       "plugins-list": args => { checkVault(args); return plugins.status(); },
       "plugin-import": async args => {
         checkVault(args);
@@ -520,6 +560,17 @@ app
       },
       "update-download": () => updates.download(),
       "update-show": async () => {shell.showItemInFolder(await updates.readyPath());return true;},
+      "update-install": async () => {
+        if (updateInstallation || quitRequested || closePending || activeMutations || restoring) throw new Error("다른 작업이 끝난 후 업데이트를 설치해 주세요.");
+        const pending = updates.beginInstall(args => stageUpdate({ ...args, directory: updates.directory, executable: process.execPath }));
+        updateInstallation = pending;
+        try {
+          await pending;
+          if (updateInstallation !== pending) return false;
+          setImmediate(() => { if (updateInstallation === pending) app.quit(); });
+          return true;
+        } catch (error) { if (updateInstallation === pending) updateInstallation = null; throw error; }
+      },
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
       "copilot-login": () => copilot.login(),
       "copilot-cancel-login": () => copilot.cancelLogin(),
@@ -787,8 +838,8 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -817,7 +868,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };
@@ -838,6 +889,7 @@ app
         const showMain = quitRequested;
         quitRequested = false;
         if (showMain) showMainWindow();
+        void cancelUpdateInstallation("작업을 저장하지 못해 업데이트를 연기했습니다. 작업을 마친 뒤 지금 설치를 눌러 주세요.");
       } else if (mode === "quit") {
         quitRequested = true;
         void finishQuit();
@@ -850,8 +902,10 @@ app
     window.on("close", event => {
       if (quitReady || window.webContents.isDestroyed()) return;
       event.preventDefault();
-      if (restoring) { quitRequested = false; return; }
+      if (finishingQuit) return;
+      if (restoring) { quitRequested = false; void cancelUpdateInstallation("진행 중인 작업이 있어 업데이트를 연기했습니다."); return; }
       if (window.webContents.isCrashed()) {
+        if (updateInstallation) { quitRequested = false; void cancelUpdateInstallation("문서 상태를 확인할 수 없어 업데이트를 중지했습니다. 앱을 다시 연 뒤 시도해 주세요."); return; }
         quitRequested = true;
         void finishQuit();
         return;
@@ -862,9 +916,10 @@ app
       const timer = setTimeout(() => {
         closePending = null;
         quitRequested = false;
+        void cancelUpdateInstallation("저장 확인 시간이 초과되어 업데이트를 연기했습니다.");
       }, 15000).unref();
       closePending = { id, mode, timer };
-      window.webContents.send("notes:before-close", { id, mode });
+      window.webContents.send("notes:before-close", { id, mode, updating: !!updateInstallation });
     });
     await startup.run("window.load", () => window.loadURL("notes://app/index.html"));
     await startup.run("plugins.activate", () => plugins.activate(vault));

@@ -1,4 +1,5 @@
 export const DOCUMENT_DRAG = 'application/x-dynote-document';
+export const TAB_DRAG = 'application/x-dynote-tab';
 
 export const documentKey = (vaultId, path) => vaultId && path ? `${vaultId}:${path}` : null;
 

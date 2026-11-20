@@ -718,6 +718,44 @@ export class Vault {
     });
   }
 
+  async moveDocumentTo(from, folder, revision, target) {
+    const snapshot = await this.documentSnapshot();
+    const entries = [...snapshot.notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...snapshot.documents, ...snapshot.attachments];
+    for (const file of [...snapshot.notes, ...snapshot.documents]) {
+      if (file.path === from) continue;
+      const links = file.kind === 'canvas' ? (parseCanvas(file.content).data.nodes ?? []).flatMap(node =>
+        node.type === 'text' ? scanLinks(node.text) : node.file || node.background ? [{ target: node.file || node.background, kind: 'wiki' }] : []) : scanLinks(file.content);
+      if (links.some(link => resolvePath(link.target, file.path, entries, { kind: link.kind }).path === from))
+        throw new Error('이 문서를 참조하는 링크가 있습니다. 다른 보관함에는 Ctrl을 눌러 복사해 주세요.');
+    }
+    const destination = folder ? `${folder}/${path.basename(from)}` : path.basename(from);
+    const existing = await target.documentSnapshot();
+    if ([...existing.notes, ...existing.documents, ...existing.attachments, ...(existing.folders ?? []).map(path => ({ path }))]
+      .some(file => file.path.normalize('NFC').toLowerCase() === destination.normalize('NFC').toLowerCase()))
+      throw new Error('대상 폴더에 같은 이름의 문서가 있습니다.');
+    const saved = await target.copyDocument(from, folder, revision, this);
+    try {
+      const trash = await this.trashFile(from, revision);
+      return { saved, trash };
+    } catch (error) {
+      await target.trashFile(saved.path, saved.revision).catch(() => {});
+      throw error;
+    }
+  }
+
+  createFolder(relative) {
+    return this.#enqueue(async () => {
+      if (!validRelativePath(relative)) throw new Error("허용되지 않는 폴더 경로입니다.");
+      const parent = path.dirname(await this.#file(`${relative}-${randomUUID()}.md`));
+      const target = path.join(parent, path.basename(relative));
+      const names = await readdir(path.dirname(target));
+      if (names.some(name => name.normalize('NFC').toLowerCase() === path.basename(target).normalize('NFC').toLowerCase()))
+        throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
+      await mkdir(target);
+      return { path: relative };
+    });
+  }
+
   renameTreeEntry(from, to, { folder, revision } = {}) {
     return this.#enqueue(async () => {
       const word = !folder && validWordPath(from);

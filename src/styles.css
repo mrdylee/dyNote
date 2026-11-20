@@ -400,6 +400,14 @@ kbd {
   background: white;
   color: #786a8d;
 }
+.tab.generating { color:#654599; background:linear-gradient(110deg,#eee5ff,#dbebff,#eee5ff); background-size:200% 100%; animation:document-tab-progress 2.4s ease-in-out infinite; }
+.tab.draft-ready { background:#e8f4eb; color:#306c49; }
+.tab.draft-failed { background:#fff0e4; color:#935c27; }
+.document-generating-icon { flex-shrink:0; animation:document-icon-spin 1s linear infinite; }
+.tab-return-preview { position:fixed; z-index:10000; pointer-events:none; border:1px solid #baa3dc; border-radius:7px; background:#eee5ff; box-shadow:0 6px 22px #49316630; margin:0; }
+@keyframes document-icon-spin { to { transform:rotate(360deg); } }
+@keyframes document-tab-progress { 0%,100% { background-position:0% 50%; } 50% { background-position:100% 50%; } }
+@media (prefers-reduced-motion: reduce) { .tab.generating,.document-generating-icon { animation:none; } }
 .tab.active:before {
   content: "";
   height: 2px;
@@ -1825,8 +1833,13 @@ kbd {
 .settings-tabs button { padding: 9px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
 .settings-tabs button[aria-current="page"] { color: #5142ac; background: #f0edfc; font-weight: 600; }
 .settings-tabs + .settings-section { border-top: 0; margin-top: 0; }
-.conversation-document-modal.modal { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
 .conversation-document { padding: 0 22px 22px; }
+.document-draft-panel { flex:1; min-height:0; overflow:auto; padding:24px; }
+.document-draft-panel[hidden] { display:none; }
+.document-area[hidden] { display:none; }
+.document-draft-panel h2 { font-size:20px; overflow-wrap:anywhere; }
+.document-draft-panel p { color:var(--muted); font-size:12px; }
+.document-draft-panel input { width:100%; border:1px solid var(--border); border-radius:6px; padding:8px; color:inherit; background:var(--surface); }
 .conversation-document label { display: grid; gap: 6px; margin: 12px 0; }
 .conversation-document select, .conversation-document textarea, .document-prompt-settings textarea {
   width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
@@ -2067,6 +2080,9 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .pane-heading { display:flex; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--surface,#faf8fc); font-size:11px; border-bottom:1px solid var(--border); }
 .pane-heading span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:grab; }
 .pane-heading button { border:0; background:none; }
+.pane-heading-actions { display:flex; align-items:center; gap:12px; flex-shrink:0; }
+.pane-heading .make-document-button { padding:6px 10px; border:1px solid #cab6e5; border-radius:6px; background:#eee5fa; color:#654599; font-size:11px; font-weight:600; white-space:nowrap; }
+.pane-drop-target.link { inset:48px 12px 12px; width:auto; }
 .pane-heading .pane-title { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .pane-space, .tab-space, .search-space { color:var(--muted); font-size:10px; }
 .pane-space, .tab-space { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

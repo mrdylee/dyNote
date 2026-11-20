@@ -5,7 +5,7 @@ import path from 'node:path';
 import {checkReleaseInformation,matchesUpdateAsset,releaseInformation} from './update-information.mjs';
 const WEEK=7*86400000,HOUR=3600000,MAX_SIZE=2*1024*1024*1024;
 function preferences(value={},downloadDirectory) {
-  return {enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
+  return {enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,autoInstall:value.autoInstall!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
 }
 export class UpdateManager {
   constructor({directory,downloadDirectory=directory,current,platform=process.platform,arch=process.arch,installed=false,now=Date.now,fetcher=(...args)=>fetch(...args),check,onChange=()=>{}}) {
@@ -13,7 +13,7 @@ export class UpdateManager {
     this.target = {platform, arch, installed};
     this.lookup=check??(()=>checkReleaseInformation(current,this.state.preferences.includePrerelease,this.target));
     this.defaultDownloadDirectory=downloadDirectory;
-    this.state={preferences:preferences({},downloadDirectory),lastCheckedAt:0,lastAttemptAt:0,retryAt:0,phase:'idle',result:null,message:'',progress:0,downloadedPath:null};
+    this.state={preferences:preferences({},downloadDirectory),installSupported:platform==='win32'&&arch==='x64'&&installed,installation:null,lastCheckedAt:0,lastAttemptAt:0,retryAt:0,phase:'idle',result:null,message:'',progress:0,downloadedPath:null};
     this.pending=null;this.cached=null;
   }
   emit(change){Object.assign(this.state,change);this.onChange(structuredClone(this.state));}
@@ -26,23 +26,34 @@ export class UpdateManager {
     let saved;try{saved=JSON.parse(await readFile(path.join(this.directory,'settings.json'),'utf8'));}catch{}
     if(saved){
       this.state.preferences=preferences(saved.preferences,this.defaultDownloadDirectory);
+      this.state.installation=saved.installation??null;
       for(const key of ['lastCheckedAt','lastAttemptAt','retryAt'])this.state[key]=Number.isFinite(saved[key])?saved[key]:0;
       if(saved.cached){
         const c=saved.cached;
         const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,this.target);
         if(result.available){
           this.cached={tag:result.latest.tag,asset:result.latest.assets[0],directory:typeof c.directory==='string'&&path.isAbsolute(c.directory)?c.directory:this.directory};
-          try{const file=await this.verify(this.cached.asset,this.cached.directory);this.emit({phase:'ready',result,downloadedPath:file,message:'다운로드 검증 완료 · 직접 설치할 수 있습니다.'});}catch{this.cached=null;this.state.lastCheckedAt=0;}
+          try{const file=await this.verify(this.cached.asset,this.cached.directory);this.emit({phase:'ready',result,downloadedPath:file,message:'다운로드 검증 완료'});}catch{this.cached=null;this.state.lastCheckedAt=0;}
         } else if (c.asset?.name && !matchesUpdateAsset(c.asset.name, this.target)) {
           this.state.lastCheckedAt = 0;
           this.state.retryAt = 0;
         }
       }
+      const attempt=this.state.installation;
+      if(attempt&&typeof attempt.directory==='string'&&path.dirname(attempt.directory)===path.join(this.directory,'install')&&/^[a-f0-9-]{36}$/.test(path.basename(attempt.directory))){
+        if(this.cached?.tag===attempt.tag){
+          let result;try{result=JSON.parse((await readFile(path.join(attempt.directory,'result.json'),'utf8')).replace(/^\uFEFF/,''));}catch{}
+          this.state.message=attempt.error||result?.error||'이전 업데이트 설치가 완료되지 않았습니다. 지금 설치를 눌러 다시 시도해 주세요.';
+        }else if(!releaseInformation([{tag_name:attempt.tag}],this.current,true).available){
+          await rm(attempt.directory,{recursive:true,force:true}).catch(()=>{});
+          this.state.installation=null;
+        }
+      }else if(attempt?.error)this.state.message=attempt.error;
     }
     return this.state;
   }
   async configure(change){
-    if(this.pending)throw new Error('업데이트 확인 또는 다운로드가 끝난 후 설정을 변경해 주세요.');
+    if(this.pending||this.state.phase==='installing')throw new Error('업데이트 확인 또는 설치가 끝난 후 설정을 변경해 주세요.');
     this.pending=(async()=>{
       const before=structuredClone(this.state),cached=this.cached;
       if(Object.hasOwn(change,'downloadDirectory')){
@@ -56,6 +67,7 @@ export class UpdateManager {
     return this.pending;
   }
   check(manual=false){
+    if(this.state.phase==='installing')return Promise.resolve(this.state);
     if(this.pending)return this.pending;
     const {preferences,lastCheckedAt,retryAt}=this.state,now=this.now();
     if(!manual&&(!preferences.enabled||(retryAt>now&&retryAt-now<=HOUR)||(!retryAt&&lastCheckedAt&&now>=lastCheckedAt&&now-lastCheckedAt<WEEK)))return Promise.resolve(this.state);
@@ -82,6 +94,7 @@ export class UpdateManager {
     return file;
   }
   download(){
+    if(this.state.phase==='installing')return Promise.resolve(this.state);
     if(this.pending)return this.pending;
     this.pending=(async()=>{try{await this.downloadAsset();await this.persist();}catch(error){this.emit({phase:'error',message:error.message,retryAt:this.now()+HOUR});await this.persist();}return this.state;})().finally(()=>{this.pending=null;});
     return this.pending;
@@ -92,7 +105,7 @@ export class UpdateManager {
     if(!asset.digest||!asset.size||asset.size>MAX_SIZE){this.emit({phase:'available',message:'공식 배포의 검증 정보가 없거나 크기가 지원 범위를 넘습니다. 릴리스 페이지에서 직접 다운로드해 주세요.'});return;}
     const directory=this.state.preferences.downloadDirectory,file=this.cachePath(asset),partial=file+'.'+randomUUID()+'.part';
     await mkdir(directory,{recursive:true});
-    try{await this.verify(asset);this.cached={tag:result.latest.tag,asset,directory};this.emit({phase:'ready',progress:100,downloadedPath:file,message:'다운로드 검증 완료 · 직접 설치할 수 있습니다.'});return;}catch{}
+    try{await this.verify(asset);this.cached={tag:result.latest.tag,asset,directory};this.emit({phase:'ready',progress:100,downloadedPath:file,message:'다운로드 검증 완료'});return;}catch{}
     this.emit({phase:'downloading',progress:0,message:'백그라운드에서 다운로드 중입니다.'});
     let handle;
     try{
@@ -109,8 +122,24 @@ export class UpdateManager {
       }
       if(size!==asset.size||'sha256:'+hash.digest('hex')!==asset.digest)throw new Error('다운로드 파일 검증에 실패했습니다. 다시 다운로드해 주세요.');
       await handle.close();handle=null;await rename(partial,file);
-      this.cached={tag:result.latest.tag,asset,directory};this.emit({phase:'ready',progress:100,retryAt:0,downloadedPath:file,message:'다운로드 검증 완료 · 직접 설치할 수 있습니다.'});
+      this.cached={tag:result.latest.tag,asset,directory};this.emit({phase:'ready',progress:100,retryAt:0,downloadedPath:file,message:'다운로드 검증 완료'});
     }finally{await handle?.close();await rm(partial,{force:true});}
   }
   async readyPath(){if(!this.cached)throw new Error('검증 완료된 다운로드가 없습니다.');return this.verify(this.cached.asset,this.cached.directory);}
+  async beginInstall(stage){
+    if(!this.state.installSupported)throw new Error('자동 설치는 Windows 설치형 앱에서 지원합니다.');
+    if(this.pending||this.state.phase!=='ready')throw new Error('업데이트 다운로드가 끝난 후 다시 시도해 주세요.');
+    this.pending=(async()=>{
+      const file=await this.readyPath();
+      const job=await stage({file,asset:this.cached.asset,tag:this.cached.tag});
+      this.emit({phase:'installing',installation:{tag:this.cached.tag,directory:job.directory},message:'작업을 저장한 뒤 업데이트하고 다시 시작합니다.'});
+      try{await this.persist();}catch(error){this.emit({phase:'ready',message:error.message});throw error;}
+      return job;
+    })().finally(()=>{this.pending=null;});
+    return this.pending;
+  }
+  async cancelInstall(message){
+    this.emit({phase:'ready',installation:{...this.state.installation,error:message},message});
+    await this.persist();
+  }
 }

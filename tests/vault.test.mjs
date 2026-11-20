@@ -25,6 +25,39 @@ async function fixture(t) {
   return { dir, root, recovery, store: await Vault.open(root, recovery) };
 }
 
+test("folders can be created without a document and reject collisions and unsafe paths", async t => {
+  const { store, root, dir } = await fixture(t);
+  assert.equal(typeof store.createFolder, 'function');
+  await store.createFolder('새 폴더');
+  await store.createFolder('새 폴더/하위 폴더');
+  assert.ok((await store.documentSnapshot()).folders.includes('새 폴더/하위 폴더'));
+  assert.deepEqual(await readdir(join(root, '새 폴더/하위 폴더')), []);
+  await assert.rejects(store.createFolder('새 폴더'), /같은 이름|exist/i);
+  for (const name of ['../escape', '/absolute', '.hidden', 'a/../b', 'CON', 'trailing.'])
+    await assert.rejects(store.createFolder(name));
+  await symlink(dir, join(root, 'outside'));
+  await assert.rejects(store.createFolder('outside/escape'));
+});
+
+test('cross-vault moves preserve recoverable source and reject incoming links', async t => {
+  const { store, dir, root } = await fixture(t);
+  const targetRoot = join(dir, 'target');
+  await mkdir(targetRoot);
+  const target = await Vault.open(targetRoot, join(dir, 'recovery'));
+  const file = await store.create('Move.md', '# Move\n');
+  assert.equal(typeof store.moveDocumentTo, 'function');
+  const result = await store.moveDocumentTo(file.path, '', file.revision, target);
+  assert.equal(await readFile(join(targetRoot, 'Move.md'), 'utf8'), file.content);
+  await assert.rejects(readFile(join(root, file.path)), { code: 'ENOENT' });
+  await store.restoreTrash(result.trash.id);
+  await store.create('Index.md', '[[Move.md]]');
+  await assert.rejects(store.moveDocumentTo(file.path, '', file.revision, target), /참조|같은 이름/);
+  assert.equal(await readFile(join(root, file.path), 'utf8'), file.content);
+  const aliased = await store.create('Aliased.md', '---\naliases: [Shortcut]\n---\n# Aliased');
+  await store.create('AliasIndex.md', '[[Shortcut]]');
+  await assert.rejects(store.moveDocumentTo(aliased.path, '', aliased.revision, target), /참조/);
+});
+
 test("new note initial content is atomic and never overwrites existing files", async (t) => {
   const { store, root } = await fixture(t);
   const created = await store.create("Generated.md", "# Agent\n작성 내용");

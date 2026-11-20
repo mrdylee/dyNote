@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { spaceLabel } from "../core/document-workspace.mjs";
 
-export default function SpaceTrees({ spaces, renderTree, dropProps }) {
+export default function SpaceTrees({ spaces, renderTree, dropProps, onContext }) {
   const container = useRef(null), drag = useRef(null);
   const [split, setSplit] = useState(() => {
     try {
@@ -22,8 +22,9 @@ export default function SpaceTrees({ spaces, renderTree, dropProps }) {
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const render = scopes => scopes.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)}>
-    <h3 {...dropProps(scope.id, "")}>{spaceLabel(scope)}</h3>
+  const render = scopes => scopes.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)} {...dropProps(scope.id, "")} data-drop-label={undefined}
+    onContextMenu={event => { if (!event.defaultPrevented) onContext?.(event, scope.id); }}>
+    <h3 tabIndex={0} {...dropProps(scope.id, "")} onContextMenu={event => onContext?.(event, scope.id)}>{spaceLabel(scope)}</h3>
     {renderTree(scope)}
   </section>);
   return <div className="space-trees" ref={container}>

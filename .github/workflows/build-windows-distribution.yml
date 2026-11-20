@@ -36,6 +36,8 @@ jobs:
           node scripts/verify-copilot-continuation.mjs
           node scripts/verify-word-documents.mjs
           node scripts/verify-external-file-open.mjs
+          node scripts/verify-document-tabs.mjs
+          node scripts/verify-update-install.mjs
           node scripts/verify-windows-installer.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

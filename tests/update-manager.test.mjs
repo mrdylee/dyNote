@@ -199,3 +199,47 @@ test('installed Windows app verifies its Setup download and restores it on resta
  await writeFile(file, Buffer.alloc(bytes.length));
  await assert.rejects(restored.readyPath(), /검증/);
 });
+
+test('automatic install is supported only for the installed Windows x64 distribution', async t => {
+ const {manager}=await fixture(t);
+ assert.equal(manager.state.installSupported,false);
+ await assert.rejects(manager.beginInstall(async()=>({directory:'unused'})),/설치형/);
+});
+
+test('installation revalidates bytes, serializes changes and remembers an unsuccessful attempt', async t => {
+ const windows={platform:'win32',arch:'x64',installed:true};
+ const {manager,directory}=await fixture(t,{...windows,check:async()=>releaseInformation([release('v2.0.0','Dynote-2.0.0-windows-x64-Setup.exe')],'1.0.0',false,windows)});
+ assert.equal(manager.state.installSupported,true);
+ assert.equal(manager.state.preferences.autoInstall,true);
+ await manager.check(true);
+ let releaseStage;
+ const installing=manager.beginInstall(async args=>{assert.equal(args.tag,'v2.0.0');await new Promise(resolve=>{releaseStage=resolve;});return {directory:path.join(directory,'install','test')};});
+ await new Promise(resolve=>setTimeout(resolve,20));
+ await assert.rejects(manager.configure({autoInstall:false}),/끝난/);
+ releaseStage();await installing;
+ assert.equal(manager.state.phase,'installing');
+ await manager.cancelInstall('저장을 완료하지 못했습니다.');
+ const restored=new tools.UpdateManager({directory,current:'1.0.0',...windows});await restored.init();
+ assert.equal(restored.state.phase,'ready');assert.equal(restored.state.installation.tag,'v2.0.0');
+ assert.match(restored.state.message,/저장/);
+ await restored.configure({autoInstall:false});
+ const disabled=new tools.UpdateManager({directory,current:'1.0.0',...windows});await disabled.init();
+ assert.equal(disabled.state.preferences.autoInstall,false);
+ await writeFile(await restored.readyPath(),Buffer.alloc(bytes.length));
+ let staged=false;await assert.rejects(restored.beginInstall(async()=>{staged=true;}),/검증/);
+ assert.equal(staged,false);
+});
+
+test('completed upgrade removes staged installer and Windows BOM errors are readable on a failed upgrade', async t => {
+ const windows={platform:'win32',arch:'x64',installed:true};
+ const {manager,directory}=await fixture(t,{...windows,check:async()=>releaseInformation([release('v2.0.0','Dynote-2.0.0-windows-x64-Setup.exe')],'1.0.0',false,windows)});
+ await manager.check(true);
+ const job=path.join(directory,'install','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');await mkdir(job,{recursive:true});
+ await manager.beginInstall(async()=>({directory:job}));
+ await writeFile(path.join(job,'result.json'),'\uFEFF'+JSON.stringify({error:'Setup exit code: 5'}));
+ const failed=new tools.UpdateManager({directory,current:'1.0.0',...windows});await failed.init();
+ assert.match(failed.state.message,/exit code: 5/);
+ const upgraded=new tools.UpdateManager({directory,current:'2.0.0',...windows});await upgraded.init();
+ assert.equal(upgraded.state.installation,null);assert.equal(upgraded.state.downloadedPath,null);
+ await assert.rejects(readdir(job),{code:'ENOENT'});
+});

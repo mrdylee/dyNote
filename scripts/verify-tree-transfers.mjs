@@ -56,11 +56,13 @@ try {
       await page.mouse.move(start.x + 12, start.y);
       const end = await center(to);
       await page.mouse.move(end.x, end.y, { steps: 10 });
+      await page.mouse.move(end.x + 1, end.y);
       await to.and(page.locator("[data-drop-label]")).waitFor();
     } finally {
       await page.mouse.up();
       if (copy) await page.keyboard.up("Control");
     }
+    if (!copy) await page.getByRole("dialog", { name: "이동할까요?", exact: true }).getByRole("button", { name: "이동", exact: true }).click();
   };
   await page.getByRole("region", { name: "저널 피드", exact: true }).locator(".cm-focused").waitFor();
   await row(personalTree, `Journal/${localDate()}.md`).waitFor();
@@ -105,16 +107,11 @@ try {
   assert.equal(await readFile(path.join(personal, "Plan.md"), "utf8"), moved.replace("../Reference.md", "Reference.md"));
   await assert.rejects(readFile(path.join(personal, "Copies/Plan.md")), { code: "ENOENT" });
 
-  await drag(row(personalTree, "Deliver.md"), row(teamTree, "Shared"));
-  const confirm = page.getByRole("dialog", { name: "다른 보관함에 복사", exact: true });
-  await confirm.waitFor();
-  await assert.rejects(readFile(path.join(team, "Shared/Deliver.md")), { code: "ENOENT" });
-  await confirm.getByRole("button", { name: "복사", exact: true }).click();
+  await drag(row(personalTree, "Deliver.md"), row(teamTree, "Shared"), true);
   await row(teamTree, "Shared/Deliver.md").waitFor();
   assert.equal(await readFile(path.join(team, "Shared/Deliver.md"), "utf8"), "# Hand-off\n");
   assert.equal(await readFile(path.join(personal, "Deliver.md"), "utf8"), "# Hand-off\n");
-  await drag(row(personalTree, "Linked.md"), row(teamTree, "Shared"));
-  await confirm.getByRole("button", { name: "복사", exact: true }).click();
+  await drag(row(personalTree, "Linked.md"), row(teamTree, "Shared"), true);
   await page.getByText(/링크 “Reference\.md”의 대상이 복사 후 달라집니다/).waitFor();
   await assert.rejects(readFile(path.join(team, "Shared/Linked.md")), { code: "ENOENT" });
   assert.equal(await readFile(path.join(personal, "Linked.md"), "utf8"), "[Reference](Reference.md)\n");

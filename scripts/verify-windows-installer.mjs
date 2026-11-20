@@ -35,7 +35,7 @@ const note = path.join(vault, 'Keep.md');
 const original = '# Note from the ZIP installation\n\nPreserve this note.\n';
 await writeFile(note, original);
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({vaultRoot: vault, vaultPurposes: {[vault]: 'personal'}}));
-await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({preferences: {enabled: false, downloadDirectory: downloads}}));
+await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({preferences: {enabled: false, autoInstall: false, downloadDirectory: downloads}}));
 const launch = async (executable, verify) => {
   const app = await electron.launch({executablePath: executable, env: {...process.env, OPEN_NOTES_DATA: profile}});
   try {
@@ -51,7 +51,7 @@ const launch = async (executable, verify) => {
     await verify?.(app, page);
   } finally {
     const child = app.process();
-    await app.close();
+    if (child.exitCode === null && child.signalCode === null) await app.close();
     if (child.exitCode === null && child.signalCode === null) {
       await once(child, 'exit', {signal: AbortSignal.timeout(15000)});
     }
@@ -104,7 +104,10 @@ try {
   const asset = assetName => ({name: assetName, size, digest, browser_download_url: `https://github.com/mrdylee/dyNote/releases/download/${tag}/${assetName}`});
   const feed = [{tag_name: tag, assets: [asset('Dynote-99.0.0-windows-x64.zip'), asset(name)]}];
   let downloaded;
+  let installerJob, installingPid;
+  const previousRuns = new Set((await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).run));
   await launch(installed, async (app, page) => {
+    installingPid = app.process().pid;
     await app.evaluate(({shell}, {feed, name, setup}) => {
       shell.showItemInFolder = file => {globalThis.shownUpdate = file;};
       globalThis.fetch = async url => {
@@ -123,7 +126,7 @@ try {
     await updates.getByRole('button', {name: '지금 업데이트 확인', exact: true}).click();
     const reveal = updates.getByRole('button', {name: '설치 파일 위치 열기', exact: true});
     await reveal.waitFor({timeout: 120000});
-    await updates.getByText('Dynote를 종료한 다음 받은 Setup.exe를 실행해 업데이트하세요.', {exact: true}).waitFor();
+    await updates.getByRole('button', {name: '지금 설치하고 다시 시작', exact: true}).waitFor();
     downloaded = await updates.getByLabel('다운로드된 업데이트 파일', {exact: true}).inputValue();
     assert.equal(path.dirname(downloaded).toLowerCase(), downloads.toLowerCase());
     assert.ok(downloaded.endsWith(name));
@@ -131,8 +134,29 @@ try {
     await reveal.click();
     await page.waitForFunction(() => !document.querySelector('.update-settings input[type="checkbox"]')?.disabled);
     assert.equal(await app.evaluate(() => globalThis.shownUpdate), downloaded);
+    const exited = once(app.process(), 'exit', {signal: AbortSignal.timeout(60000)});
+    await updates.getByRole('button', {name: '지금 설치하고 다시 시작', exact: true}).click();
+    await exited;
+    installerJob = JSON.parse(await readFile(path.join(profile, 'updates', 'settings.json'), 'utf8')).installation.directory;
   });
-  console.log('PASS installed app opened the same note and settings, downloaded Setup and verified SHA-256');
+  console.log('PASS installed app verified Setup, saved work and exited for installation');
+
+  // This controlled release reapplies the same package. Verify actual Setup and helper relaunch,
+  // while leaving version advancement to a two-release acceptance test.
+  let restarted;
+  for (let i = 0; i < 180 && !restarted; i++) {
+    await delay(1000);
+    const entries = (await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    restarted = entries.find(entry => !previousRuns.has(entry.run) && Number(entry.run.split(':').at(-1)) !== installingPid && entry.stage === 'main.services-ready');
+  }
+  assert.ok(restarted, 'Installer helper should relaunch the installed app and finish startup.');
+  const result = JSON.parse((await readFile(path.join(installerJob, 'result.json'), 'utf8')).replace(/^\uFEFF/, ''));
+  assert.equal(result.installed, true, result.error);
+  assert.equal(await readFile(note, 'utf8'), original);
+  assert.equal(await hash(path.join(appDir, 'resources', 'app.asar')), await hash(path.join(path.dirname(portable), 'resources', 'app.asar')));
+  // Only this test's newly relaunched process is stopped, after verifying its executable.
+  await run(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', '$fixtureProcess = Get-Process -Id ([int]$env:DYNOTE_TEST_PID); if ($fixtureProcess.Path -ne $env:DYNOTE_TEST_EXE) { throw "Unexpected executable" }; Stop-Process -InputObject $fixtureProcess'], {env: {...process.env, DYNOTE_TEST_PID: restarted.run.split(':').at(-1), DYNOTE_TEST_EXE: installed}});
+  console.log('PASS in-app install ran Setup, relaunched the app, preserved notes and matched the package payload');
 
   await install(downloaded, 'reinstall');
   console.log('PASS reinstall completed from the downloaded Setup');

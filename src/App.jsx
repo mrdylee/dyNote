@@ -49,7 +49,7 @@ import CopilotJournalEntries,{CopilotJournalHistory,CopilotJournalToolbar} from 
 import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
-import { DOCUMENT_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
+import { DOCUMENT_DRAG, TAB_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
 import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder, managedCopilotPath, renamedTreePath, treeRenameDestination } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
@@ -120,6 +120,7 @@ const stored = (key, fallback) => {
 };
 const persist = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Remain usable during this session. */ } };
 const documentPromptsKey = "dynote.document-prompts";
+const draftKey = draft => documentKey(draft.vaultId, `tmp/${draft.id}.md`);
 
 function IconButton({ label, children, onClick, active = false, ...props }) {
   return (
@@ -195,6 +196,8 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
             <button
               key={path}
               className={`file-row ${active === path ? "selected" : ""}`}
+              {...dropProps(path.split("/").slice(0, -1).join("/"))}
+              data-drop-label={undefined}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word}); }}
@@ -347,6 +350,31 @@ export default function App() {
   },[]);
   const [startup, setStartup] = useState(() => stored("dynote.startup", "journal"));
   const [tabs, setTabs] = useState([]);
+  const [documentDrafts, setDocumentDrafts] = useState([]);
+  const draftsRef = useRef([]), restoredDrafts = useRef(new Set());
+  draftsRef.current = documentDrafts;
+  const activeDocumentDraft = documentDrafts.find(draft => draftKey(draft) === workspace.active);
+  const persistDocumentDraft = useCallback(draft => invoke(api.writeDocumentDraft(draft)), []);
+  const updateDocumentDraft = useCallback((id, changes) => {
+    setDocumentDrafts(old => old.map(draft => draft.id === id ? { ...draft, ...changes } : draft));
+    if (changes.running === false) {
+      const draft = draftsRef.current.find(draft => draft.id === id);
+      if (draft) setTabs(old => old.includes(draftKey(draft)) ? old : [...old, draftKey(draft)]);
+    }
+  }, []);
+  useEffect(() => {
+    let mounted = true;
+    if (api?.documentDrafts) invoke(api.documentDrafts()).then(drafts => {
+      if (mounted) setDocumentDrafts(current => [...drafts.filter(draft => !current.some(item => item.id === draft.id)), ...current]);
+    }).catch(error => { if (mounted) setError(error.message); });
+    return () => { mounted = false; };
+  }, []);
+  useEffect(() => {
+    const drafts = documentDrafts.filter(draft => vaults[draft.vaultId] && !restoredDrafts.current.has(draft.id));
+    if (!drafts.length) return;
+    drafts.forEach(draft => restoredDrafts.current.add(draft.id));
+    setTabs(old => [...new Set([...old, ...drafts.map(draftKey)])]);
+  }, [documentDrafts, vaults]);
   const [tabMenu, setTabMenu] = useState(null);
   const tabMenuRef = useRef(null);
   const tabMenuIndex = tabs.indexOf(tabMenu?.key);
@@ -462,10 +490,11 @@ export default function App() {
   const captureScanning = useRef(false);
   const [fileTarget, setFileTarget] = useState(null);
   const treeDrag = useRef(null);
+  const [newFolder, setNewFolder] = useState(null);
   const macCopyDrag = useRef(null);
   const [treeDrop, setTreeDrop] = useState(null);
   const [treeReveal, setTreeReveal] = useState(null);
-  const [crossCopy, setCrossCopy] = useState(null);
+  const [treeMove, setTreeMove] = useState(null);
   const [classificationHelpDismissed, setClassificationHelpDismissed] = useState(false);
   const classificationHelpRef = useRef(null);
   useEffect(() => {
@@ -538,7 +567,6 @@ export default function App() {
   const pendingEdit = edits.drafts.find(draft => draft.path === active);
   const chatPaths = useRef(new Map());
   const note = section === "journal" || attachment ? null : model.notes.find(n => n.path === active);
-  const canMakeCopilotDocument = vault?.purpose === "personal" && note && copilotSessionPath.test(note.path);
   if (note) chatPaths.current.set(vault.id, note.path);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
   const structured = section === "journal" || attachment ? null : documents.find(d => d.path === active);
@@ -569,7 +597,7 @@ export default function App() {
   const switchResults = modal === "switch" ? searchAcross(switchQuery).slice(0, 9) : emptyFiles;
 
   const reconcileScope = useCallback((id, paths) => {
-    const keys = paths.map(path => documentKey(id, path));
+    const keys = [...paths.map(path => documentKey(id, path)), ...draftsRef.current.filter(draft => draft.vaultId === id).map(draftKey)];
     const available = new Set(keys);
     workspace.dispatch({ type: "reconcile-vault", vaultId: id, paths: keys });
     setTabs(old => old.filter(key => documentRef(key).vaultId !== id || available.has(key)));
@@ -599,7 +627,7 @@ export default function App() {
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
       const key = documentKey(snapshot.id, startPath);
       workspace.dispatch({ type: "reset", path: key });
-      setTabs(key ? [key] : []);
+      setTabs(old => [...new Set([...(key ? [key] : []), ...old.filter(key => draftsRef.current.some(draft => draftKey(draft) === key))])]);
       setSection(stored("dynote.startup", "journal") === "journal" ? "journal" : "files");
     }
     if (select || currentVault.current === snapshot.id) {
@@ -699,6 +727,41 @@ export default function App() {
     }
   }, [queue]);
 
+  const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
+  const updateComposing = useRef(false);
+  updateContext.current = { busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
+  const installUpdate = async (automatic = false) => {
+    if (updateRequest.current) return;
+    if (updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
+    updateRequest.current = { interaction: updateInteraction.current, automatic };
+    try { await invoke(api.installUpdate()); }
+    catch (error) { updateRequest.current = null; throw error; }
+  };
+  const automaticInstall = useEffectEvent(() => installUpdate(true).catch(error => {
+    setDismissedUpdate(updateState?.result?.latest?.tag);
+    setError(error.message);
+  }));
+  useEffect(() => {
+    const activity = () => { updateInteraction.current = Date.now(); };
+    const composition = event => { updateComposing.current = event.type === "compositionstart"; activity(); };
+    const events = ["pointerdown", "pointermove", "keydown", "input", "wheel", "dragover"];
+    events.forEach(name => window.addEventListener(name, activity, { passive: true }));
+    window.addEventListener("compositionstart", composition);
+    window.addEventListener("compositionend", composition);
+    return () => { events.forEach(name => window.removeEventListener(name, activity)); window.removeEventListener("compositionstart", composition); window.removeEventListener("compositionend", composition); };
+  }, []);
+  useEffect(() => {
+    if (updateState?.phase !== "installing") updateRequest.current = null;
+    const tag = updateState?.result?.latest?.tag;
+    if (!updateState?.installSupported || updateState.phase !== "ready" || !updateState.preferences.autoInstall || !tag || dismissedUpdate === tag || updateState.preferences.ignored.includes(tag) || updateState.installation?.tag === tag) return;
+    updateInteraction.current = Date.now();
+    const timer = setInterval(() => {
+      if (updateContext.current.busy || updateContext.current.modal || audioActive.current || updateComposing.current) { updateInteraction.current = Date.now(); return; }
+      if (Date.now() - updateInteraction.current >= 60000) automaticInstall();
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [updateState, dismissedUpdate]);
+
   useEffect(() => {
     if (!api) {
       setError(
@@ -716,8 +779,12 @@ export default function App() {
         api.startupStage?.("renderer.snapshot-error");
         setError(error.message);
       });
-    return api.onBeforeClose(async ({ id, mode }) => {
+    return api.onBeforeClose(async ({ id, mode, updating }) => {
       try {
+        if (updating && (updateContext.current.busy || updateComposing.current || (updateContext.current.modal && updateContext.current.modal !== "settings") || (updateRequest.current?.automatic && updateRequest.current.interaction !== updateInteraction.current))) {
+          api.confirmClose(id, false);
+          return;
+        }
         if (audioActive.current) {
           setAudioNotice("녹음을 저장하거나 취소한 뒤 닫아 주세요.");
           api.confirmClose(id, false);
@@ -725,12 +792,14 @@ export default function App() {
         }
         if (mode === "quit") await editsRef.current.close();
         await flush(true);
+        await Promise.all(draftsRef.current.map(persistDocumentDraft));
         api.confirmClose(id, true);
-      } catch {
+      } catch (error) {
+        setError(error.message);
         api.confirmClose(id, false);
       }
     });
-  }, [install, flush]);
+  }, [install, flush, persistDocumentDraft]);
 
   captureContext.current = { busy, modal, states: captureStates };
   const updateCaptureState = useCallback((id, transform) => {
@@ -842,6 +911,21 @@ export default function App() {
     setSection(old => (["graph", "planner", "journal"].includes(old) ? "files" : old));
     setModal(null);
   }, [vault?.id, vaultsRef, updateNavigation, workspace.setActive]);
+  const openDocumentDraft = draft => {
+    workspace.setActive(draftKey(draft));
+    setTabs(old => old.includes(draftKey(draft)) ? old : [...old, draftKey(draft)]);
+    setSection("files"); setAttachment(null); setModal(null);
+  };
+  const makeCopilotDocument = async (source, vaultId) => {
+    const stem = Array.from(source.title.replace(/[\\/<>:"|?*\u0000-\u001f]/g, " ").replace(/^[. ]+/, "").trim()).slice(0, 55).join("").trim();
+    const draft = { id: crypto.randomUUID(), vaultId, source: { path: source.path, title: source.title, content: source.content },
+      fileName: `${stem || "Copilot 대화"} · 문서`, content: null, promptId: "default" };
+    try {
+      await persistDocumentDraft(draft);
+      setDocumentDrafts(old => [...old, draft]);
+      openDocumentDraft(draft);
+    } catch (error) { setError(error.message); }
+  };
   const openWorkspaceKey = key => {
     const target = documentRef(key, vault?.id);
     openNote(target.path, target.vaultId);
@@ -859,7 +943,7 @@ export default function App() {
   };
   const showTabMenu = (event, key) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || (macCopyDrag.current && event.ctrlKey)) return;
     const origin = event.currentTarget.querySelector(".tab-label");
     const rect = origin.getBoundingClientRect();
     setTabMenu({
@@ -984,17 +1068,21 @@ export default function App() {
     }
   };
 
-  const saveCopilotDocument = async (path, content) => {
-    if (!canMakeCopilotDocument || busy || captureLocked || edits.blocked()) throw new Error("현재 문서 작업이 끝난 뒤 다시 저장해 주세요.");
-    const id = vault.id;
-    setBusy(true);
-    try {
-      await flush();
-      const created = await invoke(api.createNote({ vaultId: id, path, content }));
-      revisionMap(id).set(created.path, created.revision);
-      updateVault(id, old => old && ({ ...old, notes: [...old.notes, created] }));
-      openNote(created.path, id);
-    } finally { setBusy(false); }
+  const saveCopilotDocument = async (draft, path, content) => {
+    const id = draft.vaultId;
+    if (!vaultsRef.current[id]) throw new Error("원본 보관함을 다시 연결해 주세요.");
+    if (editsRef.current.forVault(id).drafts.some(edit => edit.path === path) || queue.get(id, path))
+      throw new Error("이 저장 경로에 미확정 변경이 있습니다. 다른 파일 이름을 선택해 주세요.");
+    const created = await invoke(api.createNote({ vaultId: id, path, content }));
+    revisionMap(id).set(created.path, created.revision);
+    updateVault(id, old => old && ({ ...old, notes: [...old.notes, created] }));
+    const from = draftKey(draft), to = documentKey(id, created.path);
+    workspace.dispatch({ type: "rename", path: from, to });
+    setTabs(old => [...new Set(old.map(key => key === from ? to : key))]);
+    setDocumentDrafts(old => old.filter(item => item.id !== draft.id));
+    updateNavigation({ type: "visit", path }, id);
+    setTreeReveal({ vaultId: id, folder: path.split("/").slice(0, -1).join("/") });
+    await invoke(api.removeDocumentDraft({ id: draft.id })).catch(error => setError(`문서는 저장했습니다. 임시 초안 정리: ${error.message}`));
   };
 
   const reload = async () => {
@@ -1198,20 +1286,29 @@ export default function App() {
     const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision }));
     applyWorkspaceRename(vaultId, from, to, snapshot);
   };
-  const transferTreeFile = async ({ source, vaultId, folder, operation, confirmedRevision }) => {
+  const transferTreeFile = async ({ source, vaultId, folder, operation, confirmed = false }) => {
     if (busy || !vaultsRef.current[source.vaultId] || !vaultsRef.current[vaultId]) return;
+    const draft = draftsRef.current.find(draft => draftKey(draft) === documentKey(source.vaultId, source.path));
+    if (draft) { openDocumentDraft(draft); setError("임시 문서의 저장 위치를 먼저 선택해 주세요."); return; }
+    if (operation === "move" && !confirmed) {
+      setTreeMove({ source, vaultId, folder, operation, confirmed: true });
+      setModal("tree-move");
+      return;
+    }
     setBusy(true);
     try {
       await flush();
-      const revision = confirmedRevision ?? revisionMap(source.vaultId).get(source.path);
+      const revision = revisionMap(source.vaultId).get(source.path);
       if (!revision) throw new Error("원본 문서를 새로고침해 주세요.");
-      if (source.vaultId !== vaultId && !confirmedRevision) {
-        setCrossCopy({ source, vaultId, folder, operation, confirmedRevision: revision });
-        setModal("tree-copy");
-        return;
-      }
       const name = source.path.split("/").at(-1);
-      if (operation === "move") {
+      if (operation === "move" && source.vaultId !== vaultId) {
+        const { saved } = await invoke(api.moveAcrossVaults({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
+        const from = documentKey(source.vaultId, source.path), to = documentKey(vaultId, saved.path);
+        workspace.dispatch({ type: "rename", path: from, to });
+        setTabs(old => [...new Set(old.map(key => key === from ? to : key))]);
+        acceptSnapshot(await invoke(api.snapshot({ vaultId: source.vaultId })));
+        acceptSnapshot(await invoke(api.snapshot({ vaultId })));
+      } else if (operation === "move") {
         await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision);
       } else {
         const saved = await invoke(api.copyFile({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
@@ -1221,9 +1318,9 @@ export default function App() {
         setError("");
       }
       setTreeReveal({ vaultId, folder });
-      if (confirmedRevision) setModal(null);
+      if (confirmed) setModal(null);
     } catch (error) {
-      if (confirmedRevision) setModal(null);
+      if (confirmed) setModal(null);
       setError(error.message);
     } finally { setBusy(false); }
   };
@@ -1235,6 +1332,35 @@ export default function App() {
     if (/\.md$/i.test(path)) event.dataTransfer.setData(DOCUMENT_DRAG, key);
     event.dataTransfer.effectAllowed = "copyMove";
   };
+  const startTabDrag = (event, vaultId, path) => {
+    startTreeDrag(event, vaultId, path);
+    event.dataTransfer.setData(TAB_DRAG, documentKey(vaultId, path));
+  };
+  const tabDocumentLink = (key, targetVaultId) => {
+    const source = documentRef(key);
+    const draft = draftsRef.current.find(draft => draftKey(draft) === key);
+    if (draft) { openDocumentDraft(draft); setError("임시 문서를 저장한 뒤 링크를 넣어 주세요."); return null; }
+    if (source.vaultId !== targetVaultId) { setError("다른 보관함의 문서는 먼저 복사한 뒤 내부 링크를 넣어 주세요."); return null; }
+    if (!models.get(source.vaultId)?.notes.some(note => note.path === source.path)) return null;
+    const path = source.path.split("/").map(encodeURIComponent).join("/");
+    const title = source.path.split("/").at(-1).replace(/\.md$/i, "").replace(/[\[\]|\r\n]/g, " ");
+    return `[[${path}|${title}]]`;
+  };
+  const returnDraggedTab = (key, point) => {
+    const tab = document.querySelector(`[data-tab-key="${CSS.escape(key)}"]`);
+    if (!tab || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rect = tab.getBoundingClientRect(), preview = tab.cloneNode(true);
+    preview.classList.add("tab-return-preview");
+    preview.removeAttribute("data-tab-key"); preview.setAttribute("aria-hidden", "true"); preview.inert = true;
+    preview.querySelectorAll("button").forEach(button => { button.tabIndex = -1; });
+    Object.assign(preview.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+    document.body.appendChild(preview);
+    const animation = preview.animate([
+      { transform: `translate(${point.x - rect.left - rect.width / 2}px, ${point.y - rect.top - rect.height / 2}px) scale(.92)`, opacity: .85 },
+      { transform: "translate(0, 0) scale(1)", opacity: 0 },
+    ], { duration: 420, easing: "cubic-bezier(.22,.8,.3,1)" });
+    animation.finished.catch(() => {}).finally(() => preview.remove());
+  };
   const endTreeDrag = () => { treeDrag.current = null; setTreeDrop(null); };
   const highlightTreeDrop = (vaultId, folder, operation) => {
     setTreeDrop(old => !operation ? null
@@ -1244,8 +1370,8 @@ export default function App() {
     const current = treeDrop?.vaultId === vaultId && treeDrop.folder === folder ? treeDrop : null;
     const operationAt = (event, source) => {
       if (busy || !source || !event.dataTransfer.types.includes(FILE_TREE_DRAG)) return null;
-      if (event.ctrlKey || source.vaultId !== vaultId) return "copy";
-      return source.path.split("/").slice(0, -1).join("/") === folder ? null : "move";
+      if (event.ctrlKey) return "copy";
+      return source.vaultId === vaultId && source.path.split("/").slice(0, -1).join("/") === folder ? null : "move";
     };
     return {
       "data-tree-drop-vault": vaultId,
@@ -1253,18 +1379,19 @@ export default function App() {
       "data-drop-label": current ? current.operation === "copy" ? "복사" : "이동" : undefined,
       onDragOver: event => {
         if (!event.dataTransfer.types.includes(FILE_TREE_DRAG)) return;
-        event.preventDefault();
+        event.preventDefault(); event.stopPropagation();
         const operation = operationAt(event, treeDrag.current);
         event.dataTransfer.dropEffect = operation ?? "none";
         highlightTreeDrop(vaultId, folder, operation);
       },
       onDragLeave: event => {
+        event.stopPropagation();
         if (!event.currentTarget.contains(event.relatedTarget))
           setTreeDrop(old => old?.vaultId === vaultId && old.folder === folder ? null : old);
       },
       onDrop: event => {
         if (!event.dataTransfer.types.includes(FILE_TREE_DRAG)) return;
-        event.preventDefault();
+        event.preventDefault(); event.stopPropagation();
         const source = treeDrag.current, operation = operationAt(event, source);
         endTreeDrag();
         if (!operation || event.dataTransfer.getData(FILE_TREE_DRAG) !== documentKey(source.vaultId, source.path)) return;
@@ -1289,18 +1416,37 @@ export default function App() {
   };
   const showTreeMenu = (origin, x, y, target, vaultId) => {
     const scope = vaultsRef.current[vaultId];
-    if (!scope || busy || editState.forVault(vaultId).blocked()) {
+    if (!scope || busy) {
       setTreeMenu(null);
       return;
     }
     const rect = origin.getBoundingClientRect();
     const protectedFolder = target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences));
     setTreeMenu({
-      ...target, vaultId, origin, canTrash: !protectedFolder && !target.word,
-      renameReason: treeRenameReason(target, scope),
+      ...target, vaultId, origin, canTrash: !!target.path && !protectedFolder && !target.word,
+      renameReason: target.path ? treeRenameReason(target, scope) : "보관함 이름은 설정에서 변경해 주세요.",
       x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
-      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 92)),
+      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 144)),
     });
+  };
+  const addTreeFolder = async event => {
+    event.preventDefault();
+    if (!newFolder || newFolder.working) return;
+    const target = newFolder;
+    const name = target.name.trim();
+    if (!name || /[\\/]/.test(name)) { setNewFolder({ ...target, error: "폴더 이름을 입력해 주세요." }); return; }
+    setNewFolder({ ...target, working: true, error: "" });
+    try {
+      const path = target.parent ? `${target.parent}/${name}` : name;
+      await invoke(api.createFolder({ vaultId: target.vaultId, path }));
+      updateVault(target.vaultId, old => ({ ...old, folders: [...(old.folders ?? []), path] }));
+      setTreeReveal({ vaultId: target.vaultId, folder: path });
+      setNewFolder(null); setModal(null);
+    } catch (error) { setNewFolder({ ...target, error: error.message }); }
+  };
+  const rootTreeContext = (event, id) => {
+    event.preventDefault();
+    showTreeMenu(event.currentTarget, event.clientX, event.clientY, { path: "", folder: true }, id);
   };
   const startMacCopy = (event, vaultId, path) => {
     if (!isMac || busy || !event.ctrlKey || event.button !== 0) return;
@@ -1321,7 +1467,7 @@ export default function App() {
     if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 5) drag.dragging = true;
     if (!drag.dragging) return;
     const target = macCopyTarget(event);
-    highlightTreeDrop(target?.vaultId, target?.folder, target && !busy ? "copy" : null);
+    highlightTreeDrop(target?.vaultId, target?.folder, target && !busy ? event.ctrlKey ? "copy" : "move" : null);
   };
   const finishMacCopy = (event) => {
     const drag = macCopyDrag.current;
@@ -1334,7 +1480,7 @@ export default function App() {
       return;
     }
     const target = macCopyTarget(event);
-    if (target) void transferTreeFile({ ...target, source: drag.source, operation: "copy" });
+    if (target) void transferTreeFile({ ...target, source: drag.source, operation: event.ctrlKey ? "copy" : "move" });
   };
   const prepareFile = async (path, action, folder = false, vaultId = vault.id) => {
     try {
@@ -1830,8 +1976,7 @@ export default function App() {
               )}
             </div>
           ) : (
-            together ? <SpaceTrees spaces={visibleSpaces} renderTree={renderTree} dropProps={treeDropProps}/>
-            : renderTree(vault)
+            <SpaceTrees spaces={together ? visibleSpaces : [vault]} renderTree={renderTree} dropProps={treeDropProps} onContext={rootTreeContext}/>
           )}
           <div className="structured-create-actions">
             <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
@@ -1893,19 +2038,21 @@ export default function App() {
                 const { vaultId, path } = documentRef(key);
                 const scope = vaults[vaultId];
                 if (!scope) return null;
+                const draft = documentDrafts.find(item => draftKey(item) === key);
                 const label = together ? spaceLabel(scope) : null;
-                return <div className={`tab ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
+                return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : draft && draft.content !== null ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
                   onContextMenu={event => showTabMenu(event, key)}
                   onKeyDown={event => {
                     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
                   }}>
                   <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
                     draggable={!busy && /\.md$/i.test(path)}
-                    onDragStart={event => { event.dataTransfer.setData(DOCUMENT_DRAG, key); event.dataTransfer.effectAllowed = "copy"; }}
-                    onClick={() => openNote(path, vaultId)}>
-                    <FileText size={13} />
+                    onPointerDown={event => startMacCopy(event, vaultId, path)}
+                    onDragStart={event => startTabDrag(event, vaultId, path)} onDragEnd={endTreeDrag}
+                    onClick={() => draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
+                    {draft?.running ? <LoaderCircle size={13} className="document-generating-icon" aria-label="문서 생성 중" /> : <FileText size={13} />}
                     <span className={label ? "tab-document" : undefined}>
-                      <span>{path.split("/").at(-1).replace(/\.md$/i, "")}</span>
+                      <span>{draft ? draft.fileName : path.split("/").at(-1).replace(/\.md$/i, "")}</span>
                       {label && <small className="tab-space">{label}</small>}
                     </span>
                   </button>
@@ -1937,12 +2084,10 @@ export default function App() {
               <span>
                 {section === "journal" ? "저널" : section === "graph"
                   ? "문서 그래프"
-                  : (displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
+                  : (activeDocumentDraft ? `${activeDocumentDraft.fileName} · 임시 문서` : displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
-              {canMakeCopilotDocument && !["graph", "planner"].includes(section) && <button className="text-action" disabled={busy || captureLocked || edits.blocked()}
-                onClick={() => setModal("copilot-document")}>문서로 만들기</button>}
               {note && <button className="text-action" disabled={busy} onClick={()=>{setModal("compare");}}>문서 나란히 보기</button>}
               {!["graph"].includes(section) && (note || structured) && (
                 <>
@@ -2053,7 +2198,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료 · 직접 설치할 수 있습니다.</span><button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
+          {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료{updateState.installSupported && updateState.preferences.autoInstall && updateState.installation?.tag !== updateState.result?.latest?.tag ? " · 작업을 마치고 1분간 입력이 없으면 업데이트 후 다시 시작합니다." : ""}{updateState.installation?.tag === updateState.result?.latest?.tag ? ` · ${updateState.message}` : ""}</span>{updateState.installSupported && <button disabled={busy || aiSession.activity.chat || aiSession.activity.planner} onClick={()=>installUpdate().catch(e=>setError(e.message))}>지금 설치하고 다시 시작</button>}<button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
           {journalNote && !["journal", "planner", "graph"].includes(section) && !attachment && <div className="classification-notice classification-controls">
             <span>이 기록을 폴더별로 정리할 수 있습니다.</span>
             <div ref={classificationHelpRef} className={`classification-action${classificationHelpDismissed ? " help-dismissed" : ""}`} onMouseEnter={()=>setClassificationHelpDismissed(false)} onFocusCapture={()=>setClassificationHelpDismissed(false)} tabIndex={busy||edits.blocked()||!classification.length ? 0 : undefined} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
@@ -2072,7 +2217,7 @@ export default function App() {
             <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
           </>}
           {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
-          <div className="document-area" onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
+          <div className="document-area" hidden={!!activeDocumentDraft && section === "files" && !attachment} onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
               <NotebookPen size={40} />
               <h2>저널은 개인 노트에 저장됩니다</h2>
@@ -2170,10 +2315,13 @@ export default function App() {
                 )}
               </div>
             ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || edits.blocked()} onError={setError}/>
-            : note ? (
+            : activeDocumentDraft ? null : note ? (
               <DocumentWorkspace workspace={workspace} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
                 fonts={fonts} onFontSettings={()=>{setSettingsTab("fonts");setModal("settings");}}
+                onMakeDocument={(source, id) => makeCopilotDocument({ ...source, title: captureTreeEntries.get(id)?.get(source.path)?.label ?? source.title }, id)}
+                canMakeDocument={(source, id) => vaults[id]?.purpose === "personal" && copilotSessionPath.test(source.path)}
+                onTabLink={tabDocumentLink} onTabLinkInserted={returnDraggedTab}
                 onChange={changeFile} onImportFiles={importFiles} onLink={followEditorLink} onPreviewLink={followLink}
                 disabled={busy}/>
             ) : (
@@ -2193,6 +2341,10 @@ export default function App() {
               </div>
             )}
           </div>
+          {documentDrafts.filter(draft => vaults[draft.vaultId]).map(draft => <CopilotDocument key={draft.id}
+            document={draft} hidden={activeDocumentDraft?.id !== draft.id || section !== "files" || !!attachment}
+            session={aiSession} prompts={documentPrompts} folders={vaults[draft.vaultId].folders ?? []}
+            onUpdate={updateDocumentDraft} onPersist={persistDocumentDraft} onSave={saveCopilotDocument} />)}
           <footer className="statusbar">
             <div
               className={`save-status ${status}`}
@@ -2452,10 +2604,22 @@ export default function App() {
       </div>}
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
-        <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>
-        {treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
+        <button role="menuitem" onClick={() => {
+          const parent = treeMenu.folder ? treeMenu.path : treeMenu.path.split("/").slice(0, -1).join("/");
+          setNewFolder({ vaultId: treeMenu.vaultId, parent, name: "", error: "" }); setTreeMenu(null); setModal("new-folder");
+        }}>폴더 추가</button>
+        {treeMenu.path && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
+        {treeMenu.path && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
         {treeMenu.canTrash && <button className="tree-trash" role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>}
       </div>}
+      {modal === "new-folder" && newFolder && <Modal title="폴더 추가" onClose={() => !newFolder.working && setModal(null)}>
+        <form className="new-note-form" onSubmit={addTreeFolder}>
+          <p>{spaceLabel(vaults[newFolder.vaultId])}{newFolder.parent && ` / ${newFolder.parent}`}</p>
+          <label>폴더 이름<input autoFocus value={newFolder.name} disabled={newFolder.working} onChange={event => setNewFolder({ ...newFolder, name: event.target.value })} /></label>
+          {newFolder.error && <p role="alert">{newFolder.error}</p>}
+          <div className="modal-actions"><button type="button" disabled={newFolder.working} onClick={() => setModal(null)}>취소</button><button className="primary-button" disabled={newFolder.working || !newFolder.name.trim()}>만들기</button></div>
+        </form>
+      </Modal>}
       {lastTrash && (
         <div className="undo-toast">
           {lastTrash.systemTrash ? "폴더를 시스템 휴지통으로 이동했습니다. 복구는 시스템 휴지통에서 할 수 있습니다." : "휴지통으로 이동했습니다."}{" "}
@@ -2519,14 +2683,14 @@ export default function App() {
           </form>
         </Modal>
       )}
-      {modal === "tree-copy" && crossCopy && vaults[crossCopy.source.vaultId] && vaults[crossCopy.vaultId] && (
-        <Modal title="다른 보관함에 복사" onClose={() => !busy && setModal(null)}>
-          <p>원본 · {spaceLabel(vaults[crossCopy.source.vaultId])} / {crossCopy.source.path}</p>
-          <p>대상 · {spaceLabel(vaults[crossCopy.vaultId])}{crossCopy.folder && ` / ${crossCopy.folder}`}</p>
-          <p className="muted">선택한 문서만 복사합니다. 연결된 문서와 첨부파일은 대상 보관함에 같은 내용으로 있어야 합니다.</p>
+      {modal === "tree-move" && treeMove && vaults[treeMove.source.vaultId] && vaults[treeMove.vaultId] && (
+        <Modal title="이동할까요?" onClose={() => !busy && setModal(null)}>
+          <p>원본 · {spaceLabel(vaults[treeMove.source.vaultId])} / {treeMove.source.path}</p>
+          <p>대상 · {spaceLabel(vaults[treeMove.vaultId])}{treeMove.folder && ` / ${treeMove.folder}`}</p>
+          <p className="muted">선택한 문서를 이 위치로 이동합니다. 연결된 문서의 링크도 확인합니다.</p>
           <div className="modal-actions">
             <button type="button" disabled={busy} onClick={() => setModal(null)}>취소</button>
-            <button type="button" className="primary-button" disabled={busy} onClick={() => transferTreeFile(crossCopy)}>복사</button>
+            <button type="button" className="primary-button" disabled={busy} onClick={() => transferTreeFile(treeMove)}>이동</button>
           </div>
         </Modal>
       )}
@@ -2618,10 +2782,7 @@ export default function App() {
         <input type="date" aria-label="과거 기록 기준 날짜" value={historyDate} onChange={e => { if (e.target.value) setHistoryDate(e.target.value); }}/>
         <NavigationPanel title="지난 기록" paths={onThisDay(model.notes,historyDate,{...journalPreferences.daily,locale:journalPreferences.locale}).map(n=>n.path)} onOpen={openNote}/>
       </Modal>}
-      {modal === "copilot-document" && canMakeCopilotDocument && <Modal title="문서로 만들기" wide className="conversation-document-modal" onClose={() => !busy && setModal(null)}>
-        <CopilotDocument key={note.path} source={{ ...note, title: captureTreeEntries.get(vault.id)?.get(note.path)?.label ?? note.title }} vaultId={vault.id}
-          session={aiSession} prompts={documentPrompts} onSave={saveCopilotDocument} />
-      </Modal>}
+
       {modal === "capture-history" && vault?.purpose === "personal" && (
         <Modal title="프로젝트별 기록" className="capture-history-modal" onClose={() => setModal(null)}>
           <CopilotJournalHistory state={captureState} onOpen={({path,heading,date}) => {
@@ -2817,7 +2978,7 @@ export default function App() {
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
             onEnable={(id, enabled) => invoke(api.enablePlugin({ vaultId: vault.id, id, enabled }))}
             onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
-          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
+          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onInstall={installUpdate} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
           {settingsTab === "git-workspace" && gitVault.id && <GitWorkspace key={gitVault.id} busy={busy} backupEnabled={gitSettingsStatus.enabled}
             onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
             onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: gitVault.id, path, staged }))}
