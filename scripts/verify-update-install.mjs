@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -70,11 +71,14 @@ try {
   if (app) console.error(await app.evaluate(() => ({ requests: globalThis.installRequests, responses: globalThis.closeResponses, state: globalThis.updateFixture })));
   throw error;
 } finally {
-  // The real updater shutdown is covered by verify-windows-installer. This fixture
-  // replaces install IPC and sends synthetic close requests; dispose its windows
-  // synchronously so teardown cannot race a final synthetic close notification.
-  await app?.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.destroy(); }).catch(() => {});
-  await app?.close();
+  // Real shutdown is covered by verify-windows-installer. This fixture replaces
+  // install IPC and sends synthetic close requests, so stop only its own process.
+  const child = app?.process();
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(10000) });
+    child.kill('SIGKILL');
+    await exited;
+  }
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 console.log('Closed the controlled update UI fixture.');
