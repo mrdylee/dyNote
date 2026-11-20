@@ -1569,6 +1569,16 @@ kbd {
   flex-wrap: wrap;
   gap: 6px;
 }
+.word-preview {
+  color: #393340;
+}
+.word-preview :is(p, table, blockquote) {
+  font-size: inherit;
+  line-height: inherit;
+}
+.word-preview :is(th, blockquote) {
+  color: inherit;
+}
 .word-preview img {
   max-width: 100%;
   height: auto;

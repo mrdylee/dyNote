@@ -37,6 +37,11 @@ try {
   assert.equal(hasMenu, true, "The File Open menu must exist");
   const dialog = page.getByRole("dialog", { name: path.basename(source), exact: true });
   await dialog.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
+  const article = dialog.getByRole("article", { name: "Word 미리보기" });
+  const bodySize = await article.evaluate(node => getComputedStyle(node).fontSize);
+  for (const selector of [":scope > p", "td p"]) {
+    assert.equal(await article.locator(selector).first().evaluate(node => getComputedStyle(node).fontSize), bodySize);
+  }
   await dialog.getByText(/임시 미리보기/).waitFor();
   await mkdir("output/playwright", { recursive: true });
   await page.screenshot({ path: "output/playwright/external-word-open.png" });

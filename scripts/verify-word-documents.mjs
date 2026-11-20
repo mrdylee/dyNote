@@ -39,6 +39,8 @@ try {
   const preview = page.getByRole("article", { name: "Word 미리보기" });
   await preview.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
   await preview.getByRole("table").getByText("SWRS-240 절연감시 요구사항").waitFor();
+  const bodySize = await preview.evaluate(node => getComputedStyle(node).fontSize);
+  assert.equal(await preview.locator("td p").first().evaluate(node => getComputedStyle(node).fontSize), bodySize);
   const image = preview.getByRole("img", { name: "검토용 이미지" });
   await image.waitFor();
   assert.equal(await image.evaluate(element => element.complete && element.naturalWidth === 1), true);
