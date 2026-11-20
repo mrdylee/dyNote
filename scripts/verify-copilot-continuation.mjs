@@ -105,7 +105,8 @@ try {
   await pane.dispatchEvent("drop", { dataTransfer: transfer, clientX: bounds.x + bounds.width - 2 });
   await transfer.dispose();
   await page.locator('.document-pane[data-document-path="Ref.md"]').waitFor();
-  await pane.hover(); await page.mouse.wheel(0, 1800);
+  // The comparison panes scroll independently. Send the wheel to the document itself.
+  await pane.locator(".pane-heading").hover(); await page.mouse.wheel(0, 1800);
   await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"]').scrollTop > 300);
   assert.equal(await pane.getByRole("button", { name: "변경 유지", exact: true }).evaluate(button => {
     const r = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
