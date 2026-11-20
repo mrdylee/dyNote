@@ -121,7 +121,7 @@ try {
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   await page.getByTitle(copilotPath, { exact: true }).click();
   await documentButton.click();
-  const compose = page.getByRole("dialog", { name: "문서로 만들기", exact: true });
+  const compose = page.getByRole("form", { name: "임시 생성 문서", exact: true });
   const choosePrompt = compose.getByRole("combobox", { name: "문서 프롬프트", exact: true });
   assert.equal(await choosePrompt.inputValue(), "default");
   await choosePrompt.selectOption({ label: "검증 절차" });
@@ -163,10 +163,10 @@ try {
   await start.click();
   const defaultRequest = await app.evaluate(() => globalThis.providerRequests.at(-1));
   assert.match(defaultRequest.prompt, /코드, 명령어, 수치와 조건/);
-  await compose.getByRole("button", { name: "닫기", exact: true }).click();
-  await compose.waitFor({ state: "hidden" });
+  await compose.getByRole("button", { name: "생성 중지", exact: true }).click();
+  await compose.getByRole("alert").filter({ hasText: "초안 만들기를 중지했습니다." }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.canceledProviderRequest), defaultRequest.requestId);
-  report.checks.push("Copilot document prompts survive reload; review and save without overwriting, open the original link, and cancel drafting on close");
+  report.checks.push("Copilot document prompts survive reload; review and save in a temporary tab without overwriting, open the original link, and explicitly cancel drafting");
   assert.deepEqual(report.errors, []);
   await page.screenshot({ path: "output/playwright/ai-providers.png" });
   await writeFile("output/playwright/ai-providers.json", JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
