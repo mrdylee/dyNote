@@ -52,6 +52,15 @@ test('failed or unresponsive helper is canceled before the app may quit', async 
     assert.equal(killed, true); assert.equal(await readFile(path.join(job.directory, 'cancel'), 'utf8'), '');
   }
 });
+test('launcher reports the native helper failure from its result file', async t => {
+  const job = await stageUpdate(await fixture(t));
+  await writeFile(path.join(job.directory, 'result.json'), '\uFEFF' + JSON.stringify({ installed: false, error: 'Native startup failure' }));
+  await assert.rejects(launchUpdate(job, { spawnProcess() {
+    const child = new EventEmitter(); child.kill = () => {};
+    queueMicrotask(() => child.emit('exit', 0));
+    return child;
+  }}), /Native startup failure/);
+});
 test('Windows helper acknowledges startup and cancels without running an installer', { skip: process.platform !== 'win32' }, async t => {
   const input = await fixture(t);
   const parent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
