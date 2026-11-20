@@ -1,14 +1,24 @@
-param([Parameter(Mandatory=$true)][string]$JobPath)
+param([Parameter(Mandatory=$true)][string]$JobPath, [switch]$Worker)
 $ErrorActionPreference = 'Stop'
 $jobDirectory = Split-Path -Parent $JobPath
 $job = Get-Content -LiteralPath $JobPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $relaunch = $false
 try {
+    if (!$Worker) {
+        # PowerShell cannot start with Node's DETACHED_PROCESS flag. Let Windows
+        # create an independent hidden console before the app exits.
+        $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', ('"' + $PSCommandPath + '"'), '-JobPath', ('"' + $JobPath + '"'), '-Worker')
+        Start-Process -FilePath "$PSHOME\powershell.exe" -ArgumentList $arguments -WindowStyle Hidden -WorkingDirectory $jobDirectory
+        exit 0
+    }
     # Capture the parent before acknowledging startup. Never terminate it to install.
     $parent = Get-Process -Id $job.parentPid -ErrorAction SilentlyContinue
     Set-Content -LiteralPath (Join-Path $jobDirectory 'ready') -Value 'ready'
     if ($parent -and !$parent.WaitForExit(120000)) { throw 'Dynote did not finish saving and exit.' }
-    if (Test-Path -LiteralPath (Join-Path $jobDirectory 'cancel')) { exit 1 }
+    if (Test-Path -LiteralPath (Join-Path $jobDirectory 'cancel')) {
+        Set-Content -LiteralPath (Join-Path $jobDirectory 'cancelled') -Value 'cancelled'
+        exit 1
+    }
     $relaunch = $true
     if ((Get-FileHash -LiteralPath $job.installer -Algorithm SHA256).Hash -ne $job.sha256) { throw 'Installer SHA256 verification failed.' }
     $installDirectory = Split-Path -Parent $job.executable

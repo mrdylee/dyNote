@@ -25,9 +25,9 @@ export async function launchUpdate(job, { spawnProcess = spawn, powershell = pat
   const logPath = path.join(job.directory, 'helper.log'), log = await open(logPath, 'w');
   let child, failure;
   try {
-    child = spawnProcess(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(job.directory, 'install.ps1'), '-JobPath', job.manifest], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd], shell: false });
+    child = spawnProcess(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(job.directory, 'install.ps1'), '-JobPath', job.manifest], { windowsHide: true, stdio: ['ignore', log.fd, log.fd], shell: false });
     child.once('error', error => { failure = error; });
-    child.once('exit', code => { failure ??= new Error(`업데이트 실행기가 종료되었습니다 (${code}).`); });
+    child.once('exit', code => { if (code !== 0) failure ??= new Error(`업데이트 실행기가 종료되었습니다 (${code}).`); });
   } finally { await log.close(); }
   const deadline = Date.now() + timeout;
   try {

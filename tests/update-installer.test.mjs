@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { stageUpdate, launchUpdate } from '../electron/update-installer.mjs';
 
 async function fixture(t) {
@@ -33,7 +34,7 @@ test('corrupt staging never creates a runnable job and removes partial files', a
 test('launcher waits for helper acknowledgment and passes paths as arguments without a shell', async t => {
   const job = await stageUpdate(await fixture(t)); let released = false;
   await launchUpdate(job, { spawnProcess(command, args, options) {
-    assert.equal(options.shell, false); assert.equal(options.detached, true);
+    assert.equal(options.shell, false); assert.equal(options.detached, undefined); assert.equal(options.windowsHide, true);
     assert.equal(args.at(-1), job.manifest); assert.ok(command.endsWith('powershell.exe'));
     const child = new EventEmitter(); child.unref = () => { released = true; }; child.kill = () => assert.fail('should not kill acknowledged helper');
     void writeFile(path.join(job.directory, 'ready'), 'ready');
@@ -57,7 +58,7 @@ test('launcher reports the native helper failure from its result file', async t 
   await writeFile(path.join(job.directory, 'result.json'), '\uFEFF' + JSON.stringify({ installed: false, error: 'Native startup failure' }));
   await assert.rejects(launchUpdate(job, { spawnProcess() {
     const child = new EventEmitter(); child.kill = () => {};
-    queueMicrotask(() => child.emit('exit', 0));
+    queueMicrotask(() => child.emit('exit', 1));
     return child;
   }}), /Native startup failure/);
 });
@@ -82,5 +83,10 @@ test('Windows helper acknowledges startup and cancels without running an install
     parent.kill();
     await parentExit;
     await helperExit;
+    for (let i = 0; i < 100; i++) {
+      if (await readFile(path.join(job.directory, 'cancelled'), 'utf8').catch(() => '')) break;
+      if (i === 99) throw new Error('Native helper did not acknowledge cancellation.');
+      await delay(100);
+    }
   }
 });
