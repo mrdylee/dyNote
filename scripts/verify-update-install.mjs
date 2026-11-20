@@ -42,8 +42,12 @@ try {
   assert.equal(await page.getByLabel('자동 설치 및 다시 시작', { exact: true }).isChecked(), true);
   await page.clock.fastForward(61000); assert.equal(await requests(), 0, 'open settings blocks automatic restart');
   await page.getByLabel('자동 설치 및 다시 시작', { exact: true }).uncheck();
+  // Complete native IPC before advancing a full minute on the renderer's fake clock.
+  await page.waitForFunction(() => { const input = document.querySelector('[aria-label="자동 설치 및 다시 시작"]'); return input && !input.disabled && !input.checked; });
   await page.keyboard.press('Escape'); await page.clock.fastForward(61000); assert.equal(await requests(), 0, 'disabled preference blocks automatic install');
-  await settings(); await page.getByLabel('자동 설치 및 다시 시작', { exact: true }).check(); await page.keyboard.press('Escape');
+  await settings(); await page.getByLabel('자동 설치 및 다시 시작', { exact: true }).check();
+  await page.waitForFunction(() => { const input = document.querySelector('[aria-label="자동 설치 및 다시 시작"]'); return input && !input.disabled && input.checked; });
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '나중에', exact: true }).click();
   await page.clock.fastForward(61000); assert.equal(await requests(), 0, 'Later defers this session');
   await page.reload(); await page.locator('.classification-notice').filter({ hasText: '다운로드 검증 완료' }).waitFor();
