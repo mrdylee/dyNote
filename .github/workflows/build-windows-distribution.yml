@@ -25,12 +25,15 @@ jobs:
       - run: npm run package:win
       - run: node scripts/verify-release-package.mjs win32-x64
       - run: node scripts/package-windows-distribution.mjs
-      - name: Verify installer and in-app update on Windows
+      - name: Verify Word previews, installer and in-app update on Windows
         shell: bash
         timeout-minutes: 12
         run: |
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
           export DYNOTE_PLAYWRIGHT_MODULE="$(node --input-type=module -e 'import {pathToFileURL} from "node:url";console.log(pathToFileURL(process.env.RUNNER_TEMP+"/dynote-ui-tools/node_modules/playwright/index.mjs").href)')"
+          export DYNOTE_EXECUTABLE="$(node -p "require('node:path').resolve('release/v${{ steps.version.outputs.number }}/Dynote-win32-x64/Dynote.exe')")"
+          node scripts/verify-word-documents.mjs
+          node scripts/verify-external-file-open.mjs
           node scripts/verify-windows-installer.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

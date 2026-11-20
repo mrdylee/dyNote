@@ -20,7 +20,7 @@ v0.19.0 베타에서는 Live Preview와 저널 피드에서 Mermaid를 볼 수 �
 
 Apple Silicon Mac에서는 `Dynote-0.19.0-macos-arm64.dmg`를 열고 Dynote를 Applications 폴더로 끌어 넣으세요. 기존 앱을 종료한 뒤 `/Applications/Dynote.app`을 실행합니다. 패키징 결과의 앱 경로:
 
-`release/v0.23.7/Dynote-darwin-arm64/Dynote.app`
+`release/v0.23.8/Dynote-darwin-arm64/Dynote.app`
 
 [그래프 기능·측정·검증 범위](docs/graph-validation.md)를 확인하세요.
 
@@ -28,7 +28,7 @@ Windows x64 ZIP의 **압축을 모두 푼 뒤**, `Dynote-win32-x64` 폴더 안�
 
 Windows 릴리스에 `Dynote-<버전>-windows-x64-Setup.exe`가 있으면 압축을 풀 필요 없이 설치할 수 있습니다. Setup은 관리자 권한을 요청하지 않고 `%LOCALAPPDATA%\Programs\Dynote`에 앱을 설치합니다. 기존 ZIP 앱을 종료한 뒤 설치하면 같은 계정의 노트와 설정을 이어서 사용할 수 있습니다. Windows의 **설정 → 앱 → 설치된 앱**에서 Dynote를 제거할 수 있으며, 노트와 설정은 보관됩니다. 앱 내 업데이트는 설치형에는 Setup, ZIP으로 실행 중인 앱에는 ZIP을 다운로드합니다.
 
-[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.23.7)에서 Mac arm64 DMG·ZIP, Windows x64 Setup·ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
+[GitHub Releases](https://github.com/mrdylee/dyNote/releases/tag/v0.23.8)에서 Mac arm64 DMG·ZIP, Windows x64 Setup·ZIP과 플랫폼별 SHA-256 파일을 받을 수 있습니다. Git 저장소에는 소스와 문서가 들어 있고 `release/` 실행 파일은 Git 이력에 포함하지 않습니다.
 
 앱의 시작 화면은 날짜별 저널이며 설정에서 마지막 문서 열기로 바꿀 수 있습니다. 앱을 켤 때와 실행 중 날짜가 바뀔 때, 기기의 오늘 날짜로 일간 저널을 만듭니다. 이미 있으면 그대로 열며, 개인과 팀 보관함이 모두 연결돼 있으면 개인 보관함에 만듭니다. **다른 폴더 열기** 또는 **설정 → 보관함**에서 노트 폴더를 선택하세요. 기존 경로가 없어도 임의로 다른 보관함으로 바꾸지 않습니다.
 
