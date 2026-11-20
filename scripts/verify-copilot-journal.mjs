@@ -24,9 +24,9 @@ const closeSettings=async()=>{
  await settings().getByRole('button',{name:'닫기',exact:true}).click();
  await settings().waitFor({state:'hidden'});
 };
-const importAll=async()=>{
- await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true}).click();
- await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true,disabled:false}).waitFor();
+const importSelected=async()=>{
+ await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
+ await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true,disabled:false}).waitFor();
 };
 const captureState=()=>page.evaluate(async()=>{const {value}=await window.notes.snapshot();return (await window.notes.captureStatus({vaultId:value.id})).value;});
 const pauseCaptureScan=()=>app.evaluate((_electron,directory)=>{
@@ -68,6 +68,9 @@ try{
  await page.getByRole('region',{name:'문서 Shared.md',exact:true}).waitFor();
  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();await settings().waitFor();
+ await mkdir(path.join(source,'other/chatSessions'),{recursive:true});
+ await writeFile(path.join(source,'other/workspace.json'),JSON.stringify({folder:'vscode-remote://wsl%2BDebian/home/dev/Other'}));
+ await writeFile(path.join(source,'other/chatSessions/other.json'),JSON.stringify({version:3,sessionId:'other',customTitle:'선택하지 않은 대화',requests:[{requestId:'q',timestamp:Date.now()-86400000,message:{text:'선택하지 않은 원문'},modelState:{value:1}}]}));
  await app.evaluate(({dialog},source)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[source]});},source);
  const sourceButton=settings().getByRole('button',{name:'기록 폴더 선택',exact:true,disabled:false});
  await sourceButton.waitFor();
@@ -77,22 +80,36 @@ try{
   await settings().getByRole('button',{name:'WSL 기록 폴더 선택',exact:true}).click();
   await settings().getByRole('alert').getByText('WSL 배포판의 session-state 폴더를 선택해 주세요.',{exact:true}).waitFor();
  });
- await check('whole-folder import has no project or session selection and reports an empty source',async()=>{
+ await check('project rows and bulk actions select projects, and an empty selected source is reported',async()=>{
   assert.equal(await settings().getByRole('group',{name:'가져올 기간',exact:true}).count(),0);
   assert.equal(await settings().getByRole('button',{name:'세션 불러오기',exact:true}).count(),0);
-  assert.equal(await settings().locator('.capture-project input').count(),0);
-  await importAll();
-  await settings().getByRole('status').filter({hasText:'기록 폴더에 새로 가져올 완료된 대화가 없습니다.'}).waitFor();
+  const projects=settings().getByRole('group',{name:'가져올 프로젝트',exact:true});
+  const ubuntu=projects.getByRole('checkbox',{name:/WSL \(Ubuntu\)/});
+  const debian=projects.getByRole('checkbox',{name:/WSL \(Debian\)/});
+  const selectAll=projects.getByRole('button',{name:'전체 선택',exact:true});
+  const clearAll=projects.getByRole('button',{name:'전체 해제',exact:true});
+  await selectAll.click();
+  assert.equal(await ubuntu.isChecked(),true);
+  assert.equal(await debian.isChecked(),true);
+  await clearAll.click();
+  assert.equal(await ubuntu.isChecked(),false);
+  assert.equal(await debian.isChecked(),false);
+  assert.equal(await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).isDisabled(),true);
+  await projects.getByText('WSL (Ubuntu) · /home/dev/WSL Work',{exact:true}).click();
+  assert.equal(await ubuntu.isChecked(),true);
+  await importSelected();
+  await settings().getByRole('status').filter({hasText:'새로 가져올 완료된 대화가 없습니다.'}).waitFor();
   assert.equal((await captureState()).records.length,0);
  });
  await put('first','검토 대화','첫 질문 원문');
- await importAll();
+ await importSelected();
  await page.waitForFunction(async()=>{
   const {value}=await window.notes.snapshot();
   return (await window.notes.captureStatus({vaultId:value.id})).value?.records.length===1;
  });
- await settings().getByText('기록 폴더의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
+ await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
  await closeSettings();
+ await rm(path.join(source,'other'),{recursive:true});
  let state=await captureState(),record=state.records[0];
  await check('manual import opened from a team document shows and writes only the personal journal',async()=>{
   assert.equal(state.enabled,false);assert.equal(state.records.length,1);assert.equal(record.sessions.length,1);
@@ -197,8 +214,8 @@ try{
  await check('a title delete button removes only that conversation and reimport cannot revive it',async()=>{
   await page.waitForFunction(()=>document.querySelector('.capture-record-title')?.textContent.includes('1건'));
   await page.getByRole('button',{name:'가져오기',exact:true}).click();
-  await importAll();
-  await settings().getByText('기록 폴더에 새로 가져올 완료된 대화가 없습니다.',{exact:true}).waitFor();
+  await importSelected();
+  await settings().getByText('새로 가져올 완료된 대화가 없습니다.',{exact:true}).waitFor();
   await closeSettings();
   state=await captureState();assert.equal(state.records[0].sessions.length,1);const content=await readFile(path.join(vault,secondPath),'utf8');assert.match(content,/두 번째 질문/);assert.doesNotMatch(content,/첫 질문 원문/);
   await assert.rejects(readFile(path.join(vault,firstPath)),{code:'ENOENT'});
@@ -207,8 +224,8 @@ try{
  await check('whole-folder import appends only new messages before the next hourly run',async()=>{
   await put('second','보존할 두 번째 대화','교체하면 안 되는 질문','즉시 가져올 첫 질문','즉시 가져올 두 번째 질문');
   await page.getByRole('button',{name:'가져오기',exact:true}).click();
-  await importAll();
-  await settings().getByText('기록 폴더의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
+  await importSelected();
+  await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
   await closeSettings();
   const content=await readFile(path.join(vault,secondPath),'utf8');
   assert.match(content,/### 내 프롬프트\n\n두 번째 질문/);assert.doesNotMatch(content,/교체하면 안 되는 질문/);
@@ -236,7 +253,7 @@ try{
  await writeFile(configFile,JSON.stringify(config));
  app=await launch();await setup();
  await page.getByRole('button',{name:'가져오기',exact:true}).click();
- await importAll();
+ await importSelected();
  await check('deletion exclusions survive restart and a whole-folder import',async()=>{
   assert.equal((await captureState()).records.length,0);
   await assert.rejects(readFile(path.join(vault,secondPath)),{code:'ENOENT'});
@@ -257,16 +274,16 @@ try{
   await writeFile(unreadable,JSON.stringify({version:99,sessionId:'unreadable',requests:[]}));
   await page.getByRole('button',{name:'Copilot 대화 자동 저장 설정',exact:true}).click();
   await settings().getByText(wslRoot,{exact:true}).waitFor();
-  await importAll();
-  await settings().getByText('기록 폴더의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
+  await importSelected();
+  await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
   await settings().getByRole('alert').filter({hasText:'VS Code 대화 일부를 읽지 못해 가져오기에서 제외했습니다.'}).waitFor();
   const [imported]=(await captureState()).records;
   assert.equal(imported.date,date);
   assert.equal(imported.journalPath,`Journal/${date}.md`);
   const content=await readFile(path.join(vault,imported.sessions[0].path),'utf8');
   assert.match(content,/어제 작성한 질문/);assert.doesNotMatch(content,/DO NOT IMPORT THINKING/);
-  await importAll();
-  await settings().getByText('기록 폴더에 새로 가져올 완료된 대화가 없습니다.',{exact:true}).waitFor();
+  await importSelected();
+  await settings().getByText('새로 가져올 완료된 대화가 없습니다.',{exact:true}).waitFor();
   assert.equal((await readFile(path.join(vault,imported.journalPath),'utf8')).match(/^<!-- dynote:copilot /gm).length,1);
   await rm(unreadable);
   await closeSettings();
@@ -308,8 +325,9 @@ try{
   await putSession('other','zzz-continued','다른 배포판의 세션',[request('a',+pastAt,'별개 프로젝트 질문')]);
   await page.getByRole('button',{name:'Copilot 대화 자동 저장 설정',exact:true}).click();
   await settings().getByText('WSL (Debian) · /home/dev/WSL Work',{exact:true}).waitFor();
-  await importAll();
-  await settings().getByText('기록 폴더의 대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
+ await settings().getByRole('button',{name:'전체 선택',exact:true}).click();
+  await importSelected();
+  await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
   await settings().screenshot({path:path.join(output,'folder-import.png')});
   await closeSettings();
   const {projects,records}=await captureState();

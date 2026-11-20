@@ -37,13 +37,15 @@ try{
   await page.getByRole('button',{name:'설정',exact:true}).click();
   await settings().getByRole('button',{name:'Copilot 대화 자동 저장',exact:true}).click();
   assert.equal(await settings().getByRole('button',{name:'세션 불러오기',exact:true}).count(),0);
-  assert.equal(await settings().getByRole('group',{name:'가져올 프로젝트',exact:true}).count(),0);
-  await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true}).waitFor();
+  await settings().getByRole('group',{name:'가져올 프로젝트',exact:true}).waitFor();
+  await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).waitFor();
  };
  await setDraft(teamVault.id);await openSettings();
  await app.evaluate(({dialog},source)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[source]});},source);
  await settings().getByRole('button',{name:'기록 폴더 선택',exact:true}).click();
- await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true,disabled:false}).waitFor();
+ await settings().getByRole('button',{name:'전체 선택',exact:true}).click();
+ await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
+ await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
  assert.equal(await settings().getByRole('alert').count(),0,'unrelated team drafts must not block personal imports');
  const status=await page.evaluate(async id=>(await window.notes.captureStatus({vaultId:id})).value,personalVault.id);
  assert.equal(status.records.length,1);
@@ -52,14 +54,14 @@ try{
  assert.deepEqual(await page.evaluate(id=>JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`)),teamVault.id),drafts[teamVault.id]);
  await settings().getByRole('button',{name:'닫기',exact:true}).click();
  await setDraft(personalVault.id);await openSettings();
- assert.equal(await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true}).isDisabled(),true);
+ assert.equal(await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).isDisabled(),true);
  await settings().getByRole('button',{name:'미확정 변경 검토: Home.md',exact:true}).click();
  await settings().waitFor({state:'hidden'});
  await page.getByRole('button',{name:'변경 되돌리기',exact:true}).click();
  await page.getByLabel('AI 실시간 변경',{exact:true}).waitFor({state:'hidden'});
  assert.equal(await readFile(path.join(personal,'Home.md'),'utf8'),'# Original\n');
  await openSettings();
- assert.equal(await settings().getByRole('button',{name:'전체 대화 가져오기',exact:true}).isDisabled(),false);
+ assert.equal(await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).isDisabled(),false);
  assert.deepEqual(errors,[]);
- console.log('Copilot capture: choosing a folder imports all chats without session selection; team drafts preserved; own drafts block writes and can be reviewed without losing content.');
+ console.log('Copilot capture: selecting projects imports their chats without session selection; team drafts preserved; own drafts block writes and can be reviewed without losing content.');
 }finally{await app?.close();await rm(root,{recursive:true,force:true});}

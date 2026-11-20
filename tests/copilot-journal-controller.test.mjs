@@ -93,6 +93,17 @@ test('whole-folder import includes every project and date and preserves deletion
  assert.equal((await f.controller.sync(f.vault,{},true,options)).status.records.length,1);
  await assert.rejects(readFile(path.join(f.vault.root,deleted.sessions[0].path)),{code:'ENOENT'});
 });
+test('manual history import only reads explicitly selected projects even with automatic whole-folder settings',async t=>{
+ const f=await fixture(t);await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
+ await f.put('old','지난 프로젝트 대화',f.now()-86400000);
+ await f.put('other','다른 프로젝트의 과거 대화',f.now()-2*86400000,path.join(f.source,'other/chatSessions/other.json'));
+ await assert.rejects(f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:[]}),/프로젝트를 선택/);
+ await assert.rejects(f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:['missing']}),/프로젝트를 선택/);
+ const options={allSessions:true,projectIds:['project']},result=await f.controller.sync(f.vault,{},true,options);
+ assert.deepEqual(result.status.records.map(record=>record.label),['Work']);
+ assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/지난 프로젝트 대화/);
+ assert.equal((await f.controller.sync(f.vault,{},true,options)).changed,false);
+});
 test('automatic whole-folder capture discovers new projects after activation',async t=>{
  const f=await fixture(t);
  const status=await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
@@ -116,6 +127,18 @@ test('saving whole-folder settings preserves the activation time for newly disco
  const result=await f.controller.sync(f.vault,{});
  assert.equal(result.status.records.length,1);
  assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/활성화 후 설정 저장 전 대화/);
+});
+test('choosing a subset of automatic whole-folder projects keeps their activation time',async t=>{
+ const f=await fixture(t);await f.controller.configure(f.vault,{enabled:true,allProjects:true},true);
+ const activated=f.now();f.advance(1000);
+ await mkdir(path.join(f.source,'new/chatSessions'),{recursive:true});
+ await writeFile(path.join(f.source,'new/workspace.json'),JSON.stringify({folder:pathToFileURL(path.join(f.root,'New')).href}));
+ await f.put('new','활성화 뒤에 생긴 프로젝트 대화',activated+1,path.join(f.source,'new/chatSessions/new.json'));
+ await f.put('old','해제한 프로젝트 대화',activated+2);
+ await f.controller.configure(f.vault,{enabled:true,projects:['new']},true);
+ const result=await f.controller.sync(f.vault,{});
+ assert.deepEqual(result.status.records.map(record=>record.label),['New']);
+ assert.match(await readFile(path.join(f.vault.root,result.status.records[0].sessions[0].path),'utf8'),/활성화 뒤에 생긴 프로젝트 대화/);
 });
 test('whole-folder import recovers an interrupted batch and continues with newly discovered sessions',async t=>{
  const f=await fixture(t);await f.configure(false);await f.put();

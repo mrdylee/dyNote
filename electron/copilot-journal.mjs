@@ -123,7 +123,7 @@ export class CopilotJournal{
     })),
    })),trashId:config.trashId??null};
  }
- async setSource(vault,root){const config=clone(this.config(vault));config.sourceRoot=await realpath(root);if(!(await lstat(config.sourceRoot)).isDirectory())throw new Error('VS Code 기록 폴더를 선택해 주세요.');config.enabled=false;config.projects={};await this.persist(vault,config);return this.status(vault);}
+ async setSource(vault,root){const config=clone(this.config(vault));config.sourceRoot=await realpath(root);if(!(await lstat(config.sourceRoot)).isDirectory())throw new Error('VS Code 기록 폴더를 선택해 주세요.');config.enabled=false;config.allProjects=false;config.projects={};await this.persist(vault,config);return this.status(vault);}
  async setWslSource(vault,directory){
   const distro=wslDistro(directory);
   const problem=()=>new Error('WSL 배포판의 session-state 폴더를 선택해 주세요.');
@@ -141,7 +141,7 @@ export class CopilotJournal{
   if(input.enabled&&!allProjects&&!projectIds.length)throw new Error('자동 기록할 프로젝트를 선택해 주세요.');
   const config=clone(previous);config.enabled=input.enabled;config.allProjects=allProjects;
   if(allProjects)config.since=input.enabled&&(!previous.enabled||!previous.allProjects)?this.now():previous.since??this.now();
-  config.projects=Object.fromEntries(projectIds.map(id=>[id,{since:allProjects?config.since:input.enabled&&(!previous.enabled||!Object.hasOwn(previous.projects,id))?this.now():previous.projects[id]?.since??this.now()}]));
+  config.projects=Object.fromEntries(projectIds.map(id=>[id,{since:allProjects?config.since:input.enabled&&!previous.enabled?this.now():previous.projects[id]?.since??(previous.allProjects?previous.since:undefined)??this.now()}]));
   await this.persist(vault,config);return this.status(vault);
  }
  async sources(root,workspace,errors){
@@ -300,9 +300,15 @@ export class CopilotJournal{
   const previous=this.config(vault),{pendingCapture,...config}=previous;
   if(pendingCapture)return this.commit(vault,previous,{...config,...pendingCapture});
  }
- async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false}={}){
+ async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false,projectIds}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
   const migrating=legacyLayout(previous),importAll=manual&&allSessions===true;
+  let available,requested;
+  if(importAll&&projectIds!==undefined){
+   available=await this.projects(previous.sourceRoot);
+   if(!Array.isArray(projectIds)||!projectIds.length||projectIds.some(id=>!available.some(project=>project.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
+   requested=new Set(projectIds);
+  }
   if(!previous.pendingCapture&&!migrating&&!importAll&&!previous.allProjects&&!Object.keys(previous.projects).length){if(manual)throw new Error('설정의 Copilot 대화 자동 저장에서 프로젝트를 선택해 주세요.');return {changed:false,status:await this.status(vault)};}
   const today=localDate(this.now());
   if(manual&&sessionIds!==undefined&&(!Array.isArray(sessionIds)||!sessionIds.length||sessionIds.some(id=>typeof id!=='string'||!/^[a-f0-9]{20}$/.test(id))))throw new Error('가져올 세션을 선택해 주세요.');
@@ -311,7 +317,7 @@ export class CopilotJournal{
    if(checkOnly)return {pending:true};
    const recovered=await this.finishPending(vault);
    if(!selected&&!importAll)return recovered;
-   const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions});
+   const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions,projectIds});
    return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
   if(manual&&migrating&&!selected&&!importAll)return this.commit(vault,previous,clone(previous));
@@ -321,7 +327,7 @@ export class CopilotJournal{
   const sessions=sessionRecords(next.records),updated=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
-  const projects=(await this.projects(previous.sourceRoot)).filter(project=>importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
+  const projects=(available??await this.projects(previous.sourceRoot)).filter(project=>requested?requested.has(project.id):importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
   const sources=await this.projectSessions(previous,projects,selected!==null||importAll),matched=new Set();
   const nativeKeys=new Set(sources.sessions.map(({project,source})=>captureId(project.key,source.sessionId)));
   for(const session of sessions.values())if(session.sourceKey)nativeKeys.add(session.sourceKey);
