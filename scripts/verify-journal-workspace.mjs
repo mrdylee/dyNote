@@ -40,8 +40,7 @@ try {
     await transfer.dispose();
   };
   await drag('B');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
-  await drag('C');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
-  assert.equal(await page.locator('.document-pane').count(),3);
+  assert.equal(await page.locator('.document-pane').count(),2);
   const canceled=await page.evaluateHandle(()=>{const d=new DataTransfer();d.setData('application/x-dynote-document','D.md');return d;});
   await page.locator('.document-pane').last().dispatchEvent('dragover',{dataTransfer:canceled,clientX:0});
   await page.locator('.pane-drop-target').waitFor({state:'visible'});
@@ -49,6 +48,8 @@ try {
   await page.locator('body').dispatchEvent('dragend',{dataTransfer:canceled});await canceled.dispose();
   await page.locator('.pane-drop-target').waitFor({state:'hidden'});
   assert.equal(await page.locator('.pane-drop-target').count(),0,'canceled drag clears preview without changing layout');
+  await drag('C');await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+  assert.equal(await page.locator('.document-pane').count(),3);
   await drag('D');assert.equal(await page.locator('.document-pane').count(),3);
   const internal=await page.evaluateHandle(()=>{const d=new DataTransfer();d.setData('application/x-dynote-document','B.md');d.setData('text/plain','SHOULD_NOT_INSERT');return d;});
   await page.getByRole('region',{name:'문서 A.md',exact:true}).locator('.cm-content').dispatchEvent('drop',{dataTransfer:internal});

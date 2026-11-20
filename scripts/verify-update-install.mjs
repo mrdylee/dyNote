@@ -69,4 +69,12 @@ try {
 } catch (error) {
   if (app) console.error(await app.evaluate(() => ({ requests: globalThis.installRequests, responses: globalThis.closeResponses, state: globalThis.updateFixture })));
   throw error;
-} finally { await app?.close(); await rm(root, { recursive: true, force: true }); }
+} finally {
+  // The real updater shutdown is covered by verify-windows-installer. This fixture
+  // replaces install IPC and sends synthetic close requests; dispose its windows
+  // synchronously so teardown cannot race a final synthetic close notification.
+  await app?.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.destroy(); }).catch(() => {});
+  await app?.close();
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+console.log('Closed the controlled update UI fixture.');

@@ -78,6 +78,10 @@ try {
     await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 10 });
     await folder.and(page.locator('[data-drop-label="이동"]')).waitFor();
   } finally { await page.mouse.up(); }
+  const move = page.getByRole('dialog', { name: '이동할까요?', exact: true });
+  await move.waitFor();
+  assert.match(await readFile(path.join(personal, 'Template.md'), 'utf8'), /Template for/);
+  await move.getByRole('button', { name: '이동', exact: true }).click();
   await personalTree.getByTitle('Templates/Template.md', { exact: true }).waitFor();
   assert.equal(await page.evaluate(id => JSON.parse(localStorage.getItem(`dynote.journal.${id}`)).daily.template, personalId), 'Templates/Template.md');
 
