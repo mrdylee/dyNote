@@ -37,7 +37,9 @@ await writeFile(note, original);
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({vaultRoot: vault, vaultPurposes: {[vault]: 'personal'}}));
 await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({preferences: {enabled: false, autoInstall: false, downloadDirectory: downloads}}));
 const launch = async (executable, verify) => {
+  console.log('Opening installer test app:', executable);
   const app = await electron.launch({executablePath: executable, env: {...process.env, OPEN_NOTES_DATA: profile}});
+  app.process().stderr.on('data', data => process.stderr.write(data));
   try {
     const page = await app.firstWindow();
     page.setDefaultTimeout(30000);
@@ -48,10 +50,24 @@ const launch = async (executable, verify) => {
     await page.getByRole('button', {name: '읽기 보기', exact: true}).click();
     await page.getByText('Preserve this note.', {exact: true}).waitFor();
     assert.equal(await page.evaluate(async () => (await window.notes.updateState()).value.preferences.enabled), false);
+    console.log('PASS app opened the preserved note and update preferences');
     await verify?.(app, page);
+  } catch (error) {
+    console.error('Installer app verification failed:', error);
+    throw error;
   } finally {
     const child = app.process();
-    if (child.exitCode === null && child.signalCode === null) await app.close();
+    if (child.exitCode === null && child.signalCode === null) {
+      let timer;
+      try {
+        await Promise.race([app.close(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Installer test app did not close within 15 seconds.')), 15000);
+        })]);
+      } catch (error) {
+        child.kill();
+        throw error;
+      } finally { clearTimeout(timer); }
+    }
     if (child.exitCode === null && child.signalCode === null) {
       await once(child, 'exit', {signal: AbortSignal.timeout(15000)});
     }
@@ -108,8 +124,9 @@ try {
   const previousRuns = new Set((await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).run));
   await launch(installed, async (app, page) => {
     installingPid = app.process().pid;
-    await app.evaluate(({shell}, {feed, name, setup}) => {
+    await app.evaluate(({shell, dialog}, {feed, name, setup}) => {
       shell.showItemInFolder = file => {globalThis.shownUpdate = file;};
+      dialog.showErrorBox = (title, message) => console.error('Installer app error:', title, message);
       globalThis.fetch = async url => {
         if (String(url).startsWith('https://api.github.com/')) return Response.json(feed);
         if (!String(url).endsWith('/' + name)) throw new Error('The installed app requested the wrong update asset.');
@@ -131,10 +148,12 @@ try {
     assert.equal(path.dirname(downloaded).toLowerCase(), downloads.toLowerCase());
     assert.ok(downloaded.endsWith(name));
     assert.equal('sha256:' + await hash(downloaded), digest);
+    console.log('PASS installed app downloaded and verified Setup');
     await reveal.click();
     await page.waitForFunction(() => !document.querySelector('.update-settings input[type="checkbox"]')?.disabled);
     assert.equal(await app.evaluate(() => globalThis.shownUpdate), downloaded);
     const exited = once(app.process(), 'exit', {signal: AbortSignal.timeout(60000)});
+    console.log('Requesting installation and waiting for the app to exit');
     await updates.getByRole('button', {name: '지금 설치하고 다시 시작', exact: true}).click();
     await exited;
     installerJob = JSON.parse(await readFile(path.join(profile, 'updates', 'settings.json'), 'utf8')).installation.directory;
