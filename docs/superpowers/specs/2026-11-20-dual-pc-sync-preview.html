@@ -61,26 +61,26 @@ select{display:block;margin-top:5px}.caption{margin-top:16px;color:#65686d;font-
    <button data-theme="blue" style="--dot:#426eb4" aria-pressed="true">Cloud Blue</button><button data-theme="sage" style="--dot:#47745d" aria-pressed="false">Sage Green</button>
    <button data-theme="lavender" style="--dot:#735cc2" aria-pressed="false">Soft Lavender</button><button data-theme="sand" style="--dot:#8c633c" aria-pressed="false">Warm Sand</button>
   </div></fieldset>
-  <label>상단 바 미리보기<select id="scenario"><option value="ahead">업로드 대기</option><option value="synced">동기화 완료</option><option value="behind">원격 변경</option><option value="diverged">받을 커밋과 올릴 커밋</option><option value="localOnly">로컬 커밋 전용</option><option value="conflict">충돌</option><option value="offline">오프라인</option></select></label>
+  <label>상단 바 미리보기<select id="scenario"><option value="ahead">업로드 대기</option><option value="synced">동기화 완료</option><option value="behind">원격 변경</option><option value="diverged">받을 커밋과 올릴 커밋</option><option value="rewritten">원격 이력 변경</option><option value="localOnly">로컬 커밋 전용</option><option value="conflict">충돌</option><option value="offline">오프라인</option></select></label>
  </div>
  <p class="caption">PC·테마·상태를 바꾸어 비교할 수 있습니다. 상단의 Git 동작은 화면 예시입니다.</p>
 </main>
 <script>
 const themes={blue:['#f4f8fd','#426eb4'],sage:['#f4f8f5','#47745d'],lavender:['#f8f5fc','#735cc2'],sand:['#fbf7f0','#8c633c']};
-const devices={cloud:{name:'Cloud PC',icon:'☁',theme:'blue',states:{personal:'ahead',team:'synced'}},local:{name:'Local PC',icon:'▣',theme:'sage',states:{personal:'behind',team:'synced'}}};
-const states={localOnly:['로컬 커밋 전용','로컬 커밋'],diverged:['받을 커밋 1개 · 올릴 커밋 2개','↻ 동기화'],ahead:['올릴 커밋 2개','↻ 동기화'],synced:['원격과 일치 · 10:42 확인','↻ 동기화'],behind:['받을 커밋 1개','↻ 동기화'],conflict:['충돌 1건','충돌 검토'],offline:['오프라인 · 09:42 마지막 확인','다시 확인']};
+const devices={cloud:{name:'Cloud PC',icon:'☁',theme:'blue',vault:'personal',states:{personal:'ahead',team:'synced'}},local:{name:'Local PC',icon:'▣',theme:'sage',vault:'personal',states:{personal:'behind',team:'synced'}}};
+const states={rewritten:['원격 이력 변경 · 검토 필요','원격 이력 검토'],localOnly:['로컬 커밋 전용','로컬 커밋'],diverged:['받을 커밋 1개 · 올릴 커밋 2개','↻ 동기화'],ahead:['올릴 커밋 2개','↻ 동기화'],synced:['원격과 일치 · 10:42 확인','↻ 동기화'],behind:['받을 커밋 1개','↻ 동기화'],conflict:['충돌 1건','충돌 검토'],offline:['오프라인 · 09:42 마지막 확인','다시 확인']};
 const byId=id=>document.getElementById(id);
 let selected='cloud';
-const activeVault=()=>byId('vault').value;
 function render(){
  const device=devices[selected],panel=byId('window'),[wash,accent]=themes[device.theme];
- const vault=activeVault(), state=device.states[vault];
+ const vault=device.vault, state=device.states[vault];
+ byId('vault').value=vault;
  for(const name of ['personal','team']){
   byId(name+'-nav').hidden=name!==vault;
   byId(name+'-article').hidden=name!==vault;
  }
  panel.style.setProperty('--wash',wash);panel.style.setProperty('--accent',accent);
- panel.classList.toggle('conflict',state==='conflict');
+ panel.classList.toggle('conflict',state==='conflict'||state==='rewritten');
  byId('device-name').textContent=device.name;byId('icon').textContent=device.icon;
  byId('status').textContent=states[state][0];byId('action').textContent=states[state][1];
  byId('push').style.opacity=state==='ahead'?'1':'0.45';byId('scenario').value=state;
@@ -89,8 +89,8 @@ function render(){
 }
 document.querySelectorAll('[data-device]').forEach(btn=>btn.onclick=()=>{selected=btn.dataset.device;render()});
 document.querySelectorAll('[data-theme]').forEach(btn=>btn.onclick=()=>{devices[selected].theme=btn.dataset.theme;render()});
-byId('vault').onchange=render;
-byId('scenario').onchange=event=>{devices[selected].states[activeVault()]=event.target.value;render()};
+byId('vault').onchange=event=>{devices[selected].vault=event.target.value;render()};
+byId('scenario').onchange=event=>{devices[selected].states[devices[selected].vault]=event.target.value;render()};
 render();
 </script>
 </html>
