@@ -44,7 +44,7 @@ export async function launchUpdate(job, { spawnProcess = spawn, powershell = pat
     const result = await readFile(path.join(job.directory, 'result.json'), 'utf8')
       .then(value => JSON.parse(value.replace(/^\uFEFF/, ''))).catch(() => null);
     const details = result?.error || await readFile(logPath, 'utf8').catch(() => '');
-    if (details.trim()) error.message += '\n' + details.trim().slice(-2000);
+    if (details.trim()) throw new Error(error.message + '\n' + details.trim().slice(-2000), { cause: error });
     throw error;
   }
 }

@@ -70,6 +70,10 @@ test('Windows helper acknowledges startup and cancels without running an install
   try {
     await launchUpdate(job, { spawnProcess(...args) { helper = spawn(...args); return helper; } });
     assert.equal((await readFile(path.join(job.directory, 'ready'), 'utf8')).trim(), 'ready');
+  } catch (error) {
+    console.error('Windows helper diagnostics:', error.message, await readdir(job.directory));
+    for (const name of ['helper.log', 'result.json']) console.error(name, await readFile(path.join(job.directory, name), 'utf8').catch(() => '(missing)'));
+    throw error;
   } finally {
     await writeFile(path.join(job.directory, 'cancel'), '');
     const parentExit = once(parent, 'exit');
