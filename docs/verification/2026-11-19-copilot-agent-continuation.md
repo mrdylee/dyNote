@@ -22,7 +22,7 @@
 - 고정 버튼은 실제 휠 스크롤 후 화면 위치와 클릭 가능 여부를 읽기·편집·분할 보기 및 두 문서 나란히 보기에서 확인했다.
 - 후속 편집 실패와 스크롤 버튼 이탈을 수정 전에 재현했다. 회귀 검증에서 발견한 입력 직후 전송의 저장 버전 갱신 문제도 별도 테스트로 재현하고 수정했다.
 
-UI 실행 시 `DYNOTE_PLAYWRIGHT_MODULE=/Users/james_black/.npm/_npx/31e32ef8478fbf80/node_modules/playwright/index.mjs`를 지정했다.
+UI 실행 시 `DYNOTE_PLAYWRIGHT_MODULE`에 설치된 Playwright 모듈 경로를 지정했다.
 
 ## 결과 파일
 

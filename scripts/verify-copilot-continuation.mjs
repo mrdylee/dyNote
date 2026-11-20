@@ -18,7 +18,9 @@ try {
   const personalVault = await Vault.open(personal, profile), teamVault = await Vault.open(team, profile);
   const teamNote = (await teamVault.documentSnapshot()).notes[0];
   const teamDraft = { path: teamNote.path, kind: "edit", original: teamNote.content, content: teamNote.content + "Pending team text\n", aiContent: teamNote.content + "Pending team text\n", revision: teamNote.revision, userEdited: false };
-  app = await electron.launch({ executablePath: path.resolve("node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"), args: ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
+  const packaged = process.env.DYNOTE_EXECUTABLE;
+  const executablePath = packaged || (await import("electron")).default;
+  app = await electron.launch({ executablePath, args: packaged ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
   const page = await app.firstWindow(); page.setDefaultTimeout(12000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 900));
   page.on("pageerror", error => report.errors.push(error.message));
