@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, rm, open } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -22,10 +22,13 @@ export async function stageUpdate({ file, asset, tag, directory, executable, par
 }
 
 export async function launchUpdate(job, { spawnProcess = spawn, powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), timeout = 10000 } = {}) {
-  const child = spawnProcess(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(job.directory, 'install.ps1'), '-JobPath', job.manifest], { detached: true, windowsHide: true, stdio: 'ignore', shell: false });
-  let failure;
-  child.once('error', error => { failure = error; });
-  child.once('exit', code => { failure ??= new Error(`업데이트 실행기가 종료되었습니다 (${code}).`); });
+  const logPath = path.join(job.directory, 'helper.log'), log = await open(logPath, 'w');
+  let child, failure;
+  try {
+    child = spawnProcess(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(job.directory, 'install.ps1'), '-JobPath', job.manifest], { detached: true, windowsHide: true, stdio: ['ignore', log.fd, log.fd], shell: false });
+    child.once('error', error => { failure = error; });
+    child.once('exit', code => { failure ??= new Error(`업데이트 실행기가 종료되었습니다 (${code}).`); });
+  } finally { await log.close(); }
   const deadline = Date.now() + timeout;
   try {
     while (Date.now() < deadline) {
@@ -38,6 +41,8 @@ export async function launchUpdate(job, { spawnProcess = spawn, powershell = pat
   } catch (error) {
     await writeFile(path.join(job.directory, 'cancel'), '').catch(() => {});
     child.kill();
+    const details = await readFile(logPath, 'utf8').catch(() => '');
+    if (details.trim()) error.message += '\n' + details.trim().slice(-2000);
     throw error;
   }
 }

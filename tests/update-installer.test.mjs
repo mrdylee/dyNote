@@ -4,7 +4,8 @@ import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { stageUpdate, launchUpdate } from '../electron/update-installer.mjs';
 
 async function fixture(t) {
@@ -49,5 +50,24 @@ test('failed or unresponsive helper is canceled before the app may quit', async 
       return child;
     }}), fails ? /policy/ : /시작하지/);
     assert.equal(killed, true); assert.equal(await readFile(path.join(job.directory, 'cancel'), 'utf8'), '');
+  }
+});
+test('Windows helper acknowledges startup and cancels without running an installer', { skip: process.platform !== 'win32' }, async t => {
+  const input = await fixture(t);
+  const parent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await once(parent, 'spawn');
+  const job = await stageUpdate({ ...input, parentPid: parent.pid });
+  let helper;
+  try {
+    await launchUpdate(job, { spawnProcess(...args) { helper = spawn(...args); return helper; } });
+    assert.equal((await readFile(path.join(job.directory, 'ready'), 'utf8')).trim(), 'ready');
+  } finally {
+    await writeFile(path.join(job.directory, 'cancel'), '');
+    const parentExit = once(parent, 'exit');
+    const helperExit = helper && helper.exitCode === null && helper.signalCode === null
+      ? once(helper, 'exit', { signal: AbortSignal.timeout(10000) }) : Promise.resolve();
+    parent.kill();
+    await parentExit;
+    await helperExit;
   }
 });
