@@ -23,6 +23,11 @@ try {
   page.setDefaultTimeout(10000);
   page.on("pageerror", error => errors.push(error.message));
   await page.getByRole("button", { name: "파일 목록", exact: true }).waitFor();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "설정", exact: true });
+  await settings.getByRole("button", { name: "글꼴", exact: true }).click();
+  await settings.getByLabel("본문 글자 크기", { exact: true }).fill("32");
+  await settings.getByRole("button", { name: "닫기", exact: true }).click();
   const initialVault = await page.evaluate(async () => (await window.notes.snapshot()).value.id);
   await app.evaluate(({ app, dialog, shell }, { source, cache }) => {
     app.setPath("temp", cache);
@@ -38,10 +43,11 @@ try {
   const dialog = page.getByRole("dialog", { name: path.basename(source), exact: true });
   await dialog.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
   const article = dialog.getByRole("article", { name: "Word 미리보기" });
-  const bodySize = await article.evaluate(node => getComputedStyle(node).fontSize);
   for (const selector of [":scope > p", "td p"]) {
-    assert.equal(await article.locator(selector).first().evaluate(node => getComputedStyle(node).fontSize), bodySize);
+    assert.equal(await article.locator(selector).first().evaluate(node => getComputedStyle(node).fontSize), "32px");
   }
+  const titleSize = await article.getByRole("heading", { level: 1 }).evaluate(node => parseFloat(getComputedStyle(node).fontSize));
+  assert.ok(titleSize > 32, `The document title is ${titleSize}px with 32px body text`);
   await dialog.getByText(/임시 미리보기/).waitFor();
   await mkdir("output/playwright", { recursive: true });
   await page.screenshot({ path: "output/playwright/external-word-open.png" });

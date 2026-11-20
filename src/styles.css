@@ -1572,6 +1572,10 @@ kbd {
 .word-preview {
   color: #393340;
 }
+.word-preview h1 { font-size: 1.8em; }
+.word-preview h2 { font-size: 1.25em; }
+.word-preview h3 { font-size: 1.1em; }
+.word-preview :is(h4, h5, h6) { font-size: 1em; }
 .word-preview :is(p, table, blockquote) {
   font-size: inherit;
   line-height: inherit;
