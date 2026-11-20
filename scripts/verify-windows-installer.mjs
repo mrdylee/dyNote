@@ -39,7 +39,8 @@ await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({
 const launch = async (executable, verify) => {
   console.log('Opening installer test app:', executable);
   const app = await electron.launch({executablePath: executable, env: {...process.env, OPEN_NOTES_DATA: profile}});
-  app.process().stderr.on('data', data => process.stderr.write(data));
+  const child = app.process();
+  child.stderr.on('data', data => process.stderr.write(data));
   try {
     const page = await app.firstWindow();
     page.setDefaultTimeout(30000);
@@ -56,7 +57,6 @@ const launch = async (executable, verify) => {
     console.error('Installer app verification failed:', error);
     throw error;
   } finally {
-    const child = app.process();
     if (child.exitCode === null && child.signalCode === null) {
       let timer;
       try {
