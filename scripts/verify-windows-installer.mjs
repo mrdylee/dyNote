@@ -198,12 +198,16 @@ try {
     restarted = entries.find(entry => !previousRuns.has(entry.run) && Number(entry.run.split(':').at(-1)) !== installingPid && entry.stage === 'main.services-ready');
   }
   assert.ok(restarted, 'Installer helper should relaunch the installed app and finish startup.');
-  const result = JSON.parse((await readFile(path.join(installerJob, 'result.json'), 'utf8')).replace(/^\uFEFF/, ''));
-  assert.equal(result.installed, true, result.error);
-  assert.equal(await readFile(note, 'utf8'), original);
-  assert.equal(await hash(installedAsar), packageHash);
   // Only this test's newly relaunched process is stopped, after verifying its executable.
   await run(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', '$fixtureProcess = Get-Process -Id ([int]$env:DYNOTE_TEST_PID); if ($fixtureProcess.Path -ne $env:DYNOTE_TEST_EXE) { throw "Unexpected executable" }; Stop-Process -InputObject $fixtureProcess'], {env: {...process.env, DYNOTE_TEST_PID: restarted.run.split(':').at(-1), DYNOTE_TEST_EXE: installed}});
+  if (previousSetup) {
+    assert.ok(!existsSync(installerJob), 'Startup in the target version should remove the completed installation job.');
+  } else {
+    const result = JSON.parse((await readFile(path.join(installerJob, 'result.json'), 'utf8')).replace(/^\uFEFF/, ''));
+    assert.equal(result.installed, true, result.error);
+  }
+  assert.equal(await readFile(note, 'utf8'), original);
+  assert.equal(await hash(installedAsar), packageHash);
   console.log('PASS in-app install ran Setup, relaunched the app, preserved notes and matched the package payload');
 
   await install(downloaded, 'reinstall');
