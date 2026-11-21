@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFile, execFileSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {once} from 'node:events';
 import {createReadStream, existsSync} from 'node:fs';
 import {mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile} from 'node:fs/promises';
@@ -16,6 +16,9 @@ const {version} = JSON.parse(await readFile(new URL('../package.json', import.me
 const distribution = path.resolve(process.env.DYNOTE_PACKAGE_OUT || `release/v${version}`);
 const base = path.join(distribution, `Dynote-${version}-windows-x64`);
 const setup = base + '-Setup.exe';
+const previousSetup = process.env.DYNOTE_PREVIOUS_WINDOWS_SETUP;
+const previousVersion = process.env.DYNOTE_PREVIOUS_WINDOWS_VERSION;
+assert.equal(Boolean(previousSetup), Boolean(previousVersion));
 const appDir = path.join(process.env.LOCALAPPDATA, 'Programs', 'Dynote');
 const installed = path.join(appDir, 'Dynote.exe');
 const uninstaller = path.join(appDir, 'unins000.exe');
@@ -109,20 +112,47 @@ try {
   const portable = path.join(root, 'Dynote-win32-x64', 'Dynote.exe');
   await launch(portable);
   console.log('PASS ZIP app opened the existing note and settings');
-  await install(setup, 'install');
-  assert.equal(await hash(path.join(appDir, 'resources', 'app.asar')), await hash(path.join(path.dirname(portable), 'resources', 'app.asar')));
-  console.log('PASS per-user install and matching app payload');
+  await install(previousSetup || setup, 'install');
+  const installedAsar = path.join(appDir, 'resources', 'app.asar');
+  const packageHash = await hash(path.join(path.dirname(portable), 'resources', 'app.asar'));
+  if (!previousSetup) assert.equal(await hash(installedAsar), packageHash);
 
-  const tag = 'v99.0.0';
-  const name = 'Dynote-99.0.0-windows-x64-Setup.exe';
+  const updateVersion = previousSetup ? version : '99.0.0';
+  const tag = `v${updateVersion}`;
+  const name = `Dynote-${updateVersion}-windows-x64-Setup.exe`;
   const digest = 'sha256:' + await hash(setup);
   const size = (await stat(setup)).size;
   const asset = assetName => ({name: assetName, size, digest, browser_download_url: `https://github.com/mrdylee/dyNote/releases/download/${tag}/${assetName}`});
-  const feed = [{tag_name: tag, assets: [asset('Dynote-99.0.0-windows-x64.zip'), asset(name)]}];
+  const feed = [{tag_name: tag, assets: [asset(`Dynote-${updateVersion}-windows-x64.zip`), asset(name)]}];
   let downloaded;
   let installerJob, installingPid;
+  let recoveryDraft, documentDraft;
   const previousRuns = new Set((await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).run));
   await launch(installed, async (app, page) => {
+    assert.equal(await app.evaluate(({app}) => app.getVersion()), previousVersion || version);
+    const draftId = randomUUID();
+    ({recoveryDraft, documentDraft} = await page.evaluate(async id => {
+      const snapshot = await window.notes.snapshot({});
+      if (!snapshot.ok) throw new Error(snapshot.error);
+      const {id: vaultId, notes} = snapshot.value;
+      const note = notes.find(item => item.path === 'Keep.md');
+      const content = note.content + '\nPending Agent draft before upgrade.\n';
+      const draft = {path: note.path, kind: 'edit', original: note.content, content, aiContent: content, revision: note.revision, userEdited: false};
+      const key = `dynote.copilot.drafts.${vaultId}`;
+      localStorage.setItem(key, JSON.stringify([draft]));
+      const saved = await window.notes.writeDocumentDraft({id, vaultId,
+        source: {path: note.path, title: 'Keep', content: note.content},
+        content: '# Pending generated document\n', fileName: 'Pending document', promptId: 'default'});
+      if (!saved.ok) throw new Error(saved.error);
+      return {recoveryDraft: {key, draft}, documentDraft: saved.value};
+    }, draftId));
+    await page.reload();
+    const row = page.locator('.file-row[title="Keep.md"]');
+    if (!await row.isVisible()) await page.getByRole('button', {name: '파일 목록', exact: true}).click();
+    await row.click();
+    await page.getByLabel('AI 실시간 변경', {exact: true}).waitFor();
+    console.log('PASS existing installation opened with an unconfirmed Agent draft and a saved temporary document');
+    assert.equal(await readFile(note, 'utf8'), original);
     installingPid = await app.evaluate(() => process.pid);
     await app.evaluate(({shell, dialog}, {feed, name, setup}) => {
       shell.showItemInFolder = file => {globalThis.shownUpdate = file;};
@@ -160,8 +190,7 @@ try {
   });
   console.log('PASS installed app verified Setup, saved work and exited for installation');
 
-  // This controlled release reapplies the same package. Verify actual Setup and helper relaunch,
-  // while leaving version advancement to a two-release acceptance test.
+  // The controlled feed serves the candidate Setup to the previous installation.
   let restarted;
   for (let i = 0; i < 180 && !restarted; i++) {
     await delay(1000);
@@ -172,14 +201,46 @@ try {
   const result = JSON.parse((await readFile(path.join(installerJob, 'result.json'), 'utf8')).replace(/^\uFEFF/, ''));
   assert.equal(result.installed, true, result.error);
   assert.equal(await readFile(note, 'utf8'), original);
-  assert.equal(await hash(path.join(appDir, 'resources', 'app.asar')), await hash(path.join(path.dirname(portable), 'resources', 'app.asar')));
+  assert.equal(await hash(installedAsar), packageHash);
   // Only this test's newly relaunched process is stopped, after verifying its executable.
   await run(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', '$fixtureProcess = Get-Process -Id ([int]$env:DYNOTE_TEST_PID); if ($fixtureProcess.Path -ne $env:DYNOTE_TEST_EXE) { throw "Unexpected executable" }; Stop-Process -InputObject $fixtureProcess'], {env: {...process.env, DYNOTE_TEST_PID: restarted.run.split(':').at(-1), DYNOTE_TEST_EXE: installed}});
   console.log('PASS in-app install ran Setup, relaunched the app, preserved notes and matched the package payload');
 
   await install(downloaded, 'reinstall');
   console.log('PASS reinstall completed from the downloaded Setup');
-  await launch(installed);
+  await launch(installed, async (app, page) => {
+    assert.equal(await app.evaluate(({app}) => app.getVersion()), version);
+    const savedDrafts = await page.evaluate(async key => ({
+      recovery: JSON.parse(localStorage.getItem(key)),
+      document: (await window.notes.documentDrafts()).value,
+    }), recoveryDraft.key);
+    assert.deepEqual(savedDrafts.recovery, [recoveryDraft.draft]);
+    assert.deepEqual(savedDrafts.document, [documentDraft]);
+    await app.evaluate(({ipcMain}) => {
+      ipcMain.removeHandler('notes:copilot-status');
+      ipcMain.handle('notes:copilot-status', () => ({ok: true, value: {authenticated: true, models: [{id: 'auto', name: 'Auto'}]}}));
+      ipcMain.removeHandler('notes:copilot-send');
+      ipcMain.handle('notes:copilot-send', (event, args) => {
+        globalThis.upgradeAgentRequest = args;
+        event.sender.send('notes:copilot-event', {type: 'done', requestId: args.requestId, content: 'Agent works after upgrade'});
+        return {ok: true};
+      });
+    });
+    await page.getByRole('tab', {name: 'Copilot', exact: true}).click();
+    await page.getByRole('button', {name: 'Copilot 연결 상태 확인', exact: true}).click();
+    const composer = page.locator('.copilot-panel:visible');
+    await composer.getByLabel('Copilot 모델').selectOption('auto');
+    await composer.getByLabel('Copilot 작업').selectOption('agent');
+    await composer.getByLabel('Copilot 질문').fill('Check whether the current draft is available.');
+    await composer.getByRole('button', {name: 'Copilot 보내기', exact: true}).click();
+    await composer.getByText('Agent works after upgrade', {exact: true}).waitFor();
+    const request = await app.evaluate(() => globalThis.upgradeAgentRequest);
+    assert.equal(request.mode, 'agent');
+    assert.equal(request.context.content, recoveryDraft.draft.content);
+    assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), recoveryDraft.key), [recoveryDraft.draft]);
+    assert.equal(await readFile(note, 'utf8'), original);
+  });
+  console.log('PASS updated app sent Agent using the same unconfirmed draft and retained both drafts and the original note');
   await uninstall();
   assert.equal(await readFile(note, 'utf8'), original);
   assert.equal(JSON.parse(await readFile(path.join(profile, 'settings.json'), 'utf8')).vaultRoot, vault);

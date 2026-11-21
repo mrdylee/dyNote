@@ -2,6 +2,11 @@ name: Build Windows distribution
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      previous_version:
+        description: Published Dynote version to install before testing the update
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -40,9 +45,22 @@ jobs:
       - run: node scripts/package-windows-distribution.mjs
       - name: Verify installed Windows update and relaunch
         shell: bash
-        timeout-minutes: 8
+        timeout-minutes: 12
+        env:
+          DYNOTE_PREVIOUS_WINDOWS_VERSION: ${{ inputs.previous_version }}
         run: |
           export DYNOTE_PLAYWRIGHT_MODULE="$(node --input-type=module -e 'import {pathToFileURL} from "node:url";console.log(pathToFileURL(process.env.RUNNER_TEMP+"/dynote-ui-tools/node_modules/playwright/index.mjs").href)')"
+          if [[ -n "$DYNOTE_PREVIOUS_WINDOWS_VERSION" ]]; then
+            [[ "$DYNOTE_PREVIOUS_WINDOWS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            previous="$RUNNER_TEMP/dynote-previous"
+            mkdir -p "$previous"
+            setup="Dynote-$DYNOTE_PREVIOUS_WINDOWS_VERSION-windows-x64-Setup.exe"
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/v$DYNOTE_PREVIOUS_WINDOWS_VERSION"
+            curl --fail --silent --show-error --location --retry 3 "$url/$setup" --output "$previous/$setup"
+            curl --fail --silent --show-error --location --retry 3 "$url/SHA256SUMS-windows-x64.txt" --output "$previous/SHA256SUMS-windows-x64.txt"
+            (cd "$previous" && awk -v setup="$setup" '$2 == setup {print}' SHA256SUMS-windows-x64.txt | sha256sum --check)
+            export DYNOTE_PREVIOUS_WINDOWS_SETUP="$(cygpath -w "$previous/$setup")"
+          fi
           node scripts/verify-windows-installer.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
