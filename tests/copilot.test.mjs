@@ -185,13 +185,49 @@ test("cancel during SDK startup prevents any model request", async () => {
 test("errors retain a failed state, abort work and clean the session", async () => {
   const f = fixture({ respond: async () => { throw new Error("quota exhausted"); } });
   f.controller.send(request());
-  assert.throws(() => f.controller.send(request({ requestId: "request-2" })), /진행/);
+  assert.throws(() => f.controller.send(request()), /진행/);
   await f.controller.settled();
   assert.equal(f.events.at(-1).type, "error");
   assert.match(f.events.at(-1).error, /quota/);
   assert.ok(f.aborted);
   assert.deepEqual(f.deleted, ["session-1"]);
   await f.controller.close();
+});
+
+test("document polishing and Agent use independent sessions and cancellation targets one request", async () => {
+  const f = fixture();
+  const sessions = new Map();
+  f.client.createSession = async () => {
+    const sessionId = `session-${sessions.size + 1}`;
+    let finish;
+    const response = new Promise(resolve => { finish = resolve; });
+    sessions.set(sessionId, { finish, aborted: false });
+    return {
+      sessionId,
+      rpc: { options: { update: async () => {} } },
+      on: () => () => {},
+      sendAndWait: () => response,
+      abort: async () => { sessions.get(sessionId).aborted = true; finish(); },
+    };
+  };
+  try {
+    f.controller.send(request({ requestId: "polish" }));
+    f.controller.send(request({ requestId: "agent", mode: "agent" }));
+    while (sessions.size < 2) await new Promise(resolve => setImmediate(resolve));
+    await f.controller.cancel("polish");
+    const [polish, agent] = sessions.values();
+    assert.equal(polish.aborted, true);
+    assert.equal(agent.aborted, false);
+    agent.finish({ data: { content: "Agent completed" } });
+    await f.controller.settled();
+    assert.deepEqual(f.events.map(({ requestId, type }) => [requestId, type]).sort(), [
+      ["agent", "done"], ["polish", "canceled"],
+    ]);
+    assert.deepEqual(f.deleted.sort(), ["session-1", "session-2"]);
+  } finally {
+    for (const session of sessions.values()) session.finish();
+    await f.controller.close();
+  }
 });
 
 test("unavailable models are rejected before a session sends data", async () => {

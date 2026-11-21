@@ -116,15 +116,19 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     try { await invoke(ai.login()); }
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
+  const independent = provider === "copilot";
   const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || liveEdits.running || liveEdits.working || session.activity.planner || otherChatRunning, applying, running, label,
-    vaultId, note, scope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
+  const effectiveScope = independent && !note && mode !== "edit" ? "none" : scope;
+  const otherWork = independent ? mode === "agent" && (liveEdits.running || liveEdits.working)
+    : liveEdits.running || liveEdits.working || session.activity.planner || otherChatRunning;
+  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || otherWork, applying, running, label,
+    vaultId, note, scope: effectiveScope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
     event?.preventDefault();
     if (pending.current || running || !canSend) return;
     try {
-      const { context, target } = captureContext({ vaultId, note, scope, selection });
+      const { context, target } = captureContext({ vaultId, note, scope: effectiveScope, selection });
       const requestId = crypto.randomUUID();
       const history = messages.filter((m) => m.complete && m.mode !== "edit").map(({ role, content }) => ({ role, content }));
       const attached = references.filter((path) => path !== context.path).map((path) => {
@@ -135,9 +139,17 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       const drafts = mode === "agent" ? latest.current.liveEdits.drafts.map(({ path, content }) => ({ path, content })) : [];
       const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
-      pending.current = { ...args, target, inputPrompt: prompt };
+      const request = { ...args, target, inputPrompt: prompt };
+      pending.current = request;
       if (mode === "agent") await latest.current.onBeginLive(requestId, () => ai.cancel({ requestId }));
       if (!mounted.current) { latest.current.liveEdits.stop(); await latest.current.liveEdits.finish(requestId); return; }
+      if (request.canceled) {
+        await latest.current.liveEdits.finish(requestId);
+        pending.current = null;
+        setRunning(false);
+        setError("요청을 중지했습니다. 질문을 다시 보낼 수 있습니다.");
+        return;
+      }
       setMessages((old) => [...old,
         { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },
         { id: requestId, role: "assistant", content: "", complete: false, mode },
@@ -147,6 +159,13 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       if (pending.current?.mode === "agent") latest.current.liveEdits.finish(pending.current.requestId);
       pending.current = null; setRunning(false); setError(e.message);
     }
+  };
+  const stop = () => {
+    const request = pending.current;
+    if (!request) return;
+    request.canceled = true;
+    if (request.mode === "agent") latest.current.liveEdits.stop();
+    else invoke(ai.cancel({ requestId: request.requestId })).catch(e => setError(e.message));
   };
   const isStale = (proposal) => {
     if (proposal.kind === "create") return notes.some((n) => n.path === proposal.path);
@@ -160,8 +179,9 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       if (current.busy || applying) return;
       setApplying(true);
       if (review.kind !== "create") applyProposal(review.target, { vaultId: current.vaultId, ...current.notes.find((n) => n.path === review.path) }, review.content);
-      await current.onApply(review);
-      setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", mode: "agent", complete: true, content: `적용 완료: ${review.path}. 다음 작업에서는 현재 내용을 다시 확인합니다.` }]);
+      const staged = await current.onApply(review);
+      const content = staged ? `초안에 반영: ${review.path}. 저장하려면 변경 유지를 눌러 주세요.` : `적용 완료: ${review.path}. 다음 작업에서는 현재 내용을 다시 확인합니다.`;
+      setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", mode: "agent", complete: true, content }]);
       setReview(null); setProposals((old) => old.filter((p) => p.id !== review.id));
     } catch (e) { setError(e.message); }
     finally { setApplying(false); }
@@ -170,7 +190,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-chat-heading">
       <select className="ai-provider-select" aria-label="AI 제공자" value={provider}
-        disabled={running || applying || authBusy || checking || session.activity.planner || proposals.length > 0 || liveEdits.blocked()} onChange={event => onProvider(event.target.value)}>
+        disabled={running || session.activity.chat || applying || authBusy || checking || session.activity.planner || proposals.length > 0 || (!independent && liveEdits.blocked())} onChange={event => onProvider(event.target.value)}>
         <option value="copilot">Copilot</option><option value="codex">Codex</option><option value="claude">Claude</option>
       </select>
       <div className="copilot-heading-actions">
@@ -217,7 +237,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     {error && !review && blockedSend?.message !== error && <p className="copilot-error" role="alert">{error}</p>}
     <form className="copilot-composer" onSubmit={send}>
       <div className="copilot-context-row">
-        <select aria-label={`${label} 전달 범위`} title={`${label}에 보낼 내용`} value={scope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
+        <select aria-label={`${label} 전달 범위`} title={`${label}에 보낼 내용`} value={effectiveScope} disabled={running || applying} onChange={(e) => { newConversation(); setScope(e.target.value); }}>
           <option value="none">문서 없음</option><option value="document" disabled={!note}>현재 문서</option><option value="selection" disabled={!note}>선택 영역</option>
         </select>
         <div className="copilot-context-label" title={note?.path}>{scope === "none" ? "현재 문서는 보내지 않습니다" : note?.path ?? "문서를 열어 주세요"}</div>
@@ -239,14 +259,14 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
           <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
             {provider !== "claude" && <option value="agent">Agent</option>}<option value="chat">Ask</option><option value="edit" disabled={scope === "none" || !note}>Edit</option>
           </select>
-        {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking || session.activity.planner} onChange={(e) => setModel(e.target.value)}>
+        {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking || (!independent && session.activity.planner)} onChange={(e) => setModel(e.target.value)}>
           <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
           {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select></label>}
-          {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={() => { liveEdits.stop(); invoke(ai.cancel({ requestId: pending.current?.requestId })).catch((e) => setError(e.message)); }}><Square size={15} />중지</button>
+          {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={stop}><Square size={15} />중지</button>
             : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} aria-describedby="copilot-send-status" title={blockedSend?.message || "현재 전달 범위로 질문 보내기"} disabled={!canSend}><ArrowUp size={16} /></button>}
         </div>
-        {connection.authenticated && provider !== "claude" && <label className="copilot-reasoning"><span>추론 강도</span><select aria-label={`${label} 추론 강도`} value={reasoningEffort} disabled={running || applying || checking || session.activity.planner || !reasoningEfforts.length} onChange={event => setReasoningEffort(event.target.value)}>
+        {connection.authenticated && provider !== "claude" && <label className="copilot-reasoning"><span>추론 강도</span><select aria-label={`${label} 추론 강도`} value={reasoningEffort} disabled={running || applying || checking || (!independent && session.activity.planner) || !reasoningEfforts.length} onChange={event => setReasoningEffort(event.target.value)}>
           <option value="">모델 기본값{defaultReasoningEffort ? ` (${effortLabel(defaultReasoningEffort)})` : ""}</option>
           {reasoningEfforts.map(value => <option key={value} value={value}>{effortLabel(value)}</option>)}
         </select></label>}

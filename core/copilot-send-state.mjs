@@ -13,7 +13,7 @@ export function sendBlock({ connection, model, prompt, checking, authBusy, busy,
   if (running) return reason("running", "응답을 기다리거나 중지한 뒤 다시 보낼 수 있습니다.");
   if (busy) return reason("busy", "노트 저장 작업이 끝나면 보낼 수 있습니다.");
   if (applying) return reason("applying", "수정안을 적용하고 있습니다.");
-  if (mode === "edit" && blocked) return reason("drafts", "미확정 AI 변경을 유지하거나 되돌려 주세요. Agent에서는 현재 초안을 이어서 수정할 수 있습니다.");
+  if (label !== "Copilot" && mode === "edit" && blocked) return reason("drafts", "미확정 AI 변경을 유지하거나 되돌려 주세요.");
   if (mode !== "chat" && !ready) return reason("ready", "AI 복구 초안을 확인해 주세요. Ask에서는 현재 노트로 대화할 수 있습니다.");
   if (!connection.models.some(item => item.id === model)) return reason("model", connection.error || (connection.models.length ? "AI 모델을 선택해 주세요." : "사용 가능한 AI 모델을 확인해 주세요. 연결 상태를 다시 확인할 수 있습니다."));
   try { captureContext({ vaultId, note, scope, selection }); }

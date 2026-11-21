@@ -238,7 +238,7 @@ async function workspaceSnapshots() {
 }
 
 async function changeAiExtensions(action) {
-  if (aiExtensionsChanging || [copilot, codex, claude].some(controller => controller?.job || controller?.loginJob))
+  if (aiExtensionsChanging || copilot?.jobs.size || [copilot, codex, claude].some(controller => controller?.job || controller?.loginJob))
     throw new Error("AI 작업이 끝난 뒤 MCP·스킬 연결을 변경해 주세요.");
   aiExtensionsChanging = true;
   try { return await action(); }

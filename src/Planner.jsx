@@ -52,7 +52,7 @@ export default function Planner({api,session,vaultId,notes,onSave,onImported,onO
   const [taskText,setTaskText]=useState(''),[evidencePath,setEvidencePath]=useState(''),[evidenceKind,setEvidenceKind]=useState('requirement');
   const request=useRef(null),fileInput=useRef(null),alive=useRef(true),saveLock=useRef(false),draftOrigin=useRef(null),registerLatest=useRef(null);
   const today=localDate(), targets=[...new Set(board.items.map(i=>i.target).filter(Boolean))];
-  const locked=saving||disabled||session.activity.chat||!!parsed.error;
+  const locked=saving||disabled||(session.provider!=='copilot'&&session.activity.chat)||!!parsed.error;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;if(request.current)ai.cancel({requestId:request.current.id});};},[ai]);
   useEffect(()=>{session.setActivity('planner',!!working||saving);return()=>session.setActivity('planner',false);},[working,saving,session.setActivity]);
   useEffect(()=>{

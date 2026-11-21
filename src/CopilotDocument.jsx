@@ -41,6 +41,7 @@ export function DocumentPromptSettings({ prompts, onSave }) {
 
 export default function CopilotDocument({ document, hidden, session, prompts, folders, onUpdate, onPersist, onSave }) {
   const { ai, label, model, setModel, reasoningEffort, connection, checking, activity, setActivity } = session;
+  const otherWork = session.provider !== "copilot" && (activity.chat || activity.planner);
   const { id, source, vaultId, content, fileName, promptId } = document;
   const activityId = `document:${id}`;
   const [running, setRunning] = useState(false);
@@ -80,7 +81,7 @@ export default function CopilotDocument({ document, hidden, session, prompts, fo
   }, [ai, id, activityId, setActivity]);
   const unavailable = checking ? `${label} 연결 상태를 확인하고 있습니다.`
     : !connection.authenticated ? connection.error || `AI 채팅에서 ${label}에 먼저 연결해 주세요.`
-    : !running && (activity.chat || activity.planner) ? "다른 AI 작업이 끝나면 시작할 수 있습니다."
+    : !running && otherWork ? "다른 AI 작업이 끝나면 시작할 수 있습니다."
     : !connection.models.some(item => item.id === model) ? "모델을 선택해 주세요." : "";
   const generate = async () => {
     if (request.current || unavailable) return;
@@ -128,7 +129,7 @@ export default function CopilotDocument({ document, hidden, session, prompts, fo
       <label>문서 프롬프트<select aria-label="문서 프롬프트" value={promptId} disabled={running} onChange={event => onUpdate(id, { promptId: event.target.value })}>
         {prompts.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
       </select></label>
-      {connection.authenticated && <label>AI 모델<select aria-label="AI 모델" value={model ?? ""} disabled={running || checking || activity.chat || activity.planner} onChange={event => setModel(event.target.value)}>
+      {connection.authenticated && <label>AI 모델<select aria-label="AI 모델" value={model ?? ""} disabled={running || checking || otherWork} onChange={event => setModel(event.target.value)}>
         <option value="">모델 선택</option>{connection.models.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>}
       <div className="modal-actions">{running

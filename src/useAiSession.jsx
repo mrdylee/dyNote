@@ -73,7 +73,7 @@ export default function useAiSession(api) {
   const preferredEffort = efforts[effortKey] ?? stored(effortKey);
   const reasoningEffort = reasoningEfforts.includes(preferredEffort) ? preferredEffort : "";
   const setReasoningEffort = value => {
-    if (activity.chat || activity.planner || (value !== "" && !reasoningEfforts.includes(value))) return;
+    if ((provider !== "copilot" && (activity.chat || activity.planner)) || (value !== "" && !reasoningEfforts.includes(value))) return;
     setEfforts(old => ({ ...old, [effortKey]: value }));
     try { localStorage.setItem(effortKey, value); } catch { /* Keep the choice in memory. */ }
   };

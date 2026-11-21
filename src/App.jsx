@@ -2230,13 +2230,15 @@ export default function App() {
               jump={editorJump?.vaultId === vault.id ? editorJump : null}
               fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
               disabled={!registryReady || busy || captureLocked || edits.blocked()} capture={captureControls}/>
-            : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw} disabled={busy||edits.blocked()}
+            : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw}
+              disabled={busy || (aiSession.provider === "copilot" ? edits.drafts.some(draft => draft.path === BOARD_PATH) : edits.blocked())}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
               onSave={async (content, expectedRevision) => {
                 const vaultId=vault.id;
-                await flush();
+                await flush(aiSession.provider === "copilot");
                 if(currentVault.current!==vaultId)throw new Error("보관함이 변경되었습니다.");
+                if(editsRef.current.forVault(vaultId).drafts.some(draft => draft.path === BOARD_PATH))throw new Error("일정 문서의 AI 변경을 먼저 검토해 주세요.");
                 if((revisions.current.get(BOARD_PATH)??null)!==expectedRevision)throw new Error("일정 문서가 변경되었습니다. 다시 열어 주세요.");
                 const saved=await invoke(expectedRevision===null ? api.createNote({vaultId,path:BOARD_PATH,content}) : api.saveNote({vaultId,path:BOARD_PATH,content,revision:expectedRevision}));
                 if(currentVault.current!==vaultId)return;
@@ -2421,13 +2423,16 @@ export default function App() {
                     }
                     return;
                   }
-                  const target = vaultsRef.current[id]?.notes.find(n => n.path === proposal.path);
+                  const scopeEdits = editsRef.current.forVault(id);
+                  const draft = scopeEdits.drafts.find(item => item.path === proposal.path);
+                  const target = draft ?? vaultsRef.current[id]?.notes.find(n => n.path === proposal.path);
                   const content = applyProposal(proposal.target, { vaultId: id, ...target }, proposal.content);
+                  if (draft && scopeEdits.revise(proposal.path, content)) return true;
                   const view = editorView.current;
                   if (currentVault.current === id && view && !view.state.readOnly && note?.path === proposal.path) {
                     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });
                   } else changeFile(proposal.path, content, id);
-                  await flush();
+                  await flush(aiSession.provider === "copilot");
                 }} />;
             })}
             <div className="document-info" hidden={rightTab !== "info"}>

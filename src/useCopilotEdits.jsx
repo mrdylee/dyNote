@@ -7,9 +7,9 @@ const storageKey = id => `dynote.copilot.drafts.${id}`;
 // Pending content lives outside its vault, so Git only sees accepted notes.
 export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError }) {
   const [drafts, setDrafts] = useState({});
-  const [running, setRunning] = useState(null), [working, setWorking] = useState(null);
-  const entries = useRef(new Map()), job = useRef(null), resolving = useRef(null);
-  const serial = useRef(Promise.resolve()), latest = useRef(null);
+  const [running, setRunning] = useState([]), [working, setWorking] = useState(null);
+  const entries = useRef(new Map()), jobs = useRef(new Map()), resolving = useRef(null);
+  const serial = useRef(new Map()), latest = useRef(null);
   latest.current = { vaults, onSaved, onOpen, onError };
   const readDrafts = id => entries.current.get(id) ?? empty;
   const persist = id => {
@@ -37,24 +37,25 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
     }
   }, [ids]);
   const stop = id => {
-    if (!job.current || (id && job.current.vaultId !== id)) return;
-    job.current.stopped = true;
-    job.current.cancel().catch(() => {});
+    for (const [vaultId, job] of jobs.current) {
+      if (id && id !== vaultId) continue;
+      job.stopped = true;
+      job.cancel().catch(() => {});
+    }
   };
   const begin = (id, requestId, cancel = () => api.copilotCancel({ requestId })) => {
-    if (job.current || resolving.current) throw new Error("진행 중인 AI 작업이 끝난 뒤 다시 요청해 주세요.");
+    if (jobs.current.has(id) || resolving.current?.vaultId === id) throw new Error("이 보관함의 AI 변경 작업이 끝난 뒤 다시 요청해 주세요.");
     if (!entries.current.has(id)) throw new Error("AI 복구 초안을 확인해 주세요.");
     const notes = new Map([...latest.current.vaults[id].notes, ...readDrafts(id)].map(note => [note.path, note]));
-    job.current = { id: requestId, vaultId: id, stopped: false, notes, conflicts: new Set(), cancel };
-    setRunning(id);
+    jobs.current.set(id, { id: requestId, stopped: false, notes, conflicts: new Set(), cancel });
+    setRunning([...jobs.current.keys()]);
   };
-  const stage = (proposal, requestId) => {
-    serial.current = serial.current.then(async () => {
-      const active = job.current;
+  const stage = (id, proposal, requestId) => {
+    const operation = (serial.current.get(id) ?? Promise.resolve()).then(async () => {
+      const active = jobs.current.get(id);
       if (!active || active.id !== requestId || active.stopped || active.conflicts.has(proposal.path)) return;
-      const id = active.vaultId;
       const snapshot = await invoke(api.snapshot({ vaultId: id }));
-      if (active.stopped || active !== job.current || snapshot.id !== id || !latest.current.vaults[id]) return;
+      if (active.stopped || active !== jobs.current.get(id) || snapshot.id !== id || !latest.current.vaults[id]) return;
       const source = latest.current.vaults[id].notes.find(n => n.path === proposal.path);
       const disk = snapshot.notes.find(n => n.path === proposal.path);
       const previous = readDrafts(id).find(d => d.path === proposal.path);
@@ -79,24 +80,37 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
         }
         latest.current.onError(error.message);
       }
-    }).catch(error => { if (job.current?.id === requestId) stop(); latest.current.onError(error.message); });
-    return serial.current;
+    }).catch(error => { if (jobs.current.get(id)?.id === requestId) stop(id); latest.current.onError(error.message); });
+    serial.current.set(id, operation);
+    return operation;
   };
-  const finish = async requestId => {
-    await serial.current;
-    if (job.current?.id === requestId) { job.current = null; setRunning(null); }
+  const finish = async (id, requestId) => {
+    await serial.current.get(id);
+    if (jobs.current.get(id)?.id === requestId) {
+      jobs.current.delete(id);
+      serial.current.delete(id);
+      setRunning([...jobs.current.keys()]);
+    }
   };
   const edit = (id, path, content) => {
     if (!readDrafts(id).some(d => d.path === path)) return false;
-    const active = job.current?.vaultId === id && !job.current.stopped;
-    if (active) job.current.conflicts.add(path);
+    const job = jobs.current.get(id);
+    const active = job && !job.stopped;
+    if (active) job.conflicts.add(path);
     try { update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, userEdited: true,
       ...(active ? { conflict: "요청 후 직접 편집하여 이 문서의 AI 추가 반영을 멈췄습니다." } : {}) } : d)); }
     catch (error) { latest.current.onError(error.message); }
     return true;
   };
+  const revise = (id, path, content) => {
+    if (!readDrafts(id).some(d => d.path === path)) return false;
+    if (jobs.current.has(id) || resolving.current?.vaultId === id)
+      throw new Error("이 보관함의 AI 변경 작업이 끝난 뒤 수정안을 적용해 주세요.");
+    update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, aiContent: content } : d));
+    return true;
+  };
   const resolve = (id, path, action) => {
-    if (job.current?.vaultId === id || resolving.current) return;
+    if (jobs.current.has(id) || resolving.current) return;
     const draft = readDrafts(id).find(d => d.path === path);
     if (!draft) return;
     setWorking(id);
@@ -124,23 +138,25 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
         latest.current.onError(error.message);
       } finally { resolving.current = null; setWorking(null); }
     })();
-    resolving.current = operation;
+    resolving.current = { vaultId: id, operation };
     return operation;
   };
-  const blocked = id => id ? job.current?.vaultId === id || readDrafts(id).length > 0
-    : !!job.current || !!resolving.current || Object.values(latest.current.vaults).some(vault => readDrafts(vault.id).length > 0);
+  const blocked = id => id ? jobs.current.has(id) || readDrafts(id).length > 0
+    : !!jobs.current.size || !!resolving.current || Object.values(latest.current.vaults).some(vault => readDrafts(vault.id).length > 0);
   return {
     drafts, blocked,
     forVault: id => ({
-      drafts: drafts[id] ?? empty, running: !!id && running === id, working: !!id && working === id,
+      drafts: drafts[id] ?? empty, running: running.includes(id), working: !!id && working === id,
       ready: Object.hasOwn(drafts, id), blocked: () => blocked(id),
-      begin: (requestId, cancel) => begin(id, requestId, cancel), stage, finish, edit: (path, content) => edit(id, path, content),
+      begin: (requestId, cancel) => begin(id, requestId, cancel),
+      stage: (proposal, requestId) => stage(id, proposal, requestId), finish: requestId => finish(id, requestId),
+      edit: (path, content) => edit(id, path, content), revise: (path, content) => revise(id, path, content),
       stop: () => stop(id), resolve: (path, action) => resolve(id, path, action),
     }),
     close: async () => {
       stop();
-      await serial.current;
-      await resolving.current;
+      await Promise.all(serial.current.values());
+      await resolving.current?.operation;
       for (const id of entries.current.keys()) persist(id);
     },
   };
