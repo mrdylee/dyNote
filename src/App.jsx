@@ -56,6 +56,8 @@ import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import WordPreview from "./WordPreview.jsx";
 import useExternalDocuments from "./useExternalDocuments.jsx";
+import OfficePreview from "./OfficePreview.jsx";
+import { officeKind, isOfficeKind } from "../core/office-types.mjs";
 import ExternalFilePreview from "./ExternalFilePreview.jsx";
 import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
@@ -316,7 +318,8 @@ export default function App() {
   }, [hasWorkspace]);
   const active = vault?.id === focusedVaultId ? focusedPath : null;
   const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
-  const displayedPath = showingWord ? attachment.path : active;
+  const showingOffice = isOfficeKind(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
+  const displayedPath = showingWord || showingOffice ? attachment.path : active;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
   const { mode, setMode } = workspace;
@@ -1171,7 +1174,7 @@ export default function App() {
           note.content +
             "\n" +
             imported
-              .map((a) => `${/\.pdf$/i.test(a.path) ? "" : "!"}[[${a.path}]]`)
+              .map((a) => `${/\.(pdf|xlsx|pptx)$/i.test(a.path) ? "" : "!"}[[${a.path}]]`)
               .join("\n") +
             "\n",
         );
@@ -1183,7 +1186,25 @@ export default function App() {
       setBusy(false);
     }
   };
+  const loadOfficeDocument = async (path, vaultId, revision) => {
+    const request = ++attachmentRequest.current;
+    const kind = officeKind(path);
+    if (!revision) {
+      setAttachment({ path, vaultId, kind });
+      setSection("files");
+    }
+    try {
+      const data = await invoke(api.readOfficeDocument({ path, vaultId, revision }));
+      if (request !== attachmentRequest.current || !vaultsRef.current[vaultId]) return;
+      setAttachment(old => old?.path === path && old.vaultId === vaultId
+        ? (data ? { ...data, vaultId } : { ...old, error: "" }) : old);
+    } catch (error) {
+      if (request === attachmentRequest.current)
+        setAttachment(old => old?.path === path && old.vaultId === vaultId ? { ...old, error: error.message } : old);
+    }
+  };
   const openAttachment = async (path, fragment = "", vaultId = vault.id) => {
+    if (officeKind(path)) return loadOfficeDocument(path, vaultId);
     const request = ++attachmentRequest.current;
     try {
       const data = await invoke(api.readAttachment({ vaultId, path }));
@@ -1226,6 +1247,7 @@ export default function App() {
   };
   const refreshWordOnFocus = useEffectEvent(async () => {
     const request = ++wordIndexRequest.current;
+    if (showingOffice && attachment.revision) void loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision);
     const opened = attachment?.kind === "word" ? attachment : null;
     if (opened)
       await loadWordDocument(opened.path, opened.vaultId, opened.revision);
@@ -1746,12 +1768,13 @@ export default function App() {
 
   const externalFileDialog = externalFile.visible && (
     <Modal title={externalFile.document?.name ?? "파일 열기"} wide className="external-file-dialog" onClose={externalFile.close}>
-      <p className="muted">임시 미리보기 · 보관함에 추가하지 않습니다.</p>
-      {externalFile.document && <div className="word-preview-actions">
+      {!isOfficeKind(externalFile.document?.kind) && <p className="muted">임시 미리보기 · 보관함에 추가하지 않습니다.</p>}
+      {externalFile.document && !isOfficeKind(externalFile.document.kind) && <div className="word-preview-actions">
         {externalFile.document.canOpenSource && <button onClick={externalFile.openSource} disabled={externalFile.opening}>원본을 기본 앱에서 열기</button>}
         <button onClick={externalFile.refresh} disabled={externalFile.opening}>미리보기 새로고침</button>
       </div>}
-      <ExternalFilePreview key={externalFile.document?.id} document={externalFile.document} error={externalFile.error} onExternal={url => invoke(api.openExternal(url))} />
+      {isOfficeKind(externalFile.document?.kind) ? <OfficePreview key={externalFile.document.id} document={externalFile.document}
+        onEdit={externalFile.openSource} onRefresh={externalFile.refresh} error={externalFile.error} busy={externalFile.opening}/> : <ExternalFilePreview key={externalFile.document?.id} document={externalFile.document} error={externalFile.error} onExternal={url => invoke(api.openExternal(url))} />}
     </Modal>
   );
   if (!vault)
@@ -1779,7 +1802,7 @@ export default function App() {
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
   };
-  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles)]}
+  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles), ...(scope.attachments ?? emptyFiles).filter(file => officeKind(file.path))]}
     folders={scope.folders ?? emptyFiles}
     journalPreferences={scope.journalPreferences}
     captureEntries={captureTreeEntries.get(scope.id)}
@@ -2278,7 +2301,9 @@ export default function App() {
                     문서로 돌아가기
                   </button>
                 </div>
-                {attachment.kind === "word" ? <>
+                {isOfficeKind(attachment.kind) ? <OfficePreview key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
+                  onEdit={() => invoke(api.openOfficeDocument({ vaultId: attachment.vaultId, path: attachment.path })).catch(err => setError(err.message))}
+                  onRefresh={() => loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision)}/> : attachment.kind === "word" ? <>
                   <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>
                   <WordPreview html={attachment.html} error={attachment.error} />
                 </> : attachment.mime === "application/pdf" ? (
@@ -2352,7 +2377,7 @@ export default function App() {
               className={`save-status ${status}`}
               onClick={() => flush(true).catch(() => {})}
             >
-              {showingWord ? <BookOpen size={13} /> : status === "saving" ? (
+              {showingOffice || showingWord ? <BookOpen size={13} /> : status === "saving" ? (
                 <LoaderCircle size={13} className="spin" />
               ) : status === "saved" ? (
                 <CheckCheck size={13} />
@@ -2360,7 +2385,7 @@ export default function App() {
                 <span className="status-dot" />
               )}
               <span>
-                {showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
+                {showingOffice ? "읽기 전용" : showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
                   ? "모든 변경사항 저장됨"
                   : status === "saving"
                     ? "저장 중…"
@@ -2371,7 +2396,7 @@ export default function App() {
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
-              {showingWord ? <span>DOCX</span> : <>
+              {showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
                 {note && <span>{statistics.words.toLocaleString()}단어</span>}
                 <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
                 <span>{structured?.kind ?? "Markdown"}</span>

@@ -5,6 +5,8 @@ export const attachmentMime = (name) =>
     jpeg: "image/jpeg",
     gif: "image/gif",
     webp: "image/webp",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     pdf: "application/pdf",
     webm: "audio/webm",
     wav: "audio/wav",
@@ -17,7 +19,7 @@ export const attachmentMime = (name) =>
 export function validateAttachment(name, bytes) {
   const mime = attachmentMime(name);
   if (!mime || bytes.length > 25 * 1024 * 1024)
-    throw new Error("25MB 이하의 이미지·PDF·오디오만 지원합니다.");
+    throw new Error("25MB 이하의 이미지·PDF·오디오·Office 파일만 지원합니다.");
   const signatures = {
     "image/png": () =>
       bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")),
@@ -34,7 +36,8 @@ export function validateAttachment(name, bytes) {
     "audio/ogg": () => bytes.subarray(0, 4).toString() === "OggS",
     "audio/mp4": () => bytes.subarray(4, 8).toString() === "ftyp",
   };
-  if (!signatures[mime]())
+  const matches = /\.(xlsx|pptx)$/i.test(name) ? bytes.subarray(0, 4).equals(Buffer.from("504b0304", "hex")) : signatures[mime]();
+  if (!matches)
     throw new Error("확장자와 파일 형식이 일치하지 않습니다.");
   return mime;
 }

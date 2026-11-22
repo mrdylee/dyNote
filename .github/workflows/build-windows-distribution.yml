@@ -43,7 +43,10 @@ jobs:
           node scripts/verify-document-tabs.mjs
           node scripts/verify-update-install.mjs
       - run: node scripts/package-windows-distribution.mjs
-      - name: Verify installed Windows update and relaunch
+      - name: Install native document editors for Windows handoff tests
+        shell: pwsh
+        run: ./scripts/prepare-windows-office-test.ps1
+      - name: Verify installed Windows update, relaunch and Office editing
         shell: bash
         timeout-minutes: 12
         env:

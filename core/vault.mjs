@@ -20,6 +20,9 @@ import { renamedTreePath } from "./file-tree.mjs";
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
 import { parseCanvas, rewriteCanvas, rewriteCanvasPaths } from "./canvas.mjs";
 import { noteAliases, parseMetadata } from "./metadata.mjs";
+import { officeKind } from "./office-types.mjs";
+import { officePreview } from "./office-package.mjs";
+import { readSource } from "./file-source.mjs";
 import { readWordContent } from "./word-documents.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -55,7 +58,7 @@ function validRelativePath(value) {
 }
 
 export const validFilePath = (value) =>
-  validRelativePath(value) && /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
+  validRelativePath(value) && !(officeKind(value) && path.posix.basename(value).startsWith("~$")) && /\.(?:xlsx|pptx|md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
 const validWordPath = (value) =>
   validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
 const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
@@ -372,6 +375,19 @@ export class Vault {
       if (!indexedPaths.has(relative)) this.#wordIndex.delete(relative);
     }
     return { id: this.id, name: this.name, notes, documents, wordDocuments, attachments, folders, warnings };
+  }
+
+  async officeFilePath(relative) {
+    await this.#tail;
+    if (!officeKind(relative)) throw new Error("Excel 또는 PowerPoint 파일을 선택해 주세요.");
+    const file = await this.#file(relative);
+    if (await realpath(file) !== file) throw new Error("보관함 안의 원본 파일을 선택해 주세요.");
+    return file;
+  }
+
+  async readOfficeDocument(relative, previousRevision) {
+    const data = await readSource(await this.officeFilePath(relative), previousRevision, 25 * 1024 * 1024);
+    return data && { path: relative, revision: data.revision, ...await officePreview(officeKind(relative), data.bytes) };
   }
 
   async wordFilePath(relative) {

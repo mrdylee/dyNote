@@ -1,32 +1,5 @@
-import JSZip from "jszip";
 import mammoth from "mammoth";
-import yauzl from "yauzl";
-
-async function readPackage(bytes) {
-  const zip = await yauzl.fromBufferPromise(bytes, { strictFileNames: true });
-  const validated = new JSZip();
-  try {
-    if (zip.entryCount > 4096) throw new Error("Too many package entries");
-    let expandedBytes = 0;
-    let actualBytes = 0;
-    for await (const entry of zip.eachEntry()) {
-      expandedBytes += entry.uncompressedSize;
-      if (expandedBytes > 100 * 1024 * 1024) throw new Error("Word package is too large");
-      const stream = await zip.openReadStreamPromise(entry);
-      const chunks = [];
-      for await (const chunk of stream) {
-        actualBytes += chunk.length;
-        if (actualBytes > 100 * 1024 * 1024) throw new Error("Word package is too large");
-        chunks.push(chunk);
-      }
-      validated.file(entry.fileName, Buffer.concat(chunks), { binary: true, createFolders: false });
-    }
-    // The converter receives only entries read and bounded by the same ZIP reader.
-    return await validated.generateAsync({ type: "nodebuffer" });
-  } finally {
-    zip.close();
-  }
-}
+import { readPackage } from "./office-package.mjs";
 
 const convertImage = mammoth.images.imgElement(async image => {
   if (!/^image\/(png|jpeg|gif|webp)$/i.test(image.contentType)) return {};

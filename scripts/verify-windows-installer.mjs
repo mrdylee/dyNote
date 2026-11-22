@@ -245,6 +245,12 @@ try {
     assert.equal(await readFile(note, 'utf8'), original);
   });
   console.log('PASS updated app sent Agent using the same unconfirmed draft and retained both drafts and the original note');
+  if (process.env.DYNOTE_OFFICE_PIPE) {
+    const result = await run(process.execPath, ['scripts/verify-office-preview.mjs'], {
+      env: {...process.env, DYNOTE_EXECUTABLE: installed}, timeout: 240000,
+    });
+    console.log(result.stdout);
+  }
   await uninstall();
   assert.equal(await readFile(note, 'utf8'), original);
   assert.equal(JSON.parse(await readFile(path.join(profile, 'settings.json'), 'utf8')).vaultRoot, vault);

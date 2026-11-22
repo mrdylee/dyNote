@@ -201,7 +201,7 @@ export default function Editor({
         const text = assets
           .map(
             (asset) =>
-              `${/\.pdf$/i.test(asset.path) ? "" : "!"}[[${asset.path}]]`,
+              `${/\.(pdf|xlsx|pptx)$/i.test(asset.path) ? "" : "!"}[[${asset.path}]]`,
           )
           .join("\n");
         if (journalInsertAttachments(target, text)) return;

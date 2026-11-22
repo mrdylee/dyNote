@@ -502,7 +502,7 @@ app
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
-      "read-word-document", "open-word-document",
+      "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
       "document-drafts": () => documentDrafts.list(),
@@ -698,6 +698,16 @@ app
         checkVault(args, vault);
         return vault.readAttachment(args.path);
       },
+      "read-office-document": (args, vault) => {
+        checkVault(args, vault);
+        return vault.readOfficeDocument(args.path, args.revision);
+      },
+      "open-office-document": async (args, vault) => {
+        checkVault(args, vault);
+        const file = await vault.officeFilePath(args.path);
+        if (await shell.openPath(file)) throw new Error("원본 파일을 열 수 없습니다. 기본 앱 설정을 확인해 주세요.");
+        return true;
+      },
       "read-word-document": (args, vault) => {
         checkVault(args, vault);
         return vault.readWordDocument(args.path, args.revision, args.preview !== false);
@@ -706,7 +716,7 @@ app
         const result = await dialog.showOpenDialog(window, {
           title: "파일 열기", properties: ["openFile"],
           filters: [
-            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "docx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
+            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "docx", "xlsx", "pptx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
             { name: "모든 파일 · UTF-8 텍스트", extensions: ["*"] },
           ],
         });
@@ -739,8 +749,8 @@ app
           properties: ["openFile", "multiSelections"],
           filters: [
             {
-              name: "이미지·PDF·오디오",
-              extensions: ["png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
+              name: "이미지·PDF·오디오·Office",
+              extensions: ["xlsx", "pptx", "png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
             },
           ],
         });
@@ -839,7 +849,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

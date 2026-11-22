@@ -112,6 +112,8 @@ contextBridge.exposeInMainWorld(
     importAttachment: (args) => call("import-attachment", args),
     chooseAttachments: (args) => call("choose-attachments", args),
     readAttachment: (args) => call("read-attachment", args),
+    readOfficeDocument: args => call("read-office-document", args),
+    openOfficeDocument: args => call("open-office-document", args),
     readWordDocument: (args) => call("read-word-document", args),
     openWordDocument: (args) => call("open-word-document", args),
     chooseExternalFile: () => call("choose-external-file"),

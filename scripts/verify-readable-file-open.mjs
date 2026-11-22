@@ -99,8 +99,8 @@ try {
   assert.equal(await dialog.getByText("PRIVATE_VAULT_MARKER").count(), 0);
   await dialog.getByText("원문 보기", { exact: true }).click();
   await dialog.locator("pre").getByText(/외부 목록/).waitFor();
-  await drop("binary.xlsx");
-  await page.getByRole("dialog", { name: "파일 열기", exact: true }).getByRole("status").getByText(/UTF-8/).waitFor();
+  dialog = await drop("binary.xlsx");
+  await dialog.getByRole("status").getByText(/미리 볼 수 없습니다/).waitFor();
   await page.keyboard.press("Escape");
   for (const [name, bytes] of samples) assert.deepEqual(await readFile(path.join(root, name)), bytes);
   assert.equal(await readFile(path.join(vault, "Control.md"), "utf8"), control);

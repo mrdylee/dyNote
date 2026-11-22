@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src 'none'; base-uri 'none'; form-action 'none'">
+  <link rel="stylesheet" href="/src/office-slides.css">
+  <title>슬라이드 미리보기</title>
+</head>
+<body>
+  <main id="stage" aria-label="현재 슬라이드"></main>
+  <p id="message" role="status">슬라이드를 읽는 중…</p>
+  <nav aria-label="슬라이드 이동">
+    <button id="previous" aria-label="이전 슬라이드" disabled>‹</button>
+    <output id="position" aria-live="polite"></output>
+    <button id="next" aria-label="다음 슬라이드" disabled>›</button>
+  </nav>
+  <script type="module" src="/src/office-slides.mjs"></script>
+</body></html>

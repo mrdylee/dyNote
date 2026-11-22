@@ -7,8 +7,9 @@ export function assetPath(input, root) {
   const model = decoded === "/ess/ess-container.glb";
   if (
     url.protocol !== "notes:" ||
-    !["app", "ess"].includes(url.host) ||
+    !["app", "ess", "slides"].includes(url.host) ||
     url.search || url.hash ||
+    (url.host === "slides" && decoded !== "/slides.html" && !decoded.startsWith("/assets/")) ||
     (ess && decoded !== "/ess.html" && !decoded.startsWith("/assets/") && !model) ||
     /[\\\0]/.test(decoded) ||
     decoded.split("/").some((p) => p.startsWith(".")) ||
