@@ -48,7 +48,7 @@ export default function useExternalDocuments(api, invoke) {
   const onFocus = useEffectEvent(() => refresh());
   const onDrop = useEffectEvent(event => {
     const files = Array.from(event.dataTransfer?.files ?? []);
-    if (!files.length) return;
+    if (!files.length || event.target.closest?.("[data-sidebar-copy]")) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (files.length !== 1) {

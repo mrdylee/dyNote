@@ -40,6 +40,7 @@ jobs:
           node scripts/verify-copilot-continuation.mjs
           node scripts/verify-word-documents.mjs
           node scripts/verify-external-file-open.mjs
+          node scripts/verify-sidebar-file-drop.mjs
           node scripts/verify-document-tabs.mjs
           node scripts/verify-update-install.mjs
       - run: node scripts/package-windows-distribution.mjs

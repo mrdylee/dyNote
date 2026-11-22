@@ -1,15 +1,15 @@
 import { officeKind, isOfficeKind } from "./office-types.mjs";
 import { officePreview } from "./office-package.mjs";
-import { readSource, sourcePath } from "./file-source.mjs";
+import { readSource, sourcePath, decodePreviewText } from "./file-source.mjs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { readWordContent } from "./word-documents.mjs";
-import { attachmentMime, validateAttachment } from "./attachments.mjs";
+import { attachmentMime, validateAttachment, decodeHtml } from "./attachments.mjs";
 import { documentKind, validateDocument } from "./documents.mjs";
 
 const extension = name => path.extname(name).slice(1).toLowerCase();
-const kind = name => /\.(md|markdown)$/i.test(name) ? "markdown" : /\.docx$/i.test(name) ? "word" : officeKind(name) ?? documentKind(name) ??
+const kind = name => /\.html?$/i.test(name) ? "html" : /\.(md|markdown)$/i.test(name) ? "markdown" : /\.docx$/i.test(name) ? "word" : officeKind(name) ?? documentKind(name) ??
   (attachmentMime(name)?.startsWith("image/") ? "image" : attachmentMime(name)?.startsWith("audio/") ? "audio" : /\.pdf$/i.test(name) ? "pdf" : "text");
 const limit = name => kind(name) === "markdown" ? Infinity : ["canvas", "base"].includes(kind(name)) ? 8 * 1024 * 1024 : 25 * 1024 * 1024;
 const sourceExtensions = new Set(["md", "markdown", "docx", "xlsx", "pptx", "canvas", "base", "txt", "text", "log", "json", "jsonl", "csv", "tsv", "yaml", "yml", "xml", "ini", "cfg", "conf", "toml", "pdf", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"]);
@@ -20,11 +20,7 @@ async function preview(name, bytes) {
   if (type === "word") return { kind: type, canOpenSource, ...await readWordContent(bytes, true) };
   if (["image", "audio", "pdf"].includes(type))
     return { kind: type, canOpenSource, mime: validateAttachment(name, bytes), bytes };
-  let content;
-  try {
-    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    if (content.includes("\0")) throw new Error();
-  } catch { throw new Error("지원하지 않는 파일 형식이거나 UTF-8 텍스트가 아닙니다."); }
+  const content = type === "html" ? decodeHtml(bytes) : decodePreviewText(bytes);
   if (["canvas", "base"].includes(type)) validateDocument(name, content);
   return { kind: type, canOpenSource, content, path: name };
 }

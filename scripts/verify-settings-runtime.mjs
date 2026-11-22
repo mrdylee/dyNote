@@ -57,12 +57,53 @@ try {
   report.checks.push("The DyNote wordmark and app mark render, and the version button opens About");
   await page.getByRole("button", { name: "설정", exact: true }).click();
   await page.getByRole("button", { name: "백업·복원", exact: true }).click();
-  assert.deepEqual(await page.locator(".settings-tabs button").allTextContents(), ["시작 화면", "보관함", "글꼴", "단축키", "플러그인", "Copilot 대화 자동 저장", "문서 프롬프트", "백업·복원", "업데이트"]);
+  assert.deepEqual(await page.locator(".settings-tabs button").allTextContents(), ["시작 화면", "보관함", "글꼴", "테마", "단축키", "플러그인", "Copilot 대화 자동 저장", "문서 프롬프트", "백업·복원", "업데이트"]);
   assert.equal(await page.getByRole("button", { name: "자동 백업", exact: true }).getAttribute("aria-pressed"), "true");
   assert.equal(await page.getByRole("textbox", { name: "Git 저장소 주소", exact: true }).inputValue(), "");
   assert.equal(await page.getByRole("button", { name: "연결하고 백업 시작", exact: true }).isDisabled(), true);
   assert.match(await page.locator(".daily-backup-info").innerText(), /하루 한 번/);
   report.checks.push("Git address starts empty; daily backup remains disconnected");
+  await page.getByRole("button", { name: "테마", exact: true }).click();
+  const themes = page.getByRole("group", { name: "색상 테마" }).getByRole("radio");
+  assert.equal(await themes.count(), 10);
+  assert.equal(await page.getByRole("radio", { name: "라벤더" }).isChecked(), true);
+  const panelColors = new Set();
+  for (const radio of await themes.all()) {
+    await radio.check();
+    const colors = await page.evaluate(async () => {
+      const settingsTab = document.querySelector(".settings-tabs [aria-current=page]");
+      await Promise.all(settingsTab.getAnimations().map(animation => animation.finished));
+      const style = selector => getComputedStyle(document.querySelector(selector));
+      const canvas = document.createElement("canvas").getContext("2d");
+      const luminance = color => {
+        canvas.fillStyle = color;
+        canvas.fillRect(0, 0, 1, 1);
+        const [r, g, b] = Array.from(canvas.getImageData(0, 0, 1, 1).data, byte => {
+          const v = byte / 255;
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const selected = getComputedStyle(settingsTab);
+      const tab = document.createElement("div");
+      tab.className = "tab active draft-ready";
+      document.querySelector(".tabs").append(tab);
+      const draftBackground = getComputedStyle(tab).backgroundColor;
+      tab.remove();
+      return {
+        panel: style(".navigator").backgroundColor, draftBackground,
+        selectedContrast: (luminance(selected.backgroundColor) + 0.05) / (luminance(selected.color) + 0.05),
+        primaryContrast: 1.05 / (luminance(style(":root").getPropertyValue("--accent")) + 0.05),
+      };
+    });
+    assert.ok(colors.selectedContrast >= 4.5 && colors.primaryContrast >= 4.5, JSON.stringify(colors));
+    assert.equal(colors.draftBackground, "rgb(232, 244, 235)");
+    panelColors.add(colors.panel);
+  }
+  assert.equal(panelColors.size, 10);
+  await themes.last().press("ArrowLeft");
+  assert.equal(await page.getByRole("radio", { name: "플럼" }).isChecked(), true);
+  report.checks.push("Ten themes immediately tint the sidebar, retain the green draft tab, meet selected and primary control contrast, and support arrow-key selection");
   await page.getByRole("button", { name: "글꼴", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "설치 글꼴 불러오기", exact: true }).count(), 0);
   assert.equal(await page.getByRole("textbox", { name: "본문 글꼴", exact: true }).count(), 0, "each row should expose one family picker");
@@ -153,6 +194,12 @@ try {
   assert.match(await page.locator(".git-status").innerText(), /대기/);
   assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "1");
   await app.close(); app = await launch(); await setup();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "테마", exact: true }).click();
+  assert.equal(await page.getByRole("radio", { name: "플럼" }).isChecked(), true);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()), "#88447c");
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  report.checks.push("Selected theme restores after an Electron restart");
   assert.equal(await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontSize), "19px");
   assert.ok((await page.locator(".markdown-preview").evaluate((el) => getComputedStyle(el).fontFamily)).includes(bodyFont));
   assert.equal(git("--git-dir", bare, "rev-list", "--count", "main").trim(), "1");

@@ -36,3 +36,12 @@ export async function readSource(source, previousRevision, maxBytes) {
     await handle.close();
   }
 }
+
+export function decodePreviewText(bytes) {
+  let content;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    if (content.includes("\0")) throw new Error();
+  } catch { throw new Error("지원하지 않는 파일 형식이거나 UTF-8 텍스트가 아닙니다."); }
+  return content;
+}

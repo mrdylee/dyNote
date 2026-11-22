@@ -126,6 +126,24 @@ try {
   await page.reload();
   await page.locator('.tab.draft-ready .tab-label').click();
   assert.match(await draft.getByLabel('Markdown 초안', { exact: true }).inputValue(), /Useful body/);
+  const readyTab = page.locator('.tab.draft-ready');
+  const confirmClose = page.getByRole('dialog', { name: '탭을 닫을까요?', exact: true });
+  await readyTab.locator('.tab-close').click();
+  await confirmClose.getByRole('button', { name: '취소', exact: true }).click();
+  assert.match(await draft.getByLabel('Markdown 초안', { exact: true }).inputValue(), /Useful body/);
+  const beforeCloseCount = await page.locator('.tabs .tab').count();
+  await page.locator('.tabs .tab:not(.draft-ready)').first().click({button: 'right'});
+  await page.getByRole('menuitem', {name:'다른 탭 모두 닫기', exact:true}).click();
+  await confirmClose.getByRole('button', {name:'취소', exact:true}).click();
+  assert.equal(await page.locator('.tabs .tab').count(), beforeCloseCount);
+  await readyTab.click({button: 'right'});
+  await page.getByRole('menuitem', {name:'이 탭 닫기', exact:true}).click();
+  await confirmClose.getByRole('button', {name:'탭 닫기', exact:true}).click();
+  await readyTab.waitFor({state:'detached'});
+  assert.equal(await page.locator('.tabs .tab').count(), beforeCloseCount - 1);
+  await page.reload();
+  await page.locator('.tab.draft-ready .tab-label').click();
+  assert.match(await draft.getByLabel('Markdown 초안', { exact: true }).inputValue(), /Useful body/);
   // Hold the debounce so only the close handshake can persist the final edit.
   await page.evaluate(() => { window.originalTimeout = window.setTimeout; window.setTimeout = (fn, ms, ...args) => window.originalTimeout(fn, ms === 250 ? 30000 : ms, ...args); });
   await draft.getByLabel('Markdown 초안', { exact: true }).fill('# Last edit before closing');

@@ -117,6 +117,12 @@ contextBridge.exposeInMainWorld(
     readWordDocument: (args) => call("read-word-document", args),
     openWordDocument: (args) => call("open-word-document", args),
     chooseExternalFile: () => call("choose-external-file"),
+    transferDroppedFile: (args, file) => {
+      const source = webUtils.getPathForFile(file);
+      if (!source) return Promise.resolve({ ok: false, error: "디스크에 저장된 파일을 놓아 주세요." });
+      return call("transfer-dropped-file", { ...args, source });
+    },
+    readOtherFile: args => call("read-other-file", args),
     openDroppedFile: file => {
       const path = webUtils.getPathForFile(file);
       if (!path) return Promise.resolve({ ok: false, error: "디스크에 저장된 파일을 놓아 주세요." });

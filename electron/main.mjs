@@ -500,7 +500,7 @@ app
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
-      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
+      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
@@ -690,6 +690,24 @@ app
         checkVault(args, vault);
         return vault.saveDocument(args.path, args.content, args.revision);
       },
+      "transfer-dropped-file": async (args, vault) => {
+        checkVault(args, vault);
+        const result = await vault.transferDroppedFile(args.source, args.folder, args.operation);
+        if (args.operation === "move" && !result.warning && !result.unchanged) {
+          for (const { vault: source, git } of openedVaults.values()) {
+            if (source.id !== vault.id && args.source.startsWith(source.root + path.sep)) {
+              git.markDirty(source.id);
+              result.sourceVaultId = source.id;
+              break;
+            }
+          }
+        }
+        return result;
+      },
+      "read-other-file": (args, vault) => {
+        checkVault(args, vault);
+        return vault.readOtherFile(args.path);
+      },
       "import-attachment": (args, vault) => {
         checkVault(args, vault);
         return vault.importAttachment(args.name, args.bytes);
@@ -716,7 +734,7 @@ app
         const result = await dialog.showOpenDialog(window, {
           title: "파일 열기", properties: ["openFile"],
           filters: [
-            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "docx", "xlsx", "pptx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
+            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "html", "htm", "docx", "xlsx", "pptx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
             { name: "모든 파일 · UTF-8 텍스트", extensions: ["*"] },
           ],
         });
@@ -750,7 +768,7 @@ app
           filters: [
             {
               name: "이미지·PDF·오디오·Office",
-              extensions: ["xlsx", "pptx", "png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
+              extensions: ["html", "htm", "xlsx", "pptx", "png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
             },
           ],
         });
@@ -849,7 +867,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -878,7 +896,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { captureDateHeading } from "../core/copilot-journal-links.mjs";
 import {
   BookOpen,
@@ -58,6 +58,7 @@ import WordPreview from "./WordPreview.jsx";
 import useExternalDocuments from "./useExternalDocuments.jsx";
 import OfficePreview from "./OfficePreview.jsx";
 import { officeKind, isOfficeKind } from "../core/office-types.mjs";
+import HtmlPreview from "./HtmlPreview.jsx";
 import ExternalFilePreview from "./ExternalFilePreview.jsx";
 import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
@@ -107,6 +108,7 @@ const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(
   name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
 ]));
 const emptyFiles = [];
+const isReadyDraft = draft => draft && !draft.running && draft.content !== null;
 const emptyNavigation = normalizeNavigation(null);
 const emptyModel = buildKnowledge(emptyFiles);
 const checkingGit = { phase: "off", message: "Git 설정 확인 중…", enabled: false, config: null };
@@ -121,6 +123,18 @@ const stored = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 };
 const persist = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Remain usable during this session. */ } };
+const colorThemes = [
+  { id: "lavender", name: "라벤더", color: "#7359ae" },
+  { id: "blue", name: "코발트", color: "#345bb0" },
+  { id: "ocean", name: "오션", color: "#176c91" },
+  { id: "teal", name: "청록", color: "#13736d" },
+  { id: "forest", name: "포레스트", color: "#456c40" },
+  { id: "amber", name: "앰버", color: "#86601b" },
+  { id: "terracotta", name: "테라코타", color: "#a04c31" },
+  { id: "rose", name: "로즈", color: "#a03f62" },
+  { id: "plum", name: "플럼", color: "#88447c" },
+  { id: "slate", name: "슬레이트", color: "#536275" },
+];
 const documentPromptsKey = "dynote.document-prompts";
 const draftKey = draft => documentKey(draft.vaultId, `tmp/${draft.id}.md`);
 
@@ -192,7 +206,8 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
           (a.label ?? a.name).localeCompare(b.label ?? b.name, "ko") || a.name.localeCompare(b.name, "ko"),
       )
       .map(({ name, item, path, label }) => {
-        const word = item.note?.kind === "word";
+        const word = item.note?.kind === "word", other = item.note?.kind === "other";
+        const draggable = !word && !other && !item.note?.asset;
         if (item.note)
           return (
             <button
@@ -202,14 +217,14 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
               data-drop-label={undefined}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
-              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word}); }}
-              onKeyDown={event => renameOnF2(event, {path, folder:false})}
-              onPointerDown={word ? undefined : event => onCopyPointer(event, path)}
+              onContextMenu={event => { event.preventDefault(); if (!other) onContext(event, {path, folder:false, word}); }}
+              onKeyDown={other ? undefined : event => renameOnF2(event, {path, folder:false})}
+              onPointerDown={!draggable ? undefined : event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
-              draggable={!disabled && !word}
-              onDragStart={word ? undefined : event => onDragDocument(event, path)}
-              onDragEnd={word ? undefined : onDragEnd}
+              draggable={!disabled && draggable}
+              onDragStart={!draggable ? undefined : event => onDragDocument(event, path)}
+              onDragEnd={!draggable ? undefined : onDragEnd}
             >
               <FileText size={14} />
               <span title={label}>{label ?? name.replace(/\.md$/i, "")}</span>
@@ -285,6 +300,14 @@ export default function App() {
     return Array.isArray(saved) && saved[0]?.id === "default" && saved.every(p =>
       typeof p?.id === "string" && typeof p.name === "string" && typeof p.text === "string") ? saved : [defaultDocumentPrompt];
   });
+  const [theme, setTheme] = useState(() => {
+    const saved = stored("dynote.theme", null);
+    return colorThemes.find(item => item.id === saved) ?? colorThemes[0];
+  });
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--accent", theme.color);
+    persist("dynote.theme", theme.id);
+  }, [theme]);
   const [fonts, setFonts] = useState(() => {
     try { return normalizeFonts(JSON.parse(localStorage.getItem("dynote.fonts"))); } catch { return normalizeFonts(null); }
   });
@@ -319,7 +342,8 @@ export default function App() {
   const active = vault?.id === focusedVaultId ? focusedPath : null;
   const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
   const showingOffice = isOfficeKind(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
-  const displayedPath = showingWord || showingOffice ? attachment.path : active;
+  const showingFile = ["html", "other"].includes(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
+  const displayedPath = showingWord || showingOffice || showingFile ? attachment.path : active;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
   const { mode, setMode } = workspace;
@@ -378,6 +402,7 @@ export default function App() {
     drafts.forEach(draft => restoredDrafts.current.add(draft.id));
     setTabs(old => [...new Set([...old, ...drafts.map(draftKey)])]);
   }, [documentDrafts, vaults]);
+  const [tabCloseRequest, setTabCloseRequest] = useState(null);
   const [tabMenu, setTabMenu] = useState(null);
   const tabMenuRef = useRef(null);
   const tabMenuIndex = tabs.indexOf(tabMenu?.key);
@@ -495,6 +520,7 @@ export default function App() {
   const treeDrag = useRef(null);
   const [newFolder, setNewFolder] = useState(null);
   const macCopyDrag = useRef(null);
+  const [copyStatus, setCopyStatus] = useState("");
   const [treeDrop, setTreeDrop] = useState(null);
   const [treeReveal, setTreeReveal] = useState(null);
   const [treeMove, setTreeMove] = useState(null);
@@ -933,9 +959,17 @@ export default function App() {
     const target = documentRef(key, vault?.id);
     openNote(target.path, target.vaultId);
   };
-  const closeTabs = (keys, anchor) => {
+  const closeTabs = (keys, anchor, confirmed = false) => {
     if (busy || !keys.length) return;
     const closing = new Set(keys);
+    if (!confirmed) {
+      const drafts = documentDrafts.filter(draft => closing.has(draftKey(draft)) && isReadyDraft(draft));
+      if (drafts.length) {
+        setTabCloseRequest({ keys, anchor, names: drafts.map(draft => draft.fileName) });
+        setModal("confirm-close-tabs");
+        return false;
+      }
+    }
     const paths = workspace.paths.filter(key => !closing.has(key));
     const next = tabs.filter(key => !closing.has(key));
     setTabs(old => old.filter(key => !closing.has(key)));
@@ -943,6 +977,7 @@ export default function App() {
     if (!paths.length && closing.has(workspace.active) && next.length) {
       workspace.setActive(next.includes(anchor) ? anchor : next.at(-1));
     }
+    return true;
   };
   const showTabMenu = (event, key) => {
     event.preventDefault();
@@ -1205,6 +1240,19 @@ export default function App() {
   };
   const openAttachment = async (path, fragment = "", vaultId = vault.id) => {
     if (officeKind(path)) return loadOfficeDocument(path, vaultId);
+    if (/\.html?$/i.test(path) || vaultsRef.current[vaultId]?.otherFiles?.some(file => file.path === path)) {
+      const kind = /\.html?$/i.test(path) ? "html" : "other";
+      const request = ++attachmentRequest.current;
+      setAttachment({ path, vaultId, kind });
+      setSection("files");
+      try {
+        const content = await invoke(api.readOtherFile({ vaultId, path }));
+        if (request === attachmentRequest.current) setAttachment({ path, vaultId, kind, content });
+      } catch (error) {
+        if (request === attachmentRequest.current) setAttachment({ path, vaultId, kind, error: error.message });
+      }
+      return;
+    }
     const request = ++attachmentRequest.current;
     try {
       const data = await invoke(api.readAttachment({ vaultId, path }));
@@ -1273,7 +1321,7 @@ export default function App() {
     const scope = vaultsRef.current[vaultId];
     if (scope && [...models.get(vaultId).notes, ...scope.documents].some(n => n.path === path)) openNote(path, vaultId);
     else if (scope?.wordDocuments?.some(file => file.path === path)) openWordDocument(path, vaultId);
-    else if (scope?.attachments.some(file => file.path === path)) openAttachment(path, "", vaultId);
+    else if (scope?.attachments.some(file => file.path === path) || scope?.otherFiles?.some(file => file.path === path)) openAttachment(path, "", vaultId);
     else setError(`파일을 찾을 수 없습니다: ${path}`);
   };
   const openExternal = (url) => invoke(api.openExternal(url)).catch((err) => setError(err.message));
@@ -1388,6 +1436,38 @@ export default function App() {
     setTreeDrop(old => !operation ? null
       : old?.vaultId === vaultId && old.folder === folder && old.operation === operation ? old : { vaultId, folder, operation });
   };
+  const sidebarTarget = event => {
+    const row = event.target.closest?.("[data-tree-drop-vault]");
+    return { vaultId: row?.dataset.treeDropVault ?? (together && visibleSpaces.length === 1 ? visibleSpaces[0].id : vault.id),
+      folder: row?.dataset.treeDropFolder ?? "" };
+  };
+  const transferSidebarFiles = async (files, { vaultId, folder }, operation) => {
+    const verb = operation === "copy" ? "복사" : "이동";
+    const completed = [], failed = [], refresh = new Set();
+    setBusy(true);
+    setCopyStatus("파일 " + verb + " 중…");
+    try {
+      await flush();
+      for (const file of files) {
+        try {
+          const result = await invoke(api.transferDroppedFile({ vaultId, folder, operation }, file));
+          if (!result.unchanged) refresh.add(vaultId);
+          if (result.sourceVaultId) refresh.add(result.sourceVaultId);
+          if (result.warning) failed.push(file.name + " · " + result.warning);
+          else if (!result.unchanged) completed.push(result.path);
+        }
+        catch (error) { failed.push(file.name + " · " + error.message); }
+      }
+      for (const id of refresh) acceptSnapshot(await invoke(api.snapshot({ vaultId: id })));
+      if (refresh.size) {
+        setTreeReveal({ vaultId, folder });
+      }
+      const destination = [spaceLabel(vaultsRef.current[vaultId]), folder].filter(Boolean).join(" / ");
+      setCopyStatus(completed.length ? `${destination}에 ${completed.length === 1 ? completed[0].split("/").at(-1) : "파일 " + completed.length + "개"} ${verb}됨` : failed.length ? "" : "이미 같은 폴더에 있습니다.");
+      if (failed.length) setError(failed.join("\n"));
+    } catch (error) { setCopyStatus(""); setError(error.message); }
+    finally { setBusy(false); }
+  };
   const treeDropProps = (vaultId, folder) => {
     const current = treeDrop?.vaultId === vaultId && treeDrop.folder === folder ? treeDrop : null;
     const operationAt = (event, source) => {
@@ -1398,7 +1478,7 @@ export default function App() {
     return {
       "data-tree-drop-vault": vaultId,
       "data-tree-drop-folder": folder,
-      "data-drop-label": current ? current.operation === "copy" ? "복사" : "이동" : undefined,
+      "data-drop-label": current ? ["move", "import-move"].includes(current.operation) ? "이동" : "복사" : undefined,
       onDragOver: event => {
         if (!event.dataTransfer.types.includes(FILE_TREE_DRAG)) return;
         event.preventDefault(); event.stopPropagation();
@@ -1802,7 +1882,7 @@ export default function App() {
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
   };
-  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles), ...(scope.attachments ?? emptyFiles).filter(file => officeKind(file.path))]}
+  const renderTree = scope => <FileTree notes={[...models.get(scope.id).notes, ...scope.documents, ...(scope.wordDocuments ?? emptyFiles), ...(scope.attachments ?? emptyFiles).map(file => ({ ...file, asset: true })), ...(scope.otherFiles ?? emptyFiles)]}
     folders={scope.folders ?? emptyFiles}
     journalPreferences={scope.journalPreferences}
     captureEntries={captureTreeEntries.get(scope.id)}
@@ -1912,7 +1992,25 @@ export default function App() {
             <span className="avatar">DN</span>
           </div>
         </nav>
-        <aside className="navigator" style={{ width: panelLayout.left }}>
+        <aside className="navigator" style={{ width: panelLayout.left }} data-sidebar-copy="" data-copy-active={treeDrop?.operation.startsWith("import-")}
+          onDragOverCapture={event => {
+            if (!event.dataTransfer.types.includes("Files")) return;
+            event.preventDefault(); event.stopPropagation();
+            const target = sidebarTarget(event);
+            // Dynote removes the original after publishing the file; the native drag source must keep it.
+            event.dataTransfer.dropEffect = busy ? "none" : "copy";
+            highlightTreeDrop(target.vaultId, target.folder, busy ? null : event.ctrlKey ? "import-copy" : "import-move");
+          }}
+          onDragLeaveCapture={event => {
+            if (treeDrop?.operation.startsWith("import-") && !event.currentTarget.contains(event.relatedTarget)) setTreeDrop(null);
+          }}
+          onDropCapture={event => {
+            const files = Array.from(event.dataTransfer.files);
+            if (!files.length) return;
+            event.preventDefault(); event.stopPropagation(); setTreeDrop(null);
+            if (!busy) void transferSidebarFiles(files, sidebarTarget(event), event.ctrlKey ? "copy" : "move");
+          }}>
+          {(treeDrop?.operation.startsWith("import-") || copyStatus) && <div className="sidebar-copy-status" role="status">{treeDrop?.operation === "import-move" ? "파일 이동 · Ctrl을 누르면 복사" : treeDrop?.operation === "import-copy" ? "파일 복사" : copyStatus}</div>}
           <button className="vault-switch" aria-label="공간 전환·관리" disabled={busy} {...(!together ? treeDropProps(vault.id, "") : {})} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>
             <span className="vault-icon">
               <FolderOpen size={18} />
@@ -2063,7 +2161,7 @@ export default function App() {
                 if (!scope) return null;
                 const draft = documentDrafts.find(item => draftKey(item) === key);
                 const label = together ? spaceLabel(scope) : null;
-                return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : draft && draft.content !== null ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
+                return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
                   onContextMenu={event => showTabMenu(event, key)}
                   onKeyDown={event => {
                     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
@@ -2301,7 +2399,10 @@ export default function App() {
                     문서로 돌아가기
                   </button>
                 </div>
-                {isOfficeKind(attachment.kind) ? <OfficePreview key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
+                {["html", "other"].includes(attachment.kind) ? (
+                  attachment.error ? <p role="status">{attachment.error}</p> : attachment.content === undefined ? <p role="status">파일을 읽는 중…</p>
+                    : attachment.kind === "html" ? <HtmlPreview content={attachment.content}/> : <pre className="external-file-text">{attachment.content}</pre>
+                ) : isOfficeKind(attachment.kind) ? <OfficePreview key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
                   onEdit={() => invoke(api.openOfficeDocument({ vaultId: attachment.vaultId, path: attachment.path })).catch(err => setError(err.message))}
                   onRefresh={() => loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision)}/> : attachment.kind === "word" ? <>
                   <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>
@@ -2377,7 +2478,7 @@ export default function App() {
               className={`save-status ${status}`}
               onClick={() => flush(true).catch(() => {})}
             >
-              {showingOffice || showingWord ? <BookOpen size={13} /> : status === "saving" ? (
+              {showingFile || showingOffice || showingWord ? <BookOpen size={13} /> : status === "saving" ? (
                 <LoaderCircle size={13} className="spin" />
               ) : status === "saved" ? (
                 <CheckCheck size={13} />
@@ -2385,7 +2486,7 @@ export default function App() {
                 <span className="status-dot" />
               )}
               <span>
-                {showingOffice ? "읽기 전용" : showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
+                {showingFile || showingOffice ? "읽기 전용" : showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
                   ? "모든 변경사항 저장됨"
                   : status === "saving"
                     ? "저장 중…"
@@ -2396,7 +2497,7 @@ export default function App() {
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
-              {showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
+              {showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
                 {note && <span>{statistics.words.toLocaleString()}단어</span>}
                 <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
                 <span>{structured?.kind ?? "Markdown"}</span>
@@ -2602,6 +2703,15 @@ export default function App() {
         </>
         )}
       </div>
+      {modal === "confirm-close-tabs" && tabCloseRequest && <Modal title="탭을 닫을까요?" onClose={() => setModal(null)}>
+        <p>{tabCloseRequest.names.length === 1 ? `‘${tabCloseRequest.names[0]}’에 문서로 저장하기 전인 초안이 있습니다.`
+          : `선택한 탭 중 ${tabCloseRequest.names.length}개에 문서로 저장하기 전인 초안이 있습니다.`}</p>
+        <div className="modal-actions"><button autoFocus onClick={() => setModal(null)}>취소</button>
+          <button className="primary-button" onClick={() => {
+            closeTabs(tabCloseRequest.keys, tabCloseRequest.anchor, true);
+            setModal(null);
+          }}>탭 닫기</button></div>
+      </Modal>}
       {tabMenuIndex >= 0 && <div ref={tabMenuRef} className="file-tree-menu" role="menu" aria-label="문서 탭 작업" style={{ left: tabMenu.x, top: tabMenu.y }}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setTabMenu(null); }}
         onKeyDown={event => {
@@ -2625,7 +2735,7 @@ export default function App() {
           ["오른쪽 탭 닫기", tabs.slice(tabMenuIndex + 1)],
         ].map(([label, keys]) => <button key={label} role="menuitem" tabIndex={-1} disabled={busy || !keys.length} onClick={() => {
           setTabMenu(null);
-          closeTabs(keys, tabMenu.key);
+          if (!closeTabs(keys, tabMenu.key)) return;
           requestAnimationFrame(() => {
             const target = document.querySelector(".tabs .tab.active .tab-label") ?? document.querySelector('.tabbar button[aria-label="새 문서"]');
             target?.focus();
@@ -2952,7 +3062,7 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
@@ -2960,6 +3070,16 @@ export default function App() {
               <button key={key} aria-pressed={settingsTab === key} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
+          {settingsTab === "theme" && <fieldset className="theme-picker">
+            <legend>색상 테마</legend>
+            <div className="theme-options">
+              {colorThemes.map(item => <label key={item.id} style={{ "--swatch": item.color }}>
+                <span className="theme-swatch" aria-hidden="true" />
+                <span>{item.name}</span>
+                <input type="radio" name="color-theme" value={item.id} checked={theme.id === item.id} onChange={() => setTheme(item)} />
+              </label>)}
+            </div>
+          </fieldset>}
           {settingsTab === "shortcuts" && <section className="settings-section">
             <h3>파일과 폴더</h3>
             <p><strong>이름 바꾸기</strong> <kbd>F2</kbd> · 왼쪽 파일 목록의 항목을 선택한 상태에서 누르세요.</p>

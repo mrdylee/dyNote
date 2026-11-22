@@ -1,5 +1,10 @@
+import sniffHtmlEncoding from "html-encoding-sniffer";
+
 export const attachmentMime = (name) =>
   ({
+    __proto__: null,
+    html: "text/html",
+    htm: "text/html",
     png: "image/png",
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
@@ -13,13 +18,26 @@ export const attachmentMime = (name) =>
     mp3: "audio/mpeg",
     ogg: "audio/ogg",
     m4a: "audio/mp4",
-  })[name.split(".").at(-1)?.toLowerCase()];
+  })[name.match(/\.([^./\\]+)$/)?.[1]?.toLowerCase()];
 
+
+export function decodeHtml(bytes) {
+  try {
+    const encoding = sniffHtmlEncoding(bytes, { defaultEncoding: "UTF-8" });
+    const text = new TextDecoder(encoding, { fatal: true }).decode(bytes);
+    if (!text.includes("\0")) return text;
+  } catch { /* Report the same encoding error for import and preview. */ }
+  throw new Error("HTML 문자 인코딩을 읽을 수 없습니다. UTF-8로 저장하거나 올바른 charset을 지정해 주세요.");
+}
 
 export function validateAttachment(name, bytes) {
   const mime = attachmentMime(name);
   if (!mime || bytes.length > 25 * 1024 * 1024)
-    throw new Error("25MB 이하의 이미지·PDF·오디오·Office 파일만 지원합니다.");
+    throw new Error("25MB 이하의 HTML·이미지·PDF·오디오·Office 파일만 지원합니다.");
+  if (mime === "text/html") {
+    decodeHtml(bytes);
+    return mime;
+  }
   const signatures = {
     "image/png": () =>
       bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")),
