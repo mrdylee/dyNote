@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld(
       if (!path) return Promise.resolve({ ok: false, error: "디스크에 저장된 파일을 놓아 주세요." });
       return call("open-external-file", { path });
     },
+    closeExternalFile: args => call("close-external-file", args),
     readExternalFile: args => call("read-external-file", args),
     openExternalFileSource: args => call("open-external-file-source", args),
     onOpenFile: callback => {

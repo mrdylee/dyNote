@@ -1298,14 +1298,9 @@ kbd {
   padding: 0;
   overflow: hidden;
 }
-.modal.external-file-dialog {
-  width: min(900px, 90vw);
-  max-height: 85vh;
-  overflow: auto;
-  padding: 0 22px 22px;
-}
-.modal.external-file-dialog .modal-heading { padding-left: 0; padding-right: 0; }
-.external-file-dialog .word-preview-actions button {
+.external-file-preview { padding: 16px 22px 22px; min-width: 0; }
+.external-file-preview > .word-preview-actions { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
+.external-file-preview .word-preview-actions button {
   background: white;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1316,7 +1311,7 @@ kbd {
 .navigator[data-copy-active=true] { outline: 2px solid var(--purple); outline-offset: -2px; }
 .sidebar-copy-status { position: absolute; z-index: 2; bottom: 4px; left: 6px; right: 6px; pointer-events: none; border-radius: 6px; background: var(--accent-soft); padding: 6px 12px; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .external-file-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.external-file-dialog .canvas-editor { height: 55vh; min-height: 350px; }
+.external-file-preview .canvas-editor { height: 55vh; min-height: 350px; }
 .modal-heading {
   display: flex;
   align-items: center;

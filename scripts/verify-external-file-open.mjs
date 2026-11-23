@@ -40,7 +40,7 @@ try {
     item.click(); return true;
   });
   assert.equal(hasMenu, true, "The File Open menu must exist");
-  const dialog = page.getByRole("dialog", { name: path.basename(source), exact: true });
+  const dialog = page.getByRole("region", { name: path.basename(source), exact: true });
   await dialog.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
   const article = dialog.getByRole("article", { name: "Word 미리보기" });
   for (const selector of [":scope > p", "td p"]) {
@@ -48,20 +48,21 @@ try {
   }
   const titleSize = await article.getByRole("heading", { level: 1 }).evaluate(node => parseFloat(getComputedStyle(node).fontSize));
   assert.ok(titleSize > 32, `The document title is ${titleSize}px with 32px body text`);
-  await dialog.getByText(/임시 미리보기/).waitFor();
+  await page.locator(".tab.active").getByText("임시 미리보기").waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0);
   await mkdir("output/playwright", { recursive: true });
   await page.screenshot({ path: "output/playwright/external-word-open.png" });
   assert.deepEqual(await readFile(source), before);
-  await dialog.getByRole("button", { name: "원본을 기본 앱에서 열기", exact: true }).click();
+  await dialog.getByRole("button", { name: "앱에서 수정", exact: true }).click();
   assert.equal(await app.evaluate(() => globalThis.openedExternalWordPath), source);
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: path.basename(source) + " 탭 닫기", exact: true }).click();
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
   await dialog.getByRole("heading", { name: "SWRS 검토 문서" }).waitFor();
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: path.basename(source) + " 탭 닫기", exact: true }).click();
   await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
   await page.getByRole("button", { name: "파일 열기", exact: true }).waitFor({ state: "visible" });
-  assert.equal(await page.getByRole("dialog", { name: path.basename(source) }).count(), 0);
+  assert.equal(await page.getByRole("region", { name: path.basename(source) }).count(), 0);
 
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   await page.locator(".file-tree").getByRole("button", { name: "Control", exact: true }).click();
@@ -74,7 +75,7 @@ try {
     dataTransfer.items.add(new File(["control"], "control.md"));
     document.querySelector(".cm-content").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
   });
-  await page.getByRole("status").getByText("파일은 한 번에 하나씩 놓아 주세요.").waitFor();
+  await page.getByRole("alert").getByText("파일은 한 번에 하나씩 놓아 주세요.").waitFor();
   await page.keyboard.press("Escape");
   assert.equal(await page.getByRole("dialog").count(), 0);
   const internalPassed = await page.evaluate(() => {
@@ -107,8 +108,48 @@ try {
   assert.equal(await page.evaluate(async () => (await window.notes.snapshot()).value.id), initialVault);
   assert.equal((await readdir(vault)).some(file => /\.docx$/i.test(file)), false);
   assert.deepEqual(errors, []);
+  async function delayNextReply(channel) {
+    await app.evaluate(({ ipcMain }, channel) => {
+      const handler = ipcMain._invokeHandlers.get(channel);
+      let started, resume;
+      const waiting = new Promise(resolve => { resume = resolve; });
+      globalThis.delayedPreview = { started: new Promise(resolve => { started = resolve; }), resume };
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, async (...args) => {
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, handler);
+        const result = await handler(...args);
+        started();
+        await waiting;
+        return result;
+      });
+    }, channel);
+  }
+  // Hold an unchanged read across an atomic save and a second refresh.
+  await delayNextReply("notes:read-external-file");
+  await dialog.getByRole("button", { name: "미리보기 새로고침" }).click();
+  await app.evaluate(() => globalThis.delayedPreview.started);
+  await writeFile(source + ".tmp", before);
+  await rename(source + ".tmp", source);
+  await dialog.getByRole("button", { name: "미리보기 새로고침" }).click();
+  await dialog.getByText(/절연감시/).first().waitFor();
+  await app.evaluate(() => globalThis.delayedPreview.resume());
+
+  // Closing the tab takes precedence over a late reply reopening the same source.
+  await app.evaluate(({ dialog }, source) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] });
+  }, source);
+  await delayNextReply("notes:choose-external-file");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await app.evaluate(() => globalThis.delayedPreview.started);
+  const previewId = (await page.locator(".tab.active").getAttribute("data-tab-key")).slice("external:".length);
   assert.ok((await readdir(cache)).length);
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: path.basename(source) + " 탭 닫기", exact: true }).click();
+  await app.evaluate(() => globalThis.delayedPreview.resume());
+  await page.waitForFunction(() => !document.querySelector('button[aria-label="파일 열기"]').disabled);
+  assert.equal(await page.getByRole("button", { name: path.basename(source) + " 탭 닫기", exact: true }).count(), 0);
+  assert.equal(await page.evaluate(async id => (await window.notes.readExternalFile({ id })).ok, previewId), false);
+  assert.deepEqual(await readdir(cache), []);
   await app.close(); app = null;
   assert.deepEqual(await readdir(cache), [], "Normal quit must remove temporary Word copies");
   console.log("External Word menu, button, editor drop, multi-file rejection, internal drag pass-through, source handoff, refresh and temporary cleanup passed.");

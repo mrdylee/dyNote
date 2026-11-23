@@ -1,72 +1,91 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
-export default function useExternalDocuments(api, invoke) {
-  const [state, setState] = useState({ document: null, visible: false, opening: false, error: "" });
-  const requests = useRef(0), pending = useRef(false);
+export default function useExternalDocuments(api, invoke, activeKey, activate, onError) {
+  const [documents, setDocuments] = useState({});
+  const [opening, setOpening] = useState(false);
+  const openingRequests = useRef(new Set());
+  const reads = useRef(new Map());
+  const current = documents[activeKey];
 
-  const close = () => {
-    requests.current++;
-    pending.current = false;
-    setState(value => ({ ...value, visible: false, opening: false }));
-  };
-  const open = async (operation, dropped = false) => {
-    const request = ++requests.current;
-    pending.current = true;
-    setState(value => ({ ...value, opening: true, ...(dropped ? { visible: true, document: null, error: "" } : {}) }));
+  const open = async operation => {
+    const closedDuringOpen = new Set();
+    openingRequests.current.add(closedDuringOpen);
+    setOpening(true);
     try {
       const document = await invoke(operation());
-      if (request !== requests.current) return;
-      setState(value => document ? { document, visible: true, opening: false, error: "" } : { ...value, opening: false });
-    } catch (error) {
-      if (request === requests.current) setState({ document: null, visible: true, opening: false, error: error.message });
-    } finally {
-      if (request === requests.current) pending.current = false;
+      if (document) {
+        const key = "external:" + document.id;
+        if (closedDuringOpen.has(key)) return;
+        reads.current.delete(key);
+        setDocuments(old => ({ ...old, [key]: { position: old[key]?.position ?? { current: {} }, editing: old[key]?.editing, document, error: "" } }));
+        activate(key);
+      }
+    } catch (error) { onError(error.message); }
+    finally {
+      openingRequests.current.delete(closedDuringOpen);
+      setOpening(openingRequests.current.size > 0);
     }
   };
   const choose = () => open(() => api.chooseExternalFile());
-  const refresh = async () => {
-    if (!state.visible || !state.document || pending.current) return;
-    const request = ++requests.current;
-    pending.current = true;
-    setState(value => ({ ...value, opening: true, error: "" }));
+  const close = key => {
+    const entry = documents[key];
+    if (!entry) return;
+    for (const request of openingRequests.current) request.add(key);
+    reads.current.delete(key);
+    setDocuments(old => {
+      const next = { ...old };
+      delete next[key];
+      return next;
+    });
+    invoke(api.closeExternalFile({ id: entry.document.id })).catch(error => onError(error.message));
+  };
+  const refresh = async (background = false) => {
+    if (!current || (background && reads.current.has(activeKey))) return;
+    const request = Symbol();
+    reads.current.set(activeKey, request);
+    const { id, revision } = current.document;
     try {
-      const document = await invoke(api.readExternalFile({ id: state.document.id, revision: state.document.revision }));
-      if (request === requests.current) setState(value => ({ ...value, document: document ?? value.document, opening: false }));
+      const document = await invoke(api.readExternalFile({ id, revision }));
+      if (reads.current.get(activeKey) !== request) return;
+      setDocuments(old => {
+        const entry = old[activeKey];
+        if (!entry || (!document && !entry.error)) return old;
+        return { ...old, [activeKey]: { ...entry, document: document ?? entry.document, error: "" } };
+      });
     } catch (error) {
-      if (request === requests.current) setState(value => ({ ...value, opening: false, error: error.message }));
+      if (reads.current.get(activeKey) !== request) return;
+      setDocuments(old => old[activeKey] && old[activeKey].error !== error.message
+        ? { ...old, [activeKey]: { ...old[activeKey], error: error.message } } : old);
     } finally {
-      if (request === requests.current) pending.current = false;
+      if (reads.current.get(activeKey) === request) reads.current.delete(activeKey);
     }
   };
   const openSource = async () => {
-    const id = state.document?.id;
-    if (!id) return;
-    try { await invoke(api.openExternalFileSource({ id })); }
-    catch (error) { setState(value => value.document?.id === id ? { ...value, error: error.message } : value); }
+    if (!current) return;
+    try {
+      await invoke(api.openExternalFileSource({ id: current.document.id }));
+      setDocuments(old => old[activeKey] ? { ...old, [activeKey]: { ...old[activeKey], editing: true } } : old);
+    } catch (error) { onError(error.message); }
   };
-  const onMenu = useEffectEvent(() => choose());
-  const onFocus = useEffectEvent(() => refresh());
+  const onRefresh = useEffectEvent(refresh);
+  useEffect(() => {
+    if (!activeKey) return;
+    void onRefresh();
+    const unsubscribe = api?.onWindowFocus?.(() => onRefresh());
+    const timer = current?.editing ? setInterval(() => onRefresh(true), 1500) : null;
+    return () => { unsubscribe?.(); clearInterval(timer); };
+  }, [api, activeKey, current?.editing]);
+  const onMenu = useEffectEvent(choose);
   const onDrop = useEffectEvent(event => {
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (!files.length || event.target.closest?.("[data-sidebar-copy]")) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (files.length !== 1) {
-      requests.current++;
-      pending.current = false;
-      setState({ document: null, visible: true, opening: false, error: "파일은 한 번에 하나씩 놓아 주세요." });
-      return;
-    }
-    void open(() => api.openDroppedFile(files[0]), true);
-  });
-  const onKey = useEffectEvent(event => {
-    if (event.key !== "Escape" || !state.visible) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    close();
+    if (files.length !== 1) { onError("파일은 한 번에 하나씩 놓아 주세요."); return; }
+    void open(() => api.openDroppedFile(files[0]));
   });
   useEffect(() => {
-    const offMenu = api?.onOpenFile?.(onMenu), offFocus = api?.onWindowFocus?.(onFocus);
+    const offMenu = api?.onOpenFile?.(onMenu);
     const dragover = event => {
       if (!Array.from(event.dataTransfer?.types ?? []).includes("Files")) return;
       event.preventDefault();
@@ -74,13 +93,11 @@ export default function useExternalDocuments(api, invoke) {
     };
     window.addEventListener("dragover", dragover, true);
     window.addEventListener("drop", onDrop, true);
-    window.addEventListener("keydown", onKey, true);
     return () => {
-      offMenu?.(); offFocus?.();
+      offMenu?.();
       window.removeEventListener("dragover", dragover, true);
       window.removeEventListener("drop", onDrop, true);
-      window.removeEventListener("keydown", onKey, true);
     };
   }, [api]);
-  return { ...state, choose, refresh, openSource, close };
+  return { documents, current, opening, choose, refresh: () => refresh(), openSource, close };
 }

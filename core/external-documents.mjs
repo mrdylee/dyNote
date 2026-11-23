@@ -42,6 +42,9 @@ export class ExternalDocuments {
   async #open(value) {
     const source = await sourcePath(value);
     const data = await readSource(source, undefined, limit(source));
+    for (const [id, entry] of this.#entries) {
+      if (entry.source === source) return this.#update(id, entry, data);
+    }
     const directory = await mkdtemp(path.join(this.directory, "dynote-file-open-"));
     const file = path.join(directory, "document" + path.extname(source).toLowerCase());
     try {
@@ -67,9 +70,22 @@ export class ExternalDocuments {
       const entry = this.#entry(id);
       const data = await readSource(entry.source, previousRevision, limit(entry.source));
       if (!data) return null;
-      const converted = await preview(entry.name, data.bytes);
-      await writeFile(entry.file, data.bytes, { mode: 0o600 });
-      return { id, name: entry.name, revision: data.revision, ...converted };
+      return this.#update(id, entry, data);
+    });
+  }
+
+  async #update(id, entry, data) {
+    const converted = await preview(entry.name, data.bytes);
+    await writeFile(entry.file, data.bytes, { mode: 0o600 });
+    return { id, name: entry.name, revision: data.revision, ...converted };
+  }
+
+  close(id) {
+    return this.#enqueue(async () => {
+      const entry = this.#entries.get(id);
+      if (!entry) return;
+      await rm(entry.directory, { recursive: true, force: true });
+      this.#entries.delete(id);
     });
   }
 

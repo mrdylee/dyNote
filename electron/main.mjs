@@ -757,6 +757,7 @@ app
         return result.canceled ? null : externalDocuments().open(result.filePaths[0]);
       },
       "open-external-file": args => externalDocuments().open(args.path),
+      "close-external-file": args => externalDocuments().close(args.id),
       "read-external-file": args => externalDocuments().read(args.id, args.revision),
       "open-external-file-source": async args => {
         const file = await externalDocuments().sourcePath(args.id);
@@ -883,7 +884,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);

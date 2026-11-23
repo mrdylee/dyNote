@@ -62,11 +62,11 @@ try {
   assert.equal(await readFile(path.join(team, "Shared/Sample.txt"), "utf8"), "original text\n");
   await assert.rejects(readFile(path.join(vault, "Shared/Sample.txt")), { code: "ENOENT" });
   await drop(page.locator(".attachment-heading"), ["Report.HTM"]);
-  await verifyHtml(page.getByRole("dialog", { name: "Report.HTM", exact: true }));
+  await verifyHtml(page.getByRole("region", { name: "Report.HTM", exact: true }));
   assert.deepEqual((await readdir(path.join(vault, "Reports"))).sort(), ["Report (복사본).HTM", "Report.HTM", "Sample.txt"]);
   assert.equal(await readFile(path.join(root, "Report.HTM"), "utf8"), html);
   assert.equal(await readFile(path.join(vault, "Sample.txt"), "utf8"), await readFile(path.join(root, "Sample.txt"), "utf8"));
-  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "Report.HTM 탭 닫기", exact: true }).click();
   await writeFile(path.join(root, "Move.txt"), "move me");
   await drop(reports, ["Move.txt"], false);
   await tree.locator('[title="Reports/Move.txt"]').waitFor();
