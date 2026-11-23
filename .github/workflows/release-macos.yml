@@ -1,31 +1,24 @@
-name: Publish macOS v0.23.16
+name: Build macOS distribution
 on:
-  push:
-    branches: [release/macos-v0.23.16]
+  workflow_call:
 permissions:
-  contents: write
-concurrency:
-  group: release-macos-v0.23.16
-  cancel-in-progress: false
+  contents: read
 jobs:
-  release:
+  macos:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
           cache: npm
-      - name: Verify target and released product source
+      - name: Verify build platform and version
         run: |
           test "$(uname -m)" = arm64
-          node -e "if(require('./package.json').version !== '0.23.16') process.exit(1)"
-          test "$(git rev-parse origin/release/dynote-v0.23.16)" = 910ab5c52f5e43f4dee58b4a154114a90543ddc8
-          git diff --exit-code 910ab5c52f5e43f4dee58b4a154114a90543ddc8 -- core electron src public assembly licenses branding scripts package.json package-lock.json vite.config.mjs
+          node -e "if(require('./package.json').version !== '0.23.17') process.exit(1)"
       - run: npm ci
       - name: Unit tests on macOS
         run: npm test
@@ -35,9 +28,9 @@ jobs:
           node scripts/package-mac-distribution.mjs
       - name: Verify archives and packaged app UI
         run: |
-          package="$PWD/release/v0.23.16"
-          hdiutil verify "$package/Dynote-0.23.16-macos-arm64.dmg"
-          ditto -x -k "$package/Dynote-0.23.16-macos-arm64.zip" "$RUNNER_TEMP/dynote-extracted"
+          package="$PWD/release/v0.23.17"
+          hdiutil verify "$package/Dynote-0.23.17-macos-arm64.dmg"
+          ditto -x -k "$package/Dynote-0.23.17-macos-arm64.zip" "$RUNNER_TEMP/dynote-extracted"
           codesign --verify --deep --strict "$RUNNER_TEMP/dynote-extracted/Dynote.app"
           test -x "$RUNNER_TEMP/dynote-extracted/Dynote.app/Contents/MacOS/Dynote"
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
@@ -46,26 +39,13 @@ jobs:
           node scripts/verify-ai-providers.mjs
           node scripts/verify-journal-workspace.mjs
           DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs
-      - name: Add Mac assets to the existing release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in {1..30}; do
-            if gh api repos/mrdylee/dyNote/releases/tags/v0.23.16 > "$RUNNER_TEMP/release-before.json" 2>/dev/null && jq -e '.draft == false' "$RUNNER_TEMP/release-before.json" >/dev/null; then break; fi
-            sleep 30
-          done
-          test "$(gh api repos/mrdylee/dyNote/git/ref/tags/v0.23.16 --jq .object.sha)" = 910ab5c52f5e43f4dee58b4a154114a90543ddc8
-          node --input-type=module -e '
-            import {readFileSync} from "node:fs";
-            import assert from "node:assert/strict";
-            const r=JSON.parse(readFileSync(process.env.RUNNER_TEMP+"/release-before.json"));
-            assert.equal(r.draft,false);
-            assert.equal(r.prerelease,true);
-            for (const name of ["Dynote-0.23.16-windows-x64-Setup.exe","Dynote-0.23.16-windows-x64.zip","SHA256SUMS-windows-x64.txt"]) {
-              assert(r.assets.some(a=>a.name===name && a.size>0 && /^sha256:[a-f0-9]{64}$/.test(a.digest)));
-            }
-            assert(!r.assets.some(a=>a.name.includes("macos-arm64")),"Mac assets already exist; inspect before retrying");
-          '
-          gh release upload v0.23.16 --repo mrdylee/dyNote release/v0.23.16/Dynote-0.23.16-macos-arm64.dmg release/v0.23.16/Dynote-0.23.16-macos-arm64.zip release/v0.23.16/SHA256SUMS-macos-arm64.txt
-          gh release edit v0.23.16 --repo mrdylee/dyNote --title "Dynote v0.23.16 — 여러 PC에서 이어 쓰는 개인노트" --notes-file docs/RELEASE-NOTES-0.23.16.md
-          gh release view v0.23.16 --repo mrdylee/dyNote --json url,isDraft,isPrerelease,assets
+          node scripts/verify-team-repositories.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dynote-macos-arm64
+          path: |
+            release/v0.23.17/Dynote-0.23.17-macos-arm64.dmg
+            release/v0.23.17/Dynote-0.23.17-macos-arm64.zip
+            release/v0.23.17/SHA256SUMS-macos-arm64.txt
+          if-no-files-found: error
+          compression-level: 0

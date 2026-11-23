@@ -122,3 +122,24 @@ test("folder connections preserve opposite purposes while explicit purpose chang
   assert.equal(registry.list().find(entry => entry.root === team).purpose, "personal");
   assert.equal(await readFile(path.join(personal, "Private.md"), "utf8"), "private fixture\n");
 });
+
+test("team repository registration rejects overlapping team roots and keeps the selected personal vault", async (t) => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-model-spaces-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const personal = path.join(root, "Personal"), models = path.join(root, "Models");
+  const team = path.join(models, "JF3"), child = path.join(team, "eBSC"), sibling = path.join(models, "JF3B");
+  await mkdir(personal); await mkdir(child, { recursive: true }); await mkdir(sibling);
+  const file = path.join(root, "settings.json"), registry = new VaultRegistry(file);
+  await registry.select(personal, "personal");
+  await registry.registerTeamRepository(team);
+  const before = await readFile(file);
+  for (const folder of [team, child, models]) {
+    await assert.rejects(registry.registerTeamRepository(folder), /겹치지 않는 폴더/);
+    assert.deepEqual(await readFile(file), before);
+  }
+  await registry.registerTeamRepository(sibling);
+  const reopened = new VaultRegistry(file);
+  await reopened.load();
+  assert.equal(reopened.selected, personal);
+  assert.deepEqual(reopened.purposes, { [personal]: "personal", [team]: "team", [sibling]: "team" });
+});
