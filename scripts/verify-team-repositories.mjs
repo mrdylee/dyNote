@@ -127,8 +127,13 @@ try {
   assert.equal(backups[personalId].enabled, true);
 
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 700));
+  await page.getByRole("separator", { name: "개인 노트와 팀 노트 높이" }).press("End");
   for (const repository of repositories) {
     const tree = page.getByRole("region", { name: `팀 공유 노트 · ${repository.name}`, exact: true });
+    const list = tree.locator(".file-tree");
+    assert.ok(await list.evaluate(el => el.clientHeight >= el.querySelector(".file-row").offsetHeight),
+      "Each model keeps at least one clickable file row when the team area is at its minimum height");
     await tree.getByRole("button", { name: "회의록", exact: true }).click();
     await page.locator(".navigator").getByRole("button", { name: "새 문서", exact: true }).click();
     await page.getByRole("textbox", { name: "문서 이름", exact: true }).fill("검증 노트");
