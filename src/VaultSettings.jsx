@@ -1,7 +1,31 @@
 import { useEffect, useState } from "react";
 import { UserRound, Users } from "lucide-react";
 
-export default function VaultSettings({ onList, onPick, onSelect, onForget, onPurpose, onOpenGit }) {
+function SpaceGitInfo({ vaultId, onReadGit }) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    let mounted = true;
+    onReadGit(vaultId).then(value => { if (mounted) setInfo(value); })
+      .catch(error => { if (mounted) setInfo({ error: error.message }); });
+    return () => { mounted = false; };
+  }, [vaultId, onReadGit]);
+  if (!info) return <p>Git 정보 확인 중…</p>;
+  return <div>
+    {info.error ? <p role="status">{info.error}</p> : info.available ? <>
+      <p>Git 브랜치 · <code>{info.branch}</code></p>
+      {info.remoteUrls.length === 0 && <p>Git 원격 주소 미설정</p>}
+      {info.remoteUrls.map(remote => <div key={remote.name}>
+        <p>Git 원격 · {remote.name}</p>
+        {remote.fetch.map((url, index) => <p key={index}><code>{url}</code></p>)}
+        {(remote.push.length !== remote.fetch.length || remote.push.some((url, i) => url !== remote.fetch[i])) &&
+          remote.push.map((url, index) => <p key={index}>업로드 · <code>{url}</code></p>)}
+      </div>)}
+    </> : <p>Git 저장소 없음</p>}
+    {info.backup ? <p>자동 백업 대상 · <code>{info.backup}</code></p> : !info.error && <p>자동 백업 대상 미설정</p>}
+  </div>;
+}
+
+export default function VaultSettings({ openSpaces, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -30,16 +54,20 @@ export default function VaultSettings({ onList, onPick, onSelect, onForget, onPu
       <h4>{title}</h4>
       {purpose === null && data.entries.some(entry => !entry.purpose) && <p className="muted">기존 폴더는 개인·팀 용도를 직접 선택해 주세요. 현재 Git 연결은 그대로 유지됩니다.</p>}
       <ul className="vault-settings-list">
-      {data.entries.filter(entry => (entry.purpose ?? null) === purpose).map((entry) => <li key={entry.root}>
-        <div><strong>{entry.name} {entry.root === data.current && <small>사용 중</small>}</strong><p>{entry.root}</p>
-          <label>공간 용도<select aria-label={`${entry.name} 공간 용도`} value={entry.purpose ?? ""} disabled={pending} onChange={e => run(() => onPurpose(entry.root, e.target.value), "공간 용도를 저장했습니다.")}><option value="" disabled>용도 선택</option><option value="personal">개인 노트</option><option value="team">팀 공유 노트</option></select></label>
-        </div>
-        <div className="settings-actions">
-          <button className="secondary-button" disabled={pending || entry.root === data.current} onClick={() => run(() => onSelect(entry.root))}>열기</button>
-          {entry.root === data.current && <button className="secondary-button" disabled={pending} onClick={onOpenGit}>이 공간의 Git 설정</button>}
-          <button className="secondary-button" disabled={pending || entry.active} onClick={() => run(() => onForget(entry.root))}>목록에서 제거</button>
-        </div>
-      </li>)}
+      {data.entries.filter(entry => (entry.purpose ?? null) === purpose).map((entry) => {
+        const vaultId = openSpaces.find(space => space.root === entry.root)?.id;
+        return <li key={entry.root}>
+          <div><strong>{entry.name} {entry.root === data.current && <small>사용 중</small>}</strong><p>{entry.root}</p>
+            {vaultId ? <SpaceGitInfo key={vaultId} vaultId={vaultId} onReadGit={onReadGit}/> : <p>공간을 열면 Git 정보를 확인할 수 있습니다.</p>}
+            <label>공간 용도<select aria-label={`${entry.name} 공간 용도`} value={entry.purpose ?? ""} disabled={pending} onChange={e => run(() => onPurpose(entry.root, e.target.value), "공간 용도를 저장했습니다.")}><option value="" disabled>용도 선택</option><option value="personal">개인 노트</option><option value="team">팀 공유 노트</option></select></label>
+          </div>
+          <div className="settings-actions">
+            <button className="secondary-button" disabled={pending || entry.root === data.current} onClick={() => run(() => onSelect(entry.root))}>열기</button>
+            {vaultId && <button className="secondary-button" disabled={pending} onClick={() => onOpenGit(vaultId)}>이 공간의 Git 설정</button>}
+            <button className="secondary-button" disabled={pending || entry.active} onClick={() => run(() => onForget(entry.root))}>목록에서 제거</button>
+          </div>
+        </li>;
+      })}
       </ul>
       {!data.entries.some(entry => (entry.purpose ?? null) === purpose) && <p className="muted">연결된 공간이 없습니다.</p>}
     </div>)}

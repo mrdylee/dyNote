@@ -1,7 +1,7 @@
-name: Publish Dynote Windows beta v0.23.13
+name: Publish Dynote Windows beta v0.23.14
 on:
   push:
-    branches: [release/dynote-v0.23.13]
+    branches: [release/dynote-v0.23.14]
 permissions:
   contents: read
 concurrency:
@@ -11,7 +11,7 @@ jobs:
   windows:
     uses: ./.github/workflows/build-windows-distribution.yml
     with:
-      previous_version: '0.23.12'
+      previous_version: '0.23.13'
   publish:
     needs: windows
     runs-on: ubuntu-latest
@@ -25,22 +25,22 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dynote-windows-x64
-          path: release/v0.23.13
+          path: release/v0.23.14
       - name: Check artifacts and publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(node -p "require('./package.json').version")" = 0.23.13
+          test "$(node -p "require('./package.json').version")" = 0.23.14
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          test "$(git rev-parse origin/release/dynote-v0.23.13)" = "$GITHUB_SHA"
-          if gh release view v0.23.13 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          test "$(git rev-parse origin/release/dynote-v0.23.14)" = "$GITHUB_SHA"
+          if gh release view v0.23.14 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Release already exists; inspect it before retrying.' >&2
             exit 1
           fi
-          cd release/v0.23.13
+          cd release/v0.23.14
           sha256sum --check SHA256SUMS-windows-x64.txt
-          gh release create v0.23.13 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
-            --title 'Dynote v0.23.13 — 파일 이동·복사와 색상 테마 (Windows)' \
-            --notes-file ../../docs/RELEASE-NOTES-0.23.13.md \
-            Dynote-0.23.13-windows-x64-Setup.exe Dynote-0.23.13-windows-x64.zip SHA256SUMS-windows-x64.txt
-          gh release edit v0.23.13 --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          gh release create v0.23.14 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+            --title 'Dynote v0.23.14 — Copilot 재가져오기와 개인·팀 파일 보관함 (Windows)' \
+            --notes-file ../../docs/RELEASE-NOTES-0.23.14.md \
+            Dynote-0.23.14-windows-x64-Setup.exe Dynote-0.23.14-windows-x64.zip SHA256SUMS-windows-x64.txt
+          gh release edit v0.23.14 --repo "$GITHUB_REPOSITORY" --draft=false --prerelease

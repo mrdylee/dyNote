@@ -245,12 +245,12 @@ export class CopilotJournal{
   }
   return {sessions:[...sessions.values()].sort((a,b)=>b.lastActivity-a.lastActivity),error:sources.error??''};
  }
- async commit(vault,previous,next){
+ async commit(vault,previous,next,recreate=new Set()){
   if(await realpath(vault.root)!==vault.root)throw new Error('보관함 경로가 바뀌었습니다. 다시 열어 주세요.');
   next.sessionLayout=true;
   const migrating=legacyLayout(previous);
   const snapshot=await vault.documentSnapshot(),notes=new Map(snapshot.notes.map(n=>[n.path,n])),edits=new Map();
-  const touched=new Set();
+  const touched=new Set(recreate);
   const journalContent=name=>edits.has(name)?edits.get(name):notes.get(name)?.content??`# ${path.basename(name,'.md')}\n\n`;
   for(const id of new Set([...Object.keys(previous.records),...Object.keys(next.records)])){
    const before=previous.records[id],after=next.records[id],unchanged=JSON.stringify(before)===JSON.stringify(after);
@@ -279,8 +279,9 @@ export class CopilotJournal{
   for(const id of touched){
    const before=previousSessions.get(id),after=nextSessions.get(id);
    const oldText=before?renderSessionCapture(before):null,newText=after?renderSessionCapture(after):null;
-   if(oldText===newText)continue;
    const name=(after??before).path,current=notes.get(name);
+   if(!current&&after&&recreate.has(id)){edits.set(name,newText);continue;}
+   if(oldText===newText)continue;
    if(current&&current.content!==oldText&&current.content!==newText&&
       (!before||current.content!==renderSessionCapture(before,{legacy:true})))throw new Error('가져온 대화 문서가 수정되었습니다. 내용을 확인한 뒤 다시 가져와 주세요.');
    if(!current&&before&&after)throw new Error('가져온 대화 문서가 삭제되거나 이동되었습니다. 자동 기록 제목에서 삭제 상태를 정리해 주세요.');
@@ -290,7 +291,7 @@ export class CopilotJournal{
   if(changes.length&&!previous.pendingCapture){
    // Replay the same records on retry, even if the original transcript has changed since this batch.
    const {records,sessionLayout,blocked,trashId}=next;
-   await this.persist(vault,{...previous,pendingCapture:{records,sessionLayout,blocked,trashId}});
+   await this.persist(vault,{...previous,pendingCapture:{records,sessionLayout,blocked,trashId,recreate:[...recreate]}});
   }
   const result=changes.length?await vault.applyDocumentChanges(changes,snapshot.revision):previous.pendingCapture?{snapshot}:{};
   await this.persist(vault,next);
@@ -298,7 +299,10 @@ export class CopilotJournal{
  }
  async finishPending(vault){
   const previous=this.config(vault),{pendingCapture,...config}=previous;
-  if(pendingCapture)return this.commit(vault,previous,{...config,...pendingCapture});
+  if(pendingCapture){
+   const {recreate,...pending}=pendingCapture;
+   return this.commit(vault,previous,{...config,...pending},new Set(recreate));
+  }
  }
  async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false,projectIds}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
@@ -324,7 +328,7 @@ export class CopilotJournal{
   const next=clone(previous);
   // Keep sessions in the same folder across dates until their saved paths are moved.
   const folder=Object.values(previous.records).some(record=>record.path.startsWith('AI Conversations/'))?'AI Conversations':COPILOT_NOTE_FOLDER;
-  const sessions=sessionRecords(next.records),updated=new Set();
+  const sessions=sessionRecords(next.records),updated=new Set(),recreate=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
   const projects=(available??await this.projects(previous.sourceRoot)).filter(project=>requested?requested.has(project.id):importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
@@ -340,6 +344,10 @@ export class CopilotJournal{
     const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?legacyKey:sourceKey);
     if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
+    if((importAll||selected)&&previous.sessionLayout&&existing?.path){
+     try{await lstat(path.join(vault.root,existing.path));}
+     catch(error){if(error.code!=='ENOENT')throw error;recreate.add(sessionId);}
+    }
     const seen=existing?.messages??new Map();
     let compatible;
     if(existing&&sessionId!==sourceKey&&!existing.sourceKey){
@@ -377,9 +385,9 @@ export class CopilotJournal{
   }
   if(selected&&[...selected].some(id=>!matched.has(id)))throw new Error('선택한 세션을 읽을 수 없습니다. 세션 목록을 새로 불러와 주세요.');
   for(const session of updated)session.messages.sort((a,b)=>a.at-b.at);
-  const changed=migrating||updated.size>0;
+  const changed=migrating||updated.size>0||recreate.size>0;
   if(checkOnly&&changed)return {pending:true};
-  const result=changed?await this.commit(vault,previous,next):{changed:false,status:await this.status(vault)};
+  const result=changed?await this.commit(vault,previous,next,recreate):{changed:false,status:await this.status(vault)};
   if(sources.error||incompatible)result.status.error=[sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }

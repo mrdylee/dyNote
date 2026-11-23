@@ -117,6 +117,13 @@ const invoke = async (result) => {
   if (!response.ok) throw new Error(response.error);
   return response.value;
 };
+const readSpaceGit = async vaultId => {
+  const [repository, backup] = await Promise.all([
+    invoke(api.gitWorkspaceStatus({ vaultId, summaryOnly: true })).catch(error => ({ error: error.message })),
+    invoke(api.gitStatus({ vaultId })),
+  ]);
+  return { ...repository, backup: backup.config?.remote };
+};
 const isMac = navigator.platform.includes("Mac");
 const shortcut = isMac ? "⌘" : "Ctrl";
 const stored = (key, fallback) => {
@@ -556,8 +563,8 @@ export default function App() {
   }, []);
   useEffect(() => api?.onGitStatus(acceptGitStatus), [acceptGitStatus]);
   useEffect(() => {
-    if (!vault?.id) return;
-    const id = vault.id;
+    const id = gitVault?.id;
+    if (!id) return;
     let mounted = true;
     invoke(api.gitStatus({ vaultId: id })).then(value => {
       if (mounted) acceptGitStatus(value);
@@ -565,7 +572,7 @@ export default function App() {
       if (mounted) acceptGitStatus({ vaultId: id, phase: "error", message: error.message, enabled: false, config: null });
     });
     return () => { mounted = false; };
-  }, [vault?.id, acceptGitStatus]);
+  }, [gitVault?.id, acceptGitStatus]);
   const timer = useRef(null);
   const preview = useRef(null);
   const editState = useCopilotEdits({ api, vaults, onError: setError,
@@ -3088,9 +3095,13 @@ export default function App() {
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
           </section>}
           {settingsTab === "vault" && <VaultSettings key={selectedVaultId ?? "missing"}
-            onList={loadSpaces}
-            onPurpose={async (root, purpose) => { await flush(); await invoke(api.setVaultPurpose({ root, purpose })); }}
-            onOpenGit={() => { setGitSettingsId(selectedVaultId); setSettingsTab("git"); }}
+            onList={loadSpaces} openSpaces={connectedSpaces} onReadGit={readSpaceGit}
+            onPurpose={async (root, purpose) => {
+              await flush();
+              await invoke(api.setVaultPurpose({ root, purpose }));
+              if (root === spaces.current) acceptSnapshot(await invoke(api.snapshot({ vaultId: selectedVaultId })));
+            }}
+            onOpenGit={id => { setGitSettingsId(id); setSettingsTab("git"); }}
             onPick={async (purpose) => {
               setBusy(true);
               try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } }
@@ -3144,7 +3155,7 @@ export default function App() {
             }}/>}
           {["git", "history", "git-workspace"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {settingsTab === "git" && gitVault.id && <GitSettings key={`${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
-            onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
+            onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id, summaryOnly: true }))}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);

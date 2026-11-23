@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,realpath,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,realpath,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
@@ -29,7 +29,18 @@ try{
  await page.getByRole('dialog',{name:'설정',exact:true}).getByRole('button',{name:'닫기',exact:true}).click();
  await page.getByRole('region',{name:'팀 공유 노트 · Team',exact:true}).getByTitle('Shared.md',{exact:true}).click();
  await identity().filter({hasText:'팀 공유 노트'}).waitFor();
- await identity().click();await openGit(team);
+ await identity().click();
+ await row(team).getByText(fetch,{exact:true}).waitFor();
+ await row(team).getByText(push,{exact:true}).waitFor();
+ await row(team).getByText('main',{exact:true}).waitFor();
+ await row(personal).getByText('Git 저장소 없음',{exact:true}).waitFor();
+ assert.equal(await row(personal).getByText(fetch,{exact:true}).count(),0);
+ await openGit(personal);
+ await page.locator('.git-space-context').getByText(personal,{exact:true}).waitFor();
+ await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
+ await selected(team).waitFor();
+ for(const space of [personal,team])assert.deepEqual(await readdir(path.join(space,'File Storage')),[]);
+ await openGit(team);
  await page.locator('.git-space-context').getByText(fetch,{exact:true}).waitFor();
  await page.locator('.git-space-context').getByText(push,{exact:true}).waitFor();
  assert.equal(await page.locator('.git-backup-target').innerText(),'자동 백업 대상 미설정');
@@ -51,6 +62,7 @@ try{
  await writeFile(`${profile}/git-backup.json`,JSON.stringify({[teamId]:{enabled:false,remote:backup,branch:'main',push:false,schedule:'daily'}}));
  await row(personal).getByRole('button',{name:'열기',exact:true}).click();await selected(personal).waitFor();
  await row(team).getByRole('button',{name:'열기',exact:true}).click();await selected(team).waitFor();
+ await row(team).getByText(backup,{exact:true}).waitFor();
  await openGit(team);
  await page.locator('.git-space-context').getByText(fetch,{exact:true}).waitFor();assert.equal(await page.locator('.git-backup-target').innerText(),backup);
  const changed='https://changed.example.invalid/shared.git';git('-C',team,'remote','set-url','origin',changed);

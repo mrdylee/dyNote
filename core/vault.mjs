@@ -67,6 +67,8 @@ function unusedCopyName(filename, entries) {
   return candidate;
 }
 
+export const FILE_STORAGE_FOLDER = "File Storage";
+
 export const validFilePath = (value) =>
   validRelativePath(value) && !(officeKind(value) && path.posix.basename(value).startsWith("~$")) && /\.(?:html?|xlsx|pptx|md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
 const validWordPath = (value) =>
@@ -82,11 +84,13 @@ export class Vault {
   #tail = Promise.resolve();
   #wordIndex = new Map();
 
-  static async open(root, recoveryRoot) {
+  static async open(root, recoveryRoot, purpose) {
     const canonical = await realpath(root);
     if (!(await lstat(canonical)).isDirectory())
       throw new Error("폴더를 선택해 주세요.");
-    return new Vault(canonical, recoveryRoot);
+    const vault = new Vault(canonical, recoveryRoot);
+    if (purpose === "personal" || purpose === "team") await vault.prepareFileStorage();
+    return vault;
   }
 
   constructor(root, recoveryRoot) {
@@ -94,6 +98,18 @@ export class Vault {
     this.id = digest(root).slice(0, 16);
     this.name = path.basename(root);
     this.recoveryRoot = path.join(recoveryRoot, this.id);
+  }
+
+  async prepareFileStorage() {
+    const folder = path.join(this.root, FILE_STORAGE_FOLDER);
+    this.fileStorageWarning = "";
+    try {
+      if (await realpath(this.root) !== this.root) throw new Error("보관함 위치가 변경되었습니다.");
+      await mkdir(folder);
+    } catch (error) {
+      if (error.code === "EEXIST" && (await lstat(folder).catch(() => null))?.isDirectory()) return;
+      this.fileStorageWarning = "File Storage 폴더를 준비하지 못했습니다. 같은 이름의 항목이나 폴더 권한을 확인해 주세요.";
+    }
   }
 
   #enqueue(operation) {
@@ -154,7 +170,9 @@ export class Vault {
 
   async snapshot() {
     await this.#tail;
-    return this.#snapshot();
+    const snapshot = await this.#snapshot();
+    if (this.fileStorageWarning) snapshot.warnings.push(this.fileStorageWarning);
+    return snapshot;
   }
 
   captureFiles() { return this.#enqueue(() => this.#captureFiles()); }

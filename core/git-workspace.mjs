@@ -16,11 +16,25 @@ export class GitWorkspace {
   constructor(root){this.root=root;this.backup=new GitBackup(root);}
   git(args,options){return runGit(this.root,args,options);}
   async repository(){if(!await this.backup.repository())throw new Error('먼저 Git 저장소를 초기화해 주세요.');}
+  async repositoryInfo(){
+    if(!await this.backup.repository())return {available:false,branch:'',remotes:[],remoteUrls:[]};
+    const [branch,remotes]=await Promise.all([
+      this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),this.git(['remote']),
+    ]);
+    const names=remotes.stdout.trim().split('\n').filter(Boolean);
+    const remoteUrls=await Promise.all(names.map(async name=>{
+      const [fetch,push]=await Promise.all(['url','pushurl'].map(key=>this.git(['config','--null','--get-all',`remote.${name}.${key}`],{allow:[0,1]})));
+      const read=value=>value.stdout.split('\0').filter(Boolean).map(displayRemoteUrl),fetchUrls=read(fetch),pushUrls=read(push);
+      return {name,fetch:fetchUrls,push:pushUrls.length?pushUrls:fetchUrls};
+    }));
+    return {available:true,branch:branch.stdout.trim()||'(분리된 HEAD)',remotes:names,remoteUrls};
+  }
   async status(){
-    if(!await this.backup.repository())return {available:false,branch:'',branches:[],files:[],excluded:0,remotes:[],remoteUrls:[]};
-    const [state,branch,branches,remotes]=await Promise.all([
-      this.git(['status','--porcelain=v1','--untracked-files=all','-z']),this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),
-      this.git(['for-each-ref','--format=%(refname:short)','refs/heads/']),this.git(['remote']),
+    const info=await this.repositoryInfo();
+    if(!info.available)return {...info,branches:[],files:[],excluded:0};
+    const [state,branches]=await Promise.all([
+      this.git(['status','--porcelain=v1','--untracked-files=all','-z']),
+      this.git(['for-each-ref','--format=%(refname:short)','refs/heads/']),
     ]);
     const records=state.stdout.split('\0'),files=[];let excluded=0;
     for(let i=0;i<records.length;i++){
@@ -29,13 +43,7 @@ export class GitWorkspace {
       if(/[RC]/.test(index+worktree))from=records[++i];
       if(validFilePath(path))files.push({path,index,worktree,...(from?{from}:{})});else excluded++;
     }
-    const names=remotes.stdout.trim().split('\n').filter(Boolean);
-    const remoteUrls=await Promise.all(names.map(async name=>{
-      const [fetch,push]=await Promise.all(['url','pushurl'].map(key=>this.git(['config','--null','--get-all',`remote.${name}.${key}`],{allow:[0,1]})));
-      const read=value=>value.stdout.split('\0').filter(Boolean).map(displayRemoteUrl),fetchUrls=read(fetch),pushUrls=read(push);
-      return {name,fetch:fetchUrls,push:pushUrls.length?pushUrls:fetchUrls};
-    }));
-    return {available:true,branch:branch.stdout.trim()||'(분리된 HEAD)',branches:branches.stdout.trim().split('\n').filter(Boolean),files,excluded,remotes:names,remoteUrls};
+    return {...info,branches:branches.stdout.trim().split('\n').filter(Boolean),files,excluded};
   }
   async checkPath(path){
     if(!validFilePath(path))throw new Error('허용되지 않는 노트 경로입니다.');

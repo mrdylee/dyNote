@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rename, symlink, unlink, chmod, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, symlink, unlink, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -156,7 +156,15 @@ test("connecting refuses ancestor repositories and nonempty remote histories; cl
   await mkdir(child); await mkdir(blank);
   await assert.rejects(new GitBackup(child, f.run).connect(config), /보관함.*루트|상위/);
   await assert.rejects(new GitBackup(blank, f.run).connect(config), /가져오기/);
+  const storage = path.join(blank, "File Storage"), archive = path.join(storage, "keep.zip");
+  await mkdir(storage); await writeFile(archive, "keep");
+  await assert.rejects(GitBackup.clone(blank, config, f.run), /빈 폴더/);
+  assert.equal(await readFile(archive, "utf8"), "keep");
+  await unlink(archive);
+  await assert.rejects(GitBackup.clone(blank, config, async () => { throw new Error("offline"); }), /offline/);
+  assert.deepEqual(await readdir(storage), []);
   await GitBackup.clone(blank, config, f.run);
+  assert.deepEqual(await readdir(storage), []);
   assert.equal(await readFile(path.join(blank, "Home.md"), "utf8"), "# 한글\r\n");
   await assert.rejects(GitBackup.clone(blank, config, f.run), /빈 폴더/);
 });

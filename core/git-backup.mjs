@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { lstat, readdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, rmdir } from "node:fs/promises";
 import path from "node:path";
-import { validFilePath } from "./vault.mjs";
+import { FILE_STORAGE_FOLDER, validFilePath } from "./vault.mjs";
 
 export function validateGitConfig(input) {
   const remote = typeof input?.remote === "string" ? input.remote.trim() : "";
@@ -140,8 +140,21 @@ export class GitBackup {
 
   static async clone(destination, input, run = runGit) {
     const config = validateGitConfig(input);
-    if ((await readdir(destination)).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
-    await run(destination, ["clone", "--no-recurse-submodules", "--single-branch", "--branch", config.branch, "--", config.remote, "."]);
+    const entries = await readdir(destination, { withFileTypes: true });
+    const storage = path.join(destination, FILE_STORAGE_FOLDER);
+    if (entries.length) {
+      if (entries.length !== 1 || entries[0].name !== FILE_STORAGE_FOLDER || !entries[0].isDirectory())
+        throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+      await rmdir(storage).catch(error => {
+        if (["ENOTEMPTY", "EEXIST"].includes(error.code)) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+        throw error;
+      });
+    }
+    try {
+      await run(destination, ["clone", "--no-recurse-submodules", "--single-branch", "--branch", config.branch, "--", config.remote, "."]);
+    } finally {
+      if (entries.length) await mkdir(storage).catch(error => { if (error.code !== "EEXIST") throw error; });
+    }
     return new GitBackup(destination, run);
   }
 }
