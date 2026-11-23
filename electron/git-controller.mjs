@@ -26,11 +26,23 @@ export class GitController {
   markDirty(id) {
     if (id !== this.vault?.id) return;
     this.revision++;
-    if (this.personal) this.personal.firstDirty ??= this.now().getTime();
+    if (this.current.enabled && this.current.config?.mode==="personal-sync" && this.personal) this.scheduleBatch();
     if (this.current.enabled && !["saving", "error"].includes(this.current.phase)) this.publish({ phase: "pending", message: "Git 자동 저장 대기 중" });
   }
+  scheduleBatch() {
+    this.personal.firstDirty ??= this.now().getTime();
+    if(this.batchTimer)return;
+    const id=this.vault.id, generation=this.generation;
+    const delay=this.personal.firstDirty+300000-this.now().getTime();
+    if(delay<=0)return;
+    this.batchTimer=setTimeout(()=>{
+      this.batchTimer=null;
+      if (generation===this.generation) this.sync(id,{automatic:true}).catch(()=>{});
+    },delay);
+    this.batchTimer.unref?.();
+  }
   close() {
-    this.generation++;
+    this.generation++;clearTimeout(this.batchTimer);this.batchTimer=null;
     this.watcher?.close(); this.watcher=null;
     if (this.timer !== null) this.clearTimer(this.timer);
     this.timer = null;
@@ -91,7 +103,7 @@ export class GitController {
       try {
         this.watcher=watch(this.vault.root,{recursive:true},(_type,name)=>{
           const relative=String(name ?? "").split(path.sep).join("/");
-          if (validPersonalFilePath(relative) && generation===this.generation) this.personal.firstDirty ??= this.now().getTime();
+          if (validPersonalFilePath(relative) && generation===this.generation) this.scheduleBatch();
         });
         this.watcher.on("error",()=>this.watcher?.close());
       } catch { /* Periodic discovery also covers hosts without recursive watch. */ }
@@ -211,6 +223,7 @@ export class GitController {
         const service=await this.startPersonal();
         const record=this.records[this.vault.id],register=record.registerPending===true;
         const result=await service.sync(this.current.config,{force:!automatic,register});
+        if(service.firstDirty===null){clearTimeout(this.batchTimer);this.batchTimer=null;} else this.scheduleBatch();
         record.lastSuccess=result.lastSuccess ?? this.current.lastSuccess;
         if(register && result.devices.some(d=>d.id===result.deviceId && d.name===this.current.config.deviceName))record.registerPending=false;
         if (register || result.changed.length || this.current.lastSuccess===undefined) await this.persist();

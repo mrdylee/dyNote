@@ -32,7 +32,7 @@ export default function PersonalVersionReview({path, count, action, onClose}) {
     setBusy(true);setError("");
     try {
       const copies=both?Object.fromEntries(rows.filter(v=>v.commit!==selected && v.blob).map(v=>[v.commit,names[v.commit] ?? copyPath(path,v.commit)])):undefined;
-      await action({action:"resolve",path,basis,commit:selected,options:{hunks:hunks.map((h,i)=>picks[i] ?? selected),copies}});
+      await action({action:"resolve",path,basis,commit:selected,options:{hunks:hunks.map(h=>picks[h.key] ?? selected),copies}});
       onClose();
     } catch(e){setError(e.message);setReload(n=>n+1);} finally {setBusy(false);}
   }
@@ -54,12 +54,12 @@ export default function PersonalVersionReview({path, count, action, onClose}) {
         {v.blob && <button onClick={()=>download(v)}>이 버전 저장</button>}</div>)}
       {rows.length<basis.length && <button onClick={()=>setLimit(n=>n+50)}>이전 버전 더 보기</button>}
     </fieldset>
-    {hunks.map((h,i)=><fieldset key={i}><legend>겹친 문장 {i+1}</legend><details><summary>공통 원문</summary><pre>{h.original}</pre></details>
-      {rows.filter(v=>Object.hasOwn(h.alternatives,v.commit)).map(v=><label key={v.commit}><input type="radio" name={"hunk"+i} checked={(picks[i] ?? selected)===v.commit} onChange={()=>{setPicks(old=>({...old,[i]:v.commit}));if(!selected)select(v.commit);}}/>{h.alternatives[v.commit] || "(삭제)"}</label>)}</fieldset>)}
+    {hunks.map((h,i)=><fieldset key={h.key}><legend>겹친 문장 {i+1}</legend><details><summary>공통 원문</summary><pre>{h.original}</pre></details>
+      {rows.filter(v=>Object.hasOwn(h.alternatives,v.commit)).map(v=><label key={v.commit}><input type="radio" name={"hunk"+i} checked={(picks[h.key] ?? selected)===v.commit} onChange={()=>{setPicks(old=>({...old,[h.key]:v.commit}));if(!selected)select(v.commit);}}/>{h.alternatives[v.commit] || "(삭제)"}</label>)}</fieldset>)}
     {!/\.md$/i.test(path) && selected && <><label><input type="checkbox" checked={both} onChange={e=>setBoth(e.target.checked)}/>모두 유지</label>
       {both && rows.filter(v=>v.blob && v.commit!==selected).map(v=><label key={v.commit}>{v.device || v.author} 사본 경로<input value={names[v.commit] ?? copyPath(path,v.commit)} onChange={e=>setNames(old=>({...old,[v.commit]:e.target.value}))}/></label>)}</>}
     {error && <p role="alert">{error}</p>}
-    <div className="settings-actions"><button className="primary-button" disabled={busy || !selected || (both && rows.length!==basis.length)} onClick={apply}>{applyName}</button>
+    <div className="settings-actions"><button className="primary-button" disabled={busy || !selected || rows.length!==basis.length} onClick={apply}>{applyName}</button>
       <button disabled={busy} onClick={onClose}>나중에</button></div>
   </section>;
 }

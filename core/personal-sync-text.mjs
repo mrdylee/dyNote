@@ -1,21 +1,25 @@
 import { captureLinkRanges } from "./copilot-journal-links.mjs";
 
 const linesOf = text => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-const decode = bytes => new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);
+const decode = bytes => { try {return new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);} catch {return null;} };
 
 export async function textChoices(store, name, versions) {
   if (!/\.md$/i.test(name) || versions.length<2 || versions.some(v=>!v.blob)) return null;
   const ancestor=(await store.git(["merge-base","--octopus",...versions.map(v=>v.commit)],{allow:[0,1]})).stdout.trim();
   const baseEntry=(await store.tree(ancestor)).get(name);
   const base=baseEntry ?? await store.storeBytes(Buffer.alloc(0)), baseBytes=await store.blob(base.oid);
-  const original=linesOf(decode(baseBytes)), edits=[];
+  const baseText=decode(baseBytes);
+  if(baseText===null)return null;
+  const original=linesOf(baseText), edits=[];
   let total=baseBytes.length;
   for (const version of versions) {
     total+=(await store.git(["cat-file","-s",version.blob])).stdout.trim()*1;
     if(total>512*1024*1024) throw new Error("검토할 본문이 512 MiB를 넘습니다.");
     const bytes=await store.blob(version.blob);
     if(bytes.includes(0))return null;
-    const lines=linesOf(decode(bytes));
+    const content=decode(bytes);
+    if(content===null)return null;
+    const lines=linesOf(content);
     const diff=(await store.git(["diff","--no-ext-diff","--no-textconv","--unified=0","--text",base.oid,version.blob])).stdout;
     for(const match of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
       const count=Number(match[2] ?? 1), length=Number(match[4] ?? 1);
@@ -46,7 +50,7 @@ export async function textChoices(store, name, versions) {
     const originalText=original.slice(group.start,group.end).join("");
     for(const version of versions) if(version.blob===base.oid && !Object.hasOwn(alternatives,version.commit)) alternatives[version.commit]=originalText;
     const distinct=[...new Set(Object.values(alternatives))];
-    parts.push(distinct.length===1 ? distinct[0] : {original:original.slice(group.start,group.end).join(""),alternatives});
+    parts.push(distinct.length===1 ? distinct[0] : {key:[base.oid,group.start,group.end].join("/"),original:originalText,alternatives});
     at=group.end;
   }
   parts.push(original.slice(at).join(""));
