@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld(
       return () => ipcRenderer.removeListener("notes:copilot-event", listener);
     },
     pickVault: (args) => call("pick-vault", args),
+    pickTeamRepositoryFolder: () => call("pick-team-repository-folder"),
+    connectTeamRepositories: (args) => call("connect-team-repositories", args),
     vaults: () => call("vaults"),
     setVaultPurpose: (args) => call("set-vault-purpose", args),
     selectVault: (args) => call("select-vault", args),

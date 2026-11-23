@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UserRound, Users } from "lucide-react";
 
-export default function VaultSettings({ onList, onPick, onSelect, onForget, onPurpose, onOpenGit }) {
+export default function VaultSettings({ onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [teamRows, setTeamRows] = useState([]);
+  const nextTeamRow = useRef(0);
   useEffect(() => {
     let mounted = true;
     onList().then((value) => { if (mounted) setData(value); }).catch((e) => { if (mounted) setError(e.message); });
@@ -11,17 +13,69 @@ export default function VaultSettings({ onList, onPick, onSelect, onForget, onPu
   }, []);
   const run = async (action, message = "") => {
     setPending(true); setError(""); setMessage("");
-    try { await action(); setData(await onList()); setMessage(message); }
+    try {
+      const result = await action();
+      setMessage(typeof result === "string" ? result : message);
+      setData(await onList());
+    }
     catch (e) { setError(e.message); }
     finally { setPending(false); }
+  };
+  const addTeamRow = () => {
+    const id = nextTeamRow.current++;
+    setTeamRows(rows => [...rows, { id, remote: "", branch: "main", folder: "", error: "" }]);
+  };
+  const updateTeamRow = (id, values) => setTeamRows(rows => rows.map(row => row.id === id ? { ...row, error: "", ...values } : row));
+  const pickTeamFolder = async (id) => {
+    setPending(true);
+    try {
+      const folder = await onPickTeamRepositoryFolder();
+      if (folder) updateTeamRow(id, { folder });
+    } catch (error) { updateTeamRow(id, { error: error.message }); }
+    finally { setPending(false); }
+  };
+  const connectTeams = event => {
+    event.preventDefault();
+    if (pending) return;
+    void run(async () => {
+      const results = await onConnectTeamRepositories(teamRows.map(({ remote, branch, folder }) => ({ remote, branch, folder })));
+      const failed = teamRows.flatMap((row, index) => results[index].ok ? [] : [{ ...row, error: results[index].error }]);
+      setTeamRows(failed);
+      const connected = teamRows.length - failed.length;
+      return connected ? `팀 저장소 ${connected}개를 연결했습니다.` : "";
+    });
   };
   return <section className="settings-section">
     <h3>개인·팀 공간</h3>
     <p>개인 기록과 팀 문서는 서로 다른 폴더에 보관하세요. 각 공간의 Git 저장소도 따로 연결합니다.</p>
     <div className="space-choices">
       <article className="space-choice personal"><UserRound size={22}/><h4>개인 노트</h4><p>저널·아이디어·작업 초안을 기록합니다. Git 백업은 개인용 저장소에 연결하세요.</p><button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("personal"))}>개인 노트 폴더 연결</button></article>
-      <article className="space-choice team"><Users size={22}/><h4>팀 공유 노트</h4><p>설계서·회의록·결정 사항을 함께 관리합니다. 팀원이 접근하는 별도 Git 저장소에 연결하세요.</p><button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("team"))}>팀 공유 폴더 연결</button></article>
+      <article className="space-choice team"><Users size={22}/><h4>팀 공유 노트</h4><p>설계서·회의록·결정 사항을 함께 관리합니다. 모델마다 별도 Git 저장소를 연결할 수 있습니다.</p>
+        <div className="team-repository-actions">
+          <button className="secondary-button" disabled={pending || teamRows.length > 0} onClick={addTeamRow}>팀 저장소 연결</button>
+          <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("team"))}>팀 공유 폴더 연결</button>
+        </div>
+      </article>
     </div>
+    {teamRows.length > 0 && <form className="team-repositories" onSubmit={connectTeams} aria-label="팀 저장소 연결">
+      <h4>팀 저장소 연결</h4>
+      <p className="muted">모델마다 빈 폴더나 같은 저장소를 이미 가져온 폴더를 선택하세요. 왼쪽에 폴더 이름으로 표시됩니다.</p>
+      {teamRows.map((row, index) => <fieldset key={row.id} aria-label={`팀 저장소 ${index + 1}`} disabled={pending} className="team-repository-row">
+        <label>저장소 주소<input required value={row.remote} placeholder="https:// 또는 SSH" onChange={event => updateTeamRow(row.id, { remote: event.target.value })}/></label>
+        <label>브랜치<input required value={row.branch} onChange={event => updateTeamRow(row.id, { branch: event.target.value })}/></label>
+        <div className="team-repository-folder">
+          <button type="button" className="secondary-button" onClick={() => pickTeamFolder(row.id)}>폴더 선택</button>
+          {row.folder && <span>{row.folder}</span>}
+        </div>
+        <button type="button" className="secondary-button" disabled={teamRows.length < 2} aria-label={`팀 저장소 ${index + 1} 입력 제거`} onClick={() => setTeamRows(rows => rows.filter(item => item.id !== row.id))}>제거</button>
+        {row.error && <p className="settings-message" role="alert">{row.error}</p>}
+      </fieldset>)}
+      <div className="settings-actions">
+        <button type="button" className="secondary-button" disabled={pending} onClick={addTeamRow}>저장소 추가</button>
+        <button type="button" className="secondary-button" disabled={pending} onClick={() => setTeamRows([])}>취소</button>
+        <button className="primary-button" disabled={pending || teamRows.some(row => !row.remote.trim() || !row.branch.trim() || !row.folder)}>입력한 저장소 연결</button>
+      </div>
+    </form>}
     <div className="space-guide"><strong>서로 다른 폴더 + 서로 다른 Git 저장소</strong><div><span>개인 폴더 → 개인용 Git</span><span>팀 폴더 → 팀 Git</span></div><p>아래 ‘이 공간의 Git 설정’에서 공간별 저장소 주소를 연결합니다.</p></div>
     <p className="muted">공간 용도는 앱의 구분 표시입니다. 용도를 바꿔도 파일을 옮기거나 Git 저장소의 접근 권한을 바꾸지 않습니다.</p>
     {(error || data.error) && <p role="alert" className="settings-message">{error || data.error}</p>}

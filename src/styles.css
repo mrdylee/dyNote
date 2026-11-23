@@ -1872,6 +1872,12 @@ kbd {
 .space-choice h4, .space-choice p { margin: 0; }
 .space-choice p { flex: 1; line-height: 1.6; font-size: 13px; word-break: keep-all; overflow-wrap: anywhere; }
 .space-choice button { margin-top: 5px; }
+.team-repository-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-repository-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(70px, .45fr) minmax(110px, 1fr) auto; align-items: end; gap: 8px; margin: 8px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.team-repository-row label { margin: 0; }
+.team-repository-folder { display: grid; justify-items: start; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.team-repository-folder span { font-size: 12px; }
+.team-repository-row .settings-message { grid-column: 1 / -1; margin: 0; }
 .space-guide, .git-space-context { background: #f5f7fa; border: 1px solid var(--border); border-radius: 8px; padding: 15px; line-height: 1.6; }
 .space-guide > div { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; font-size: 13px; }
 .space-guide p, .git-space-context p { font-size: 13px; margin: 10px 0; }
@@ -1886,6 +1892,7 @@ kbd {
 @media (max-width: 850px) {
   .space-choices { grid-template-columns: 1fr; }
   .git-space-context dl { grid-template-columns: 1fr; gap: 3px; }
+  .team-repository-row { grid-template-columns: minmax(0, 1fr) minmax(70px, .4fr); }
 }
 .daily-backup-info { padding: 14px; background: #f7f6fc; border-radius: 8px; margin-top: 16px; }
 .backup-month { display: flex; justify-content: space-between; align-items: center; gap: 12px; }

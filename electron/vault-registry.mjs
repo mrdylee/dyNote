@@ -50,6 +50,18 @@ export class VaultRegistry {
       throw new Error("이미 다른 용도로 등록된 폴더입니다. 별도 폴더를 선택하거나 목록의 ‘공간 용도’에서 변경해 주세요.");
     return canonical;
   }
+  async checkTeamRepositoryFolder(root) {
+    const canonical = await this.checkConnection(root, "team");
+    if (this.roots.some(other => [path.relative(other, canonical), path.relative(canonical, other)]
+      .some(relative => !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..")))
+      throw new Error("연결된 보관함과 겹치지 않는 폴더를 선택해 주세요.");
+    return canonical;
+  }
+  async registerTeamRepository(folder) {
+    if (await this.checkTeamRepositoryFolder(folder) !== folder)
+      throw new Error("폴더 위치가 변경되었습니다. 폴더를 다시 선택해 주세요.");
+    await this.save(this.selected, [...this.roots, folder], { ...this.purposes, [folder]: "team" });
+  }
   async setPurpose(root, purpose) {
     if (!this.roots.includes(root)) throw new Error("등록된 보관함을 선택해 주세요.");
     await this.checkPurpose(root, purpose);

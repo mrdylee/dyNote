@@ -2941,6 +2941,17 @@ export default function App() {
             onList={loadSpaces}
             onPurpose={async (root, purpose) => { await flush(); await invoke(api.setVaultPurpose({ root, purpose })); }}
             onOpenGit={() => { setGitSettingsId(selectedVaultId); setSettingsTab("git"); }}
+            onPickTeamRepositoryFolder={() => invoke(api.pickTeamRepositoryFolder())}
+            onConnectTeamRepositories={async (repositories) => {
+              setBusy(true);
+              try {
+                await flush();
+                const results = await invoke(api.connectTeamRepositories({ repositories }));
+                if (results.some(result => result.ok)) setSpaceFilter("all");
+                return results;
+              }
+              finally { setBusy(false); }
+            }}
             onPick={async (purpose) => {
               setBusy(true);
               try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } }

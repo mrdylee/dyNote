@@ -494,6 +494,7 @@ app
       onOpen: value => { if (value.created) gitBackup.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
+    const pickedTeamFolders = new Set();
     const scopedActions = new Set([
       "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
@@ -651,6 +652,43 @@ app
         });
         if (result.canceled) return null;
         return selectVault(result.filePaths[0], args?.purpose);
+      },
+      "pick-team-repository-folder": async () => {
+        const result = await dialog.showOpenDialog(window, {
+          title: "팀 저장소 폴더 선택", properties: ["openDirectory", "createDirectory"],
+        });
+        if (result.canceled) return null;
+        const folder = await registry.checkTeamRepositoryFolder(result.filePaths[0]);
+        pickedTeamFolders.add(folder);
+        return folder;
+      },
+      "connect-team-repositories": async (args) => {
+        if (!Array.isArray(args?.repositories) || !args.repositories.length) throw new Error("연결할 팀 저장소를 입력해 주세요.");
+        const results = [];
+        for (const repository of args.repositories) {
+          try {
+            const folder = repository?.folder;
+            if (!pickedTeamFolders.has(folder)) throw new Error("저장소 폴더를 선택해 주세요.");
+            if (await registry.checkTeamRepositoryFolder(folder) !== folder)
+              throw new Error("폴더 위치가 변경되었습니다. 폴더를 다시 선택해 주세요.");
+            const config = validateGitConfig(repository);
+            const git = new GitBackup(folder);
+            if (await git.repository()) {
+              const origin = await git.git(["config", "--local", "--get-all", "remote.origin.url"], { allow: [0, 1] });
+              const branch = await git.git(["symbolic-ref", "--quiet", "--short", "HEAD"], { allow: [0, 1] });
+              if (origin.stdout.trim() !== config.remote || branch.stdout.trim() !== config.branch)
+                throw new Error("선택한 폴더의 origin 주소와 현재 브랜치를 확인해 주세요.");
+            } else {
+              await GitBackup.clone(folder, config);
+            }
+            await registry.registerTeamRepository(folder);
+            pickedTeamFolders.delete(folder);
+            results.push({ ok: true });
+          } catch (error) {
+            results.push({ ok: false, error: error.message });
+          }
+        }
+        return results;
       },
       "git-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.status(); },
       "git-connect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.connect(vault.id, args.config); },
@@ -838,7 +876,7 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
