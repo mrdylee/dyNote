@@ -31,7 +31,10 @@ test("opens an external Word copy without changing the original and cleans tempo
   assert.equal(folders.length, 1);
   assert.deepEqual(await readFile(path.join(cache, folders[0], "document.docx")), before);
   assert.deepEqual(await readFile(file), before);
-  await documents.dispose();
+  assert.equal((await documents.open(file)).id, opened.id);
+  assert.equal((await readdir(cache)).length, 1);
+  await documents.close(opened.id);
+  await assert.rejects(documents.read(opened.id), /임시 문서/);
   assert.deepEqual(await readdir(cache), []);
   assert.deepEqual(await readFile(file), before);
 });

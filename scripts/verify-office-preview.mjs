@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import electronPath from "electron";
+import JSZip from "jszip";
 import { utils, write } from "xlsx";
 
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
@@ -102,13 +103,22 @@ try {
   if (native) assert.notDeepEqual(await readFile(deckPath), original);
   else assert.deepEqual(await readFile(deckPath), original);
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "외부 시트.xlsx", exact: true });
+  const dialog = page.getByRole("region", { name: "외부 시트.xlsx", exact: true });
   await dialog.getByRole("cell", { name: "외부 확인" }).waitFor();
   await dialog.getByRole("button", { name: "앱에서 수정" }).click();
-  await confirmOpened(externalPath, "inspect");
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await confirmOpened(externalPath, "edit");
+  if (!native) {
+    await writeFile(externalPath + ".tmp", workbook("승인 완료"));
+    await rename(externalPath + ".tmp", externalPath);
+  }
+  await dialog.getByRole("cell", { name: "승인 완료" }).waitFor();
+  const sheetTab = page.locator(".tabs .tab-label").filter({ hasText: "외부 시트.xlsx" });
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await dialog.getByRole("cell", { name: "승인 완료" }).waitFor();
+  assert.equal(await sheetTab.count(), 1);
+  await dialog.getByRole("button", { name: "검토 기록" }).click();
   const externalDeck = path.join(root, "외부 발표.pptx");
-  await copyFile(deckPath, externalDeck);
+  await writeFile(externalDeck, original);
   await page.evaluate(() => {
     const input = document.createElement("input");
     input.id = "office-drop"; input.type = "file"; document.body.append(input);
@@ -119,10 +129,29 @@ try {
     transfer.items.add(document.querySelector("#office-drop").files[0]);
     window.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, cancelable: true }));
   });
-  const dropped = page.getByRole("dialog", { name: "외부 발표.pptx", exact: true });
+  const dropped = page.getByRole("region", { name: "외부 발표.pptx", exact: true });
   await dropped.frameLocator("iframe").getByText("시험 계획", { exact: true }).first().waitFor();
+  await dropped.frameLocator("iframe").getByRole("button", { name: "다음 슬라이드" }).click();
+  await dropped.frameLocator("iframe").getByText("시험 결과", { exact: true }).first().waitFor();
   await dropped.getByRole("button", { name: "앱에서 수정" }).click();
-  await confirmOpened(externalDeck, "inspect");
+  assert.equal(await sheetTab.count(), 1);
+  await confirmOpened(externalDeck, "edit");
+  if (!native) {
+    const archive = await JSZip.loadAsync(original);
+    const part = "ppt/slides/slide2.xml";
+    archive.file(part, (await archive.file(part).async("string")).replace("시험 결과", "Windows 저장 확인"));
+    await writeFile(externalDeck + ".tmp", await archive.generateAsync({ type: "nodebuffer" }));
+    await rename(externalDeck + ".tmp", externalDeck);
+  }
+  await dropped.frameLocator("iframe").getByText("Windows 저장 확인", { exact: true }).first().waitFor();
+  await writeFile(externalPath + ".tmp", workbook("배경 탭 저장"));
+  await rename(externalPath + ".tmp", externalPath);
+  await sheetTab.click();
+  await dialog.getByRole("cell", { name: "배경 탭 저장" }).waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "검토 기록" }).getAttribute("aria-pressed"), "true");
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  await page.getByRole("button", { name: "외부 시트.xlsx 탭 닫기", exact: true }).click();
+  await dropped.frameLocator("iframe").getByText("Windows 저장 확인", { exact: true }).first().waitFor();
   console.log("Office vault, external picker, worksheet tabs, slides, edit handoff and focus refresh passed.");
 } finally {
   if (app) await app.close();

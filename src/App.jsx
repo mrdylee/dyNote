@@ -302,7 +302,6 @@ function Modal({ title, children, onClose, wide = false, className = "" }) {
 }
 
 export default function App() {
-  const externalFile = useExternalDocuments(api, invoke);
   const aiSession = useAiSession(api);
   const [documentPrompts, setDocumentPrompts] = useState(() => {
     const saved = stored(documentPromptsKey, null);
@@ -348,7 +347,9 @@ export default function App() {
   useEffect(() => {
     if (hasWorkspace) api?.startupStage?.("renderer.workspace-visible");
   }, [hasWorkspace]);
-  const active = vault?.id === focusedVaultId ? focusedPath : null;
+  const externalKey = workspace.active?.startsWith("external:") ? workspace.active : null;
+  const showingExternal = !!externalKey && !attachment && !["journal", "planner", "graph"].includes(section);
+  const active = !externalKey && vault?.id === focusedVaultId ? focusedPath : null;
   const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
   const showingOffice = isOfficeKind(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
   const showingFile = ["html", "other"].includes(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
@@ -452,6 +453,17 @@ export default function App() {
   const editorView = useRef(null);
   const [status, setStatus] = useState("saved");
   const [error, setError] = useState("");
+  const activateExternal = key => {
+    attachmentRequest.current++;
+    setAttachment(null);
+    setTabs(old => old.includes(key) ? old : [...old, key]);
+    workspace.setActive(key);
+    setSection("files");
+    setModal(null);
+    setError("");
+  };
+  const externalFile = useExternalDocuments(api, invoke, showingExternal ? externalKey : null, activateExternal, setError);
+  const externalDocument = externalFile.current?.document;
   const [busy, setBusy] = useState(false);
   const audioActive = useRef(false);
   const [audioNotice, setAudioNotice] = useState("");
@@ -667,7 +679,7 @@ export default function App() {
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
       const key = documentKey(snapshot.id, startPath);
       workspace.dispatch({ type: "reset", path: key });
-      setTabs(old => [...new Set([...(key ? [key] : []), ...old.filter(key => draftsRef.current.some(draft => draftKey(draft) === key))])]);
+      setTabs(old => [...new Set([...(key ? [key] : []), ...old.filter(key => key.startsWith("external:") || draftsRef.current.some(draft => draftKey(draft) === key))])]);
       setSection(stored("dynote.startup", "journal") === "journal" ? "journal" : "files");
     }
     if (select || currentVault.current === snapshot.id) {
@@ -1001,6 +1013,7 @@ export default function App() {
         return false;
       }
     }
+    for (const key of closing) if (key.startsWith("external:")) externalFile.close(key);
     const paths = workspace.paths.filter(key => !closing.has(key));
     const next = tabs.filter(key => !closing.has(key));
     setTabs(old => old.filter(key => !closing.has(key)));
@@ -1263,7 +1276,7 @@ export default function App() {
       const data = await invoke(api.readOfficeDocument({ path, vaultId, revision }));
       if (request !== attachmentRequest.current || !vaultsRef.current[vaultId]) return;
       setAttachment(old => old?.path === path && old.vaultId === vaultId
-        ? (data ? { ...data, vaultId } : { ...old, error: "" }) : old);
+        ? (data ? { ...data, vaultId } : old.error ? { ...old, error: "" } : old) : old);
     } catch (error) {
       if (request === attachmentRequest.current)
         setAttachment(old => old?.path === path && old.vaultId === vaultId ? { ...old, error: error.message } : old);
@@ -1324,6 +1337,31 @@ export default function App() {
     setModal(null);
     void loadWordDocument(path, vaultId);
   };
+  const [editingAttachment, setEditingAttachment] = useState(null);
+  const editAttachment = async () => {
+    const { vaultId, path, kind } = attachment;
+    try {
+      const open = kind === "word" ? api.openWordDocument : api.openOfficeDocument;
+      await invoke(open({ vaultId, path }));
+      setEditingAttachment(documentKey(vaultId, path));
+    } catch (error) { setError(error.message); }
+  };
+  const watchAttachment = (showingOffice || showingWord) && editingAttachment === documentKey(attachment.vaultId, attachment.path);
+  const readEditedAttachment = useEffectEvent(() => {
+    if (!watchAttachment) return;
+    const load = showingWord ? loadWordDocument : loadOfficeDocument;
+    return load(attachment.path, attachment.vaultId, attachment.revision);
+  });
+  useEffect(() => {
+    if (!watchAttachment) return;
+    let stopped = false;
+    const check = async () => {
+      await readEditedAttachment();
+      if (!stopped) timer = setTimeout(check, 1500);
+    };
+    let timer = setTimeout(check, 1500);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [watchAttachment, editingAttachment]);
   const refreshWordOnFocus = useEffectEvent(async () => {
     const request = ++wordIndexRequest.current;
     if (showingOffice && attachment.revision) void loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision);
@@ -1877,17 +1915,44 @@ export default function App() {
     Promise.resolve().then(command.run).catch(err => setError(err.message));
   };
 
-  const externalFileDialog = externalFile.visible && (
-    <Modal title={externalFile.document?.name ?? "파일 열기"} wide className="external-file-dialog" onClose={externalFile.close}>
-      {!isOfficeKind(externalFile.document?.kind) && <p className="muted">임시 미리보기 · 보관함에 추가하지 않습니다.</p>}
-      {externalFile.document && !isOfficeKind(externalFile.document.kind) && <div className="word-preview-actions">
-        {externalFile.document.canOpenSource && <button onClick={externalFile.openSource} disabled={externalFile.opening}>원본을 기본 앱에서 열기</button>}
-        <button onClick={externalFile.refresh} disabled={externalFile.opening}>미리보기 새로고침</button>
-      </div>}
-      {isOfficeKind(externalFile.document?.kind) ? <OfficePreview key={externalFile.document.id} document={externalFile.document}
-        onEdit={externalFile.openSource} onRefresh={externalFile.refresh} error={externalFile.error} busy={externalFile.opening}/> : <ExternalFilePreview key={externalFile.document?.id} document={externalFile.document} error={externalFile.error} onExternal={url => invoke(api.openExternal(url))} />}
-    </Modal>
-  );
+  const externalPreview = externalDocument && <section className="external-file-preview" aria-label={externalDocument.name}>
+    {isOfficeKind(externalDocument.kind) ? <OfficePreview key={externalDocument.id} document={externalDocument} position={externalFile.current.position}
+      onEdit={externalFile.openSource} onRefresh={externalFile.refresh} error={externalFile.current.error}/> : <>
+      <div className="word-preview-actions">
+        {externalDocument.canOpenSource && <button onClick={externalFile.openSource}>앱에서 수정</button>}
+        <button onClick={externalFile.refresh}>미리보기 새로고침</button>
+      </div>
+      {externalFile.current.error && <p role="status">{externalFile.current.error}</p>}
+      <ExternalFilePreview key={externalDocument.id} document={externalDocument} onExternal={openExternal}/>
+    </>}
+  </section>;
+  const documentTabs = tabs.map(key => {
+    const external = externalFile.documents[key];
+    const { vaultId, path: vaultPath } = documentRef(key);
+    const path = external?.document.name ?? vaultPath;
+    const scope = vaults[vaultId];
+    if (!scope && !external) return null;
+    const draft = documentDrafts.find(item => draftKey(item) === key);
+    const label = external ? "임시 미리보기" : together ? spaceLabel(scope) : null;
+    return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && (external ? showingExternal : section !== "graph") ? "active" : ""}`} key={key}
+      onContextMenu={event => showTabMenu(event, key)}
+      onKeyDown={event => {
+        if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
+      }}>
+      <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
+        draggable={!external && !busy && /\.md$/i.test(path)}
+        onPointerDown={external ? undefined : event => startMacCopy(event, vaultId, path)}
+        onDragStart={event => startTabDrag(event, vaultId, path)} onDragEnd={endTreeDrag}
+        onClick={() => external ? activateExternal(key) : draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
+        {draft?.running ? <LoaderCircle size={13} className="document-generating-icon" aria-label="문서 생성 중" /> : <FileText size={13} />}
+        <span className={label ? "tab-document" : undefined}>
+          <span>{external ? path : draft ? draft.fileName : path.split("/").at(-1).replace(/\.md$/i, "")}</span>
+          {label && <small className="tab-space">{label}</small>}
+        </span>
+      </button>
+      <button className="tab-close" aria-label={`${path} 탭 닫기`} disabled={busy} onClick={() => closeTabs([key])}><X size={12} /></button>
+    </div>;
+  });
   if (!vault)
     return (
       <div className="loading-screen">
@@ -1897,7 +1962,8 @@ export default function App() {
         <h1>Dynote</h1>
         <p>{error || "생각을 연결할 준비를 하고 있어요…"}</p>
         <button onClick={externalFile.choose} disabled={!api || externalFile.opening}>파일 열기</button>
-        {externalFileDialog}
+        {documentTabs.length > 0 && <div className="tabbar"><div className="tabs">{documentTabs}</div></div>}
+        {externalPreview}
       </div>
     );
   const resolveDocument = key => {
@@ -2186,31 +2252,7 @@ export default function App() {
         <main className="workspace">
           <div className="tabbar">
             <div className="tabs">
-              {tabs.map(key => {
-                const { vaultId, path } = documentRef(key);
-                const scope = vaults[vaultId];
-                if (!scope) return null;
-                const draft = documentDrafts.find(item => draftKey(item) === key);
-                const label = together ? spaceLabel(scope) : null;
-                return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && !["graph"].includes(section) ? "active" : ""}`} key={key}
-                  onContextMenu={event => showTabMenu(event, key)}
-                  onKeyDown={event => {
-                    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
-                  }}>
-                  <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
-                    draggable={!busy && /\.md$/i.test(path)}
-                    onPointerDown={event => startMacCopy(event, vaultId, path)}
-                    onDragStart={event => startTabDrag(event, vaultId, path)} onDragEnd={endTreeDrag}
-                    onClick={() => draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
-                    {draft?.running ? <LoaderCircle size={13} className="document-generating-icon" aria-label="문서 생성 중" /> : <FileText size={13} />}
-                    <span className={label ? "tab-document" : undefined}>
-                      <span>{draft ? draft.fileName : path.split("/").at(-1).replace(/\.md$/i, "")}</span>
-                      {label && <small className="tab-space">{label}</small>}
-                    </span>
-                  </button>
-                  <button className="tab-close" aria-label={`${path} 탭 닫기`} disabled={busy} onClick={() => closeTabs([key])}><X size={12} /></button>
-                </div>;
-              })}
+              {documentTabs}
               {section === "graph" && (
                 <div className="tab active">
                   <Network size={14} />
@@ -2231,12 +2273,12 @@ export default function App() {
           <div className="document-toolbar">
             <div className="breadcrumbs">
               <Folder size={13} />
-              <span>{vault.name}</span>
+              <span>{showingExternal ? "임시 미리보기" : vault.name}</span>
               <ChevronRight size={12} />
               <span>
                 {section === "journal" ? "저널" : section === "graph"
                   ? "문서 그래프"
-                  : (activeDocumentDraft ? `${activeDocumentDraft.fileName} · 임시 문서` : displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
+                  : externalDocument ? externalDocument.name : (activeDocumentDraft ? `${activeDocumentDraft.fileName} · 임시 문서` : displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
@@ -2411,7 +2453,7 @@ export default function App() {
                 active={active}
                 onOpen={openFile}
               />
-            ) : structured && !attachment ? (
+            ) : externalPreview ? externalPreview : structured && !attachment ? (
               structured.kind === "canvas" ? <CanvasEditor key={`${vault.id}:${structured.path}`} document={structured}
                 files={[...model.notes, ...documents, ...(vault.attachments ?? [])]} attachments={vault.attachments ?? []} vaultId={vault.id}
                 onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy || captureLocked} />
@@ -2422,7 +2464,7 @@ export default function App() {
                 <div className="attachment-heading">
                   <strong>{attachment.path}</strong>
                   {attachment.kind === "word" && <div className="word-preview-actions">
-                    <button onClick={() => invoke(api.openWordDocument({ vaultId: attachment.vaultId, path: attachment.path })).catch(error => setError(error.message))}>
+                    <button onClick={editAttachment}>
                       기본 앱에서 열기
                     </button>
                     <button onClick={() => loadWordDocument(attachment.path, attachment.vaultId, attachment.revision)}>
@@ -2437,7 +2479,7 @@ export default function App() {
                   attachment.error ? <p role="status">{attachment.error}</p> : attachment.content === undefined ? <p role="status">파일을 읽는 중…</p>
                     : attachment.kind === "html" ? <HtmlPreview content={attachment.content}/> : <pre className="external-file-text">{attachment.content}</pre>
                 ) : isOfficeKind(attachment.kind) ? <OfficePreview key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
-                  onEdit={() => invoke(api.openOfficeDocument({ vaultId: attachment.vaultId, path: attachment.path })).catch(err => setError(err.message))}
+                  onEdit={editAttachment}
                   onRefresh={() => loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision)}/> : attachment.kind === "word" ? <>
                   <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>
                   <WordPreview html={attachment.html} error={attachment.error} />
@@ -2512,7 +2554,7 @@ export default function App() {
               className={`save-status ${status}`}
               onClick={() => flush(true).catch(() => {})}
             >
-              {showingFile || showingOffice || showingWord ? <BookOpen size={13} /> : status === "saving" ? (
+              {showingExternal || showingFile || showingOffice || showingWord ? <BookOpen size={13} /> : status === "saving" ? (
                 <LoaderCircle size={13} className="spin" />
               ) : status === "saved" ? (
                 <CheckCheck size={13} />
@@ -2520,7 +2562,7 @@ export default function App() {
                 <span className="status-dot" />
               )}
               <span>
-                {showingFile || showingOffice ? "읽기 전용" : showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
+                {showingExternal || showingFile || showingOffice ? "읽기 전용" : showingWord ? "Word에서 저장" : pendingEdit ? "Copilot 미확정 변경 · 복구 초안 보관" : status === "saved"
                   ? "모든 변경사항 저장됨"
                   : status === "saving"
                     ? "저장 중…"
@@ -2531,7 +2573,7 @@ export default function App() {
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             <div>
-              {showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
+              {externalDocument ? <span>{externalDocument.kind.toUpperCase()}</span> : showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
                 {note && <span>{statistics.words.toLocaleString()}단어</span>}
                 <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
                 <span>{structured?.kind ?? "Markdown"}</span>
@@ -3241,7 +3283,6 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {externalFileDialog}
     </div>
   );
 }
