@@ -56,3 +56,8 @@ The MIT permission and warranty terms reproduced above apply to the respective M
 ## Native PDF editing
 
 `pdf-lib` 1.17.1 is an MIT-licensed dependency from [Hopding/pdf-lib](https://github.com/Hopding/pdf-lib). Copyright (c) 2019 Andrew Dillon. Its original license is retained in the installed `node_modules/pdf-lib/LICENSE.md` and packaged dependency. Dynote uses its own annotation workflow; no PDF++ program code is copied into the product. Official API references: [PDFDocument](https://pdf-lib.js.org/docs/api/classes/pdfdocument), [PDFPage](https://pdf-lib.js.org/docs/api/classes/pdfpage).
+
+## Excel and PowerPoint preview
+
+- SheetJS Community Edition 0.20.3 reads worksheet values and merge ranges in a local worker. Its Apache-2.0 license is included in the installed `xlsx` package.
+- `@aiden0z/pptx-renderer` 1.4.0 renders slides in the local preview frame. Its Apache-2.0 license and third-party notices are included in the installed package.

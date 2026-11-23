@@ -25,6 +25,32 @@ async function fixture(t) {
   return { dir, root, recovery, store: await Vault.open(root, recovery) };
 }
 
+test("personal and team vaults start with an empty File Storage folder and preserve its files on reopen", async t => {
+  const { root, recovery, dir, store } = await fixture(t);
+  assert.ok(!(await store.snapshot()).folders.includes("File Storage"));
+  for (const purpose of ["personal", "team"]) {
+    const space = purpose === "personal" ? root : join(dir, "Team");
+    if (purpose === "team") await mkdir(space);
+    const vault = await Vault.open(space, recovery, purpose);
+    const storage = join(space, "File Storage");
+    assert.ok((await vault.snapshot()).folders.includes("File Storage"));
+    assert.deepEqual(await readdir(storage), []);
+    await writeFile(join(storage, "saved.zip"), "keep");
+    await Vault.open(space, recovery, purpose);
+    assert.equal(await readFile(join(storage, "saved.zip"), "utf8"), "keep");
+  }
+});
+
+test("a File Storage name collision leaves existing data and the vault usable", async t => {
+  const { root, recovery } = await fixture(t);
+  const file = join(root, "File Storage");
+  await writeFile(file, "keep");
+  const vault = await Vault.open(root, recovery, "team");
+  assert.match((await vault.snapshot()).warnings.join(" "), /File Storage/);
+  assert.equal(await readFile(file, "utf8"), "keep");
+  assert.ok((await vault.snapshot()).notes.length);
+});
+
 test("folders can be created without a document and reject collisions and unsafe paths", async t => {
   const { store, root, dir } = await fixture(t);
   assert.equal(typeof store.createFolder, 'function');

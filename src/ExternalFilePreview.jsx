@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import { renderMarkdown } from "../core/knowledge.mjs";
 import DiagramPreview from "./DiagramPreview.jsx";
+import HtmlPreview from "./HtmlPreview.jsx";
 import WordPreview from "./WordPreview.jsx";
 import PdfViewer from "./PdfViewer.jsx";
 import AudioViewer from "./AudioViewer.jsx";
@@ -30,6 +31,7 @@ export default function ExternalFilePreview({ document, error, onExternal }) {
   const external = url => Promise.resolve().then(() => onExternal(url)).catch(value => setNotice(value.message));
   let preview;
   switch (document.kind) {
+    case "html": preview = <HtmlPreview content={document.content}/>; break;
     case "word": preview = <WordPreview html={document.html} />; break;
     case "markdown": preview = <section aria-label="Markdown 미리보기"><DiagramPreview html={html} onClick={event => {
       const link = event.target.closest("a");

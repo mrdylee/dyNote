@@ -26,16 +26,20 @@ export default function useVaultDocuments(api, invoke) {
     setVaults(next);
   }, []);
   const queue = useMemo(() => {
-    const byVault = new Map();
+    const byVault = new Map(), generations=new Map();
+    const changed=id=>generations.set(id,(generations.get(id) ?? 0)+1);
     return {
       get dirty() { return [...byVault.values()].some(queue => queue.dirty); },
       dirtyIn(id) { return !!byVault.get(id)?.dirty; },
+      generation(id) { return generations.get(id) ?? 0; },
       get(id, path) { return byVault.get(id)?.get(path); },
       set(id, draft) {
+        changed(id);
         if (!byVault.has(id)) byVault.set(id, new SaveQueue((path, content, revision) => {
           const save = revision === null ? api.createNote : documentKind(path) ? api.saveDocument : api.saveNote;
           return invoke(save({ vaultId: id, path, content, revision }));
         }, saved => {
+          changed(id);
           revisionMap(id).set(saved.path, saved.revision);
           const files = documentKind(saved.path) ? "documents" : "notes";
           update(id, vault => vault && ({ ...vault, [files]: vault[files].map(file => (
@@ -65,7 +69,10 @@ export default function useVaultDocuments(api, invoke) {
       map.set(file.path, file.revision);
       return file;
     });
-    update(id, old => ({ ...old, ...snapshot, notes: installFiles(snapshot.notes), documents: installFiles(snapshot.documents ?? []) }));
+    update(id, old => {
+      const keepDrafts=(files,previous=[])=>[...installFiles(files),...previous.filter(file=>queue.get(id,file.path) && !files.some(incoming=>incoming.path===file.path))];
+      return {...old,...snapshot,notes:keepDrafts(snapshot.notes,old?.notes),documents:keepDrafts(snapshot.documents ?? [],old?.documents)};
+    });
   }, [queue, revisionMap, update]);
   return { vaults, current, revisionMap, update, remove, queue, install };
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
@@ -26,7 +26,7 @@ const row=name=>page.locator('.vault-settings-list li').filter({has:page.getByTe
 const close=()=>page.getByRole('dialog',{name:'설정',exact:true}).getByRole('button',{name:'닫기',exact:true}).click();
 const picker=folder=>app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},folder);
 async function connect(purpose){
- await page.getByRole('button',{name:'이 공간의 Git 설정',exact:true}).click();
+ await row(purpose==='personal'?personal:team).getByRole('button',{name:'이 공간의 Git 설정',exact:true}).click();
  await page.getByRole('textbox',{name:'Git 저장소 주소',exact:true}).fill(remotes[purpose]);
  await page.getByRole('button',{name:'연결하고 백업 시작',exact:true}).click();
  await page.locator('.git-space-context').getByText(remotes[purpose],{exact:true}).waitFor();
@@ -50,13 +50,16 @@ try{
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
  await picker(team);await page.getByRole('button',{name:'팀 공유 폴더 연결',exact:true}).click();
  await row(team).getByText('사용 중',{exact:true}).waitFor();
+ for(const space of [personal,team])assert.deepEqual(await readdir(path.join(space,'File Storage')),[]);
  await connect('team');assert.match(await page.locator('.git-space-context').innerText(),/팀 공유 노트/);assert.match(await page.locator('.git-space-context').innerText(),/접근 권한/);
  assert.equal(git('--git-dir',`${root}/personal.git`,'show','main:Private.md'),original);
  assert.equal(git('--git-dir',`${root}/team.git`,'show','main:Shared.md'),shared);
  assert.throws(()=>git('--git-dir',`${root}/team.git`,'show','main:Private.md'));
  report.checks.push('personal and team connect to separate real local remotes; private notes are absent from the team repository');
  await page.locator('.git-space-context').scrollIntoViewIfNeeded();await page.screenshot({path:'output/playwright/vault-spaces-git.png'});
- await close();await page.getByRole('button',{name:'파일 목록',exact:true}).click();await page.locator('.file-row[title="Shared.md"]').click();
+ await close();await page.getByRole('button',{name:'파일 목록',exact:true}).click();await page.getByRole('region',{name:'팀 공유 노트 · Team',exact:true}).getByText('File Storage',{exact:true}).waitFor();
+ await page.getByRole('region',{name:'개인 노트 · Personal',exact:true}).getByText('File Storage',{exact:true}).waitFor();
+ await page.locator('.file-row[title="Shared.md"]').click();
  await page.getByRole('button',{name:'편집 보기',exact:true}).click();await page.locator('.cm-content').click();await page.keyboard.press(process.platform==='darwin'?'Meta+End':'Control+End');await page.keyboard.insertText('Team edit\n');
  await identity().click();await row(personal).getByRole('button',{name:'열기',exact:true}).click();
  await row(personal).getByText('사용 중',{exact:true}).waitFor();
@@ -73,6 +76,7 @@ try{
  report.checks.push('space switch flushes team edits, restores the personal Git address and the personal search filter excludes team results');
  await app.close();await start();await identity().filter({hasText:'개인 노트'}).waitFor();assert.match(await identity().innerText(),/개인 노트/);await identity().click();
  assert.equal(await page.getByRole('combobox',{name:'Personal 공간 용도',exact:true}).inputValue(),'personal');assert.equal(await page.getByRole('combobox',{name:'Team 공간 용도',exact:true}).inputValue(),'team');
+ for(const [root,address] of [[personal,remotes.personal],[team,remotes.team]])await row(root).getByText(address,{exact:true}).waitFor();
  for(const width of [1050,800]){
   await app.evaluate(({BrowserWindow},width)=>{const window=BrowserWindow.getAllWindows()[0];window.setMinimumSize(800,700);window.setSize(width,700);},width);
   const overflow=await page.getByRole('dialog',{name:'설정',exact:true}).evaluate(el=>el.scrollWidth>el.clientWidth+1);assert.equal(overflow,false);

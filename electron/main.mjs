@@ -12,7 +12,7 @@ import {
   powerMonitor,
 } from "electron";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
+import { readFile, writeFile, mkdir, lstat, realpath, readdir } from "node:fs/promises";
 import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,7 +117,9 @@ function openVaultController(target, refresh = false) {
   }
   const git = new GitController({
     settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
+    isPersonal: target => registry.purposes[target.root] === "personal",
     onStatus: status => {
+      if(status.changed?.length) stickyNotes?.receive(target,status.changed).catch(error=>console.warn("Sticky Note 동기화",error.message));
       if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status);
     },
   });
@@ -150,7 +152,7 @@ async function saveStickyNote(root, relative, content, revision) {
   activeMutations++;
   try {
     const { vault: target, git } = await stickyVault(root);
-    const saved = revision ? await target.save(relative, content, revision) : await target.create(relative, content);
+    const saved = revision ? await git.saveNote(relative,content,revision,()=>target.save(relative,content,revision)) : await target.create(relative, content);
     git.markDirty(target.id);
     if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:sticky-saved", { vaultId: target.id, note: saved });
     return saved;
@@ -221,7 +223,8 @@ async function workspaceSnapshots() {
   const spaces = await Promise.all(entries.map(async space => {
     try {
       if (await registry.checkPurpose(space.root) !== space.root) throw new Error("폴더 위치가 변경되었습니다.");
-      const target = await Vault.open(space.root, recovery);
+      const existing = [...openedVaults.values()].find(entry => entry.vault.root === space.root);
+      const target = existing?.vault ?? await Vault.open(space.root, recovery, space.purpose);
       if (target.root !== space.root) throw new Error("폴더 위치가 변경되었습니다.");
       if (!togetherEntries().some(entry => entry.root === space.root && entry.purpose === space.purpose)) return null;
       const entry = openVaultController(target);
@@ -238,7 +241,7 @@ async function workspaceSnapshots() {
 }
 
 async function changeAiExtensions(action) {
-  if (aiExtensionsChanging || [copilot, codex, claude].some(controller => controller?.job || controller?.loginJob))
+  if (aiExtensionsChanging || copilot?.jobs.size || [copilot, codex, claude].some(controller => controller?.job || controller?.loginJob))
     throw new Error("AI 작업이 끝난 뒤 MCP·스킬 연결을 변경해 주세요.");
   aiExtensionsChanging = true;
   try { return await action(); }
@@ -252,10 +255,11 @@ function sendAi(controller, args) {
 }
 
 async function selectVault(root, purpose) {
-  await registry.checkConnection(root, purpose);
+  const canonical = await registry.checkConnection(root, purpose);
   await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
-  const opened = await Vault.open(root, recovery);
-  const selected = openedVaults.get(opened.id)?.vault ?? opened;
+  const existing = [...openedVaults.values()].find(entry => entry.vault.root === canonical);
+  const selected = existing?.vault ?? await Vault.open(canonical, recovery, purpose ?? registry.purposes[canonical]);
+  if (existing && purpose && !registry.purposes[canonical]) await selected.prepareFileStorage();
   const snapshot = await selected.snapshot();
   await plugins?.close();
   await registry.select(selected.root, purpose);
@@ -271,7 +275,7 @@ async function selectVault(root, purpose) {
 async function initialVault() {
   try {
     await startup.run("vault.read-registry", () => registry.load());
-    if (registry.selected) return await startup.run("vault.open-selected", () => Vault.open(registry.selected, recovery));
+    if (registry.selected) return await startup.run("vault.open-selected", () => Vault.open(registry.selected, recovery, registry.purposes[registry.selected]));
     const demo = path.join(app.getPath("userData"), "처음 만나는 노트");
     for (const [relative, content] of Object.entries(demoNotes)) {
       const file = path.join(demo, relative);
@@ -500,10 +504,10 @@ app
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
-      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
-      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "read-attachment", "copy-text", "choose-attachments",
+      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips",
+      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
-      "read-word-document", "open-word-document",
+      "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
       "document-drafts": () => documentDrafts.list(),
@@ -595,8 +599,11 @@ app
       },
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
-        if (args.checkOnly === true) return copilotJournal.sync(vault,args.dailyOptions,false,{checkOnly:true});
-        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds});});
+        const run=async()=>{checkVault(args,vault);
+          const protectedPaths=gitBackup.status().enabled && gitBackup.status().config?.mode==="personal-sync" ? await gitBackup.personal.blockedSessions() : undefined;
+          return copilotJournal.sync(vault,args.dailyOptions,args.checkOnly!==true && args.manual===true,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
+        };
+        return args.checkOnly===true ? run() : gitBackup.enqueue(run);
       },
       "capture-trash": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 삭제해 주세요.");
@@ -609,20 +616,39 @@ app
       snapshot: (args, vault) => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "workspace-snapshots": () => startup.run("vault.read-workspaces", workspaceSnapshots),
       "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
-      "set-vault-purpose": async (args) => { await registry.setPurpose(args?.root, args?.purpose); pruneVaultControllers(); return true; },
+      "set-vault-purpose": async (args) => {
+        await registry.setPurpose(args?.root, args?.purpose);
+        const entry = [...openedVaults.values()].find(entry => entry.vault.root === args.root);
+        if (entry && args.purpose!=="personal" && entry.git.status().config?.mode==="personal-sync") await entry.git.disconnect(entry.vault.id);
+        if (entry) await entry.vault.prepareFileStorage();
+        else await Vault.open(args.root, recovery, args.purpose);
+        pruneVaultControllers();
+        return true;
+      },
       "select-vault": (args) => {
         if (!registry.roots.includes(args?.root)) throw new Error("등록된 보관함을 선택해 주세요.");
         return selectVault(args.root);
       },
       "forget-vault": async (args) => { await registry.forget(args?.root); pruneVaultControllers(); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
-      "git-history": (args, vault) => { checkVault(args, vault); return new GitHistory(vault).list(args.month); },
+      "git-history": (args, vault) => {
+        checkVault(args, vault);
+        const history = new GitHistory(vault);
+        return args.filePath === undefined ? history.list(args.month) : history.fileVersions(args.filePath, args.skip, args.anchor);
+      },
       "classification-preview": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args, vault);return new JournalClassifier(vault).preview(args.input);}); },
       "classification-apply": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args, vault);return new JournalClassifier(vault).apply(args.input,args.revision);}); },
       "composer-preview": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args, vault); return new NoteComposer(vault).preview(args.input); }); },
       "composer-apply": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args, vault); return new NoteComposer(vault).apply(args.input, args.revision); }); },
       "pdf-preview": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async () => { const { PdfEditor } = await import("../core/pdf-editing.mjs"); checkVault(args, vault); return new PdfEditor(vault).preview(args.input); }); },
       "pdf-apply": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async () => { const { PdfEditor } = await import("../core/pdf-editing.mjs"); checkVault(args, vault); return new PdfEditor(vault).apply(args.input, args.revision); }); },
-      "git-workspace-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(() => { checkVault(args, vault); return new GitWorkspace(vault.root).status(); }); },
+      "git-workspace-status": (args, vault, gitBackup) => {
+        checkVault(args, vault);
+        return gitBackup.enqueue(() => {
+          checkVault(args, vault);
+          const workspace = new GitWorkspace(vault.root);
+          return args.summaryOnly === true ? workspace.repositoryInfo() : workspace.status();
+        });
+      },
       "git-workspace-diff": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(() => { checkVault(args, vault); return new GitWorkspace(vault.root).diff(args.path, args.staged === true); }); },
       "git-workspace-action": (args, vault, gitBackup) => {
         checkVault(args, vault);
@@ -635,13 +661,29 @@ app
           return { status, snapshot };
         });
       },
-      "git-preview": (args, vault) => { checkVault(args, vault); return new GitHistory(vault).preview(args.commit); },
+      "git-preview": (args, vault) => {
+        checkVault(args, vault);
+        const history = new GitHistory(vault);
+        return args.filePath === undefined ? history.preview(args.commit) : history.filePreview(args.filePath, args.commit);
+      },
       "git-restore": (args, vault, gitBackup) => {
         checkVault(args, vault);
         return gitBackup.enqueue(async () => {
           checkVault(args, vault);
-          const result = await new GitHistory(vault).restore(args.commit, args.revision);
+          const history = new GitHistory(vault);
+          const cfg=gitBackup.status().config;
+          const personal=gitBackup.status().enabled && cfg?.mode==="personal-sync" && args.filePath!==undefined;
+          if(personal) {
+            checkVault(args,vault);
+            const preview=await history.filePreview(args.filePath,args.commit);
+            if(preview.revision!==args.revision)throw new Error("미리보기 이후 파일이 변경되었습니다.");
+            await gitBackup.personal.checkpointFile(cfg,args.filePath,"복원 전 파일 보존");
+          }
+          const result = args.filePath === undefined ? await history.restore(args.commit, args.revision)
+            : await history.restoreFile(args.filePath, args.commit, args.revision);
+          if(personal) await gitBackup.personal.checkpointFile(cfg,args.filePath,"파일 버전 복원");
           gitBackup.markDirty(vault.id);
+          if(personal) gitBackup.sync(vault.id).catch(()=>{});
           return result;
         });
       },
@@ -673,14 +715,14 @@ app
               throw new Error("폴더 위치가 변경되었습니다. 폴더를 다시 선택해 주세요.");
             const config = validateGitConfig(repository);
             const git = new GitBackup(folder);
-            if (await git.repository()) {
-              const origin = await git.git(["config", "--local", "--get-all", "remote.origin.url"], { allow: [0, 1] });
-              const branch = await git.git(["symbolic-ref", "--quiet", "--short", "HEAD"], { allow: [0, 1] });
-              if (origin.stdout.trim() !== config.remote || branch.stdout.trim() !== config.branch)
-                throw new Error("선택한 폴더의 origin 주소와 현재 브랜치를 확인해 주세요.");
-            } else {
+            if (!await git.repository()) {
+              if (!await git.remoteHead(config)) throw new Error("원격 저장소에서 해당 브랜치를 찾을 수 없습니다.");
               await GitBackup.clone(folder, config);
             }
+            const origin = await git.git(["config", "--local", "--get-all", "remote.origin.url"], { allow: [0, 1] });
+            const branch = await git.git(["symbolic-ref", "--quiet", "HEAD"], { allow: [0, 1] });
+            if (origin.stdout.trim() !== config.remote || branch.stdout.trim() !== "refs/heads/" + config.branch)
+              throw new Error("선택한 폴더의 origin 주소와 현재 브랜치를 확인해 주세요.");
             await registry.registerTeamRepository(folder);
             pickedTeamFolders.delete(folder);
             results.push({ ok: true });
@@ -692,21 +734,27 @@ app
       },
       "git-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.status(); },
       "git-connect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.connect(vault.id, args.config); },
-      "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id); },
+      "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id,{automatic:args.poll===true}); },
+      "personal-sync-zips": (args,vault,controller) => { checkVault(args,vault); return controller.enqueue(()=>controller.zipList()); },
+      "personal-sync-action": (args,vault,controller) => { checkVault(args,vault); return controller.personalAction(vault.id,args); },
       "git-disconnect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.disconnect(vault.id); },
       "git-clone": async (args, source) => {
         checkVault(args, source);
-        const config = validateGitConfig(args.config);
+        const personal=args.config?.mode==="personal-sync";
+        if(personal && registry.purposes[source.root]!=="personal") throw new Error("개인 보관함을 선택해 주세요.");
+        const config = personal ? {...validateGitConfig(args.config),mode:"personal-sync",deviceName:args.config.deviceName,zipPaths:[]} : validateGitConfig(args.config);
         const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
         if (result.canceled) return null;
         checkVault(args, source);
         const purpose = registry.purposes[source.root];
         await registry.checkConnection(result.filePaths[0], purpose);
-        await GitBackup.clone(result.filePaths[0], config);
+        if (personal) {
+          if ((await readdir(result.filePaths[0])).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+        } else await GitBackup.clone(result.filePaths[0], config);
         const snapshot = await selectVault(result.filePaths[0], purpose);
         try { await gitBackup.connect(vault.id, config); }
         catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
-        return snapshot;
+        return personal ? await vault.snapshot() : snapshot;
       },
       create: (args, vault) => {
         checkVault(args, vault);
@@ -716,9 +764,9 @@ app
         checkVault(args, vault);
         return vault.openOrCreate(args.path, args.content);
       },
-      save: (args, vault) => {
+      save: (args, vault, controller) => {
         checkVault(args, vault);
-        return vault.save(args.path, args.content, args.revision);
+        return controller.saveNote(args.path,args.content,args.revision,()=>vault.save(args.path, args.content, args.revision));
       },
       "create-document": (args, vault) => {
         checkVault(args, vault);
@@ -728,6 +776,29 @@ app
         checkVault(args, vault);
         return vault.saveDocument(args.path, args.content, args.revision);
       },
+      "transfer-dropped-file": async (args, vault) => {
+        checkVault(args, vault);
+        const result = await vault.transferDroppedFile(args.source, args.folder, args.operation);
+        const sync=openedVaults.get(vault.id)?.git.personal;
+        if(sync?.disk && result.path && /\.(?:zip|pdf|pptx|xlsx)$/i.test(result.path)) {
+          const copy=await sync.disk.read(result.path).catch(()=>null);
+          if(copy) sync.confirmed.set(result.path,copy.oid);
+        }
+        if (args.operation === "move" && !result.warning && !result.unchanged) {
+          for (const { vault: source, git } of openedVaults.values()) {
+            if (source.id !== vault.id && args.source.startsWith(source.root + path.sep)) {
+              git.markDirty(source.id);
+              result.sourceVaultId = source.id;
+              break;
+            }
+          }
+        }
+        return result;
+      },
+      "read-other-file": (args, vault) => {
+        checkVault(args, vault);
+        return vault.readOtherFile(args.path);
+      },
       "import-attachment": (args, vault) => {
         checkVault(args, vault);
         return vault.importAttachment(args.name, args.bytes);
@@ -735,6 +806,16 @@ app
       "read-attachment": (args, vault) => {
         checkVault(args, vault);
         return vault.readAttachment(args.path);
+      },
+      "read-office-document": (args, vault) => {
+        checkVault(args, vault);
+        return vault.readOfficeDocument(args.path, args.revision);
+      },
+      "open-office-document": async (args, vault) => {
+        checkVault(args, vault);
+        const file = await vault.officeFilePath(args.path);
+        if (await shell.openPath(file)) throw new Error("원본 파일을 열 수 없습니다. 기본 앱 설정을 확인해 주세요.");
+        return true;
       },
       "read-word-document": (args, vault) => {
         checkVault(args, vault);
@@ -744,13 +825,14 @@ app
         const result = await dialog.showOpenDialog(window, {
           title: "파일 열기", properties: ["openFile"],
           filters: [
-            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "docx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
+            { name: "문서·이미지·오디오", extensions: ["md", "markdown", "html", "htm", "docx", "xlsx", "pptx", "pdf", "canvas", "base", "txt", "log", "json", "csv", "yaml", "yml", "png", "jpg", "jpeg", "gif", "webp", "webm", "wav", "mp3", "ogg", "m4a"] },
             { name: "모든 파일 · UTF-8 텍스트", extensions: ["*"] },
           ],
         });
         return result.canceled ? null : externalDocuments().open(result.filePaths[0]);
       },
       "open-external-file": args => externalDocuments().open(args.path),
+      "close-external-file": args => externalDocuments().close(args.id),
       "read-external-file": args => externalDocuments().read(args.id, args.revision),
       "open-external-file-source": async args => {
         const file = await externalDocuments().sourcePath(args.id);
@@ -777,8 +859,8 @@ app
           properties: ["openFile", "multiSelections"],
           filters: [
             {
-              name: "이미지·PDF·오디오",
-              extensions: ["png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
+              name: "이미지·PDF·오디오·Office",
+              extensions: ["html", "htm", "xlsx", "pptx", "png", "jpg", "jpeg", "gif", "webp", "pdf", "webm", "wav", "mp3", "ogg", "m4a"],
             },
           ],
         });
@@ -877,7 +959,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-attachment", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
@@ -906,7 +988,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

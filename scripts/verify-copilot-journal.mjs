@@ -98,7 +98,7 @@ try{
   await projects.getByText('WSL (Ubuntu) · /home/dev/WSL Work',{exact:true}).click();
   assert.equal(await ubuntu.isChecked(),true);
   await importSelected();
-  await settings().getByRole('status').filter({hasText:'새로 가져올 완료된 대화가 없습니다.'}).waitFor();
+  await settings().getByRole('status').filter({hasText:'완료된 원본 대화나 Dynote에 저장된 이전 기록을 찾지 못했습니다.'}).waitFor();
   assert.equal((await captureState()).records.length,0);
  });
  await put('first','검토 대화','첫 질문 원문');
@@ -113,7 +113,8 @@ try{
  let state=await captureState(),record=state.records[0];
  await check('manual import opened from a team document shows and writes only the personal journal',async()=>{
   assert.equal(state.enabled,false);assert.equal(state.records.length,1);assert.equal(record.sessions.length,1);
-  assert.deepEqual(await readdir(team),['Shared.md']);
+  assert.deepEqual((await readdir(team)).sort(),['File Storage','Shared.md']);
+  assert.deepEqual(await readdir(path.join(team,'File Storage')),[]);
   assert.match(await page.getByRole('button',{name:'공간 전환·관리',exact:true}).innerText(),/개인 노트/);
   assert.equal(await page.locator('.capture-record-title').count(),1);
   assert.equal(await page.getByRole('button',{name:'프로젝트별 기록',exact:true}).count(),1);
@@ -191,7 +192,8 @@ try{
    return response.value?.records[0]?.sessions.length===2;
   },undefined,{polling:300});
   assert.ok((await teamPane.getAttribute('class')).includes('focused'));
-  assert.deepEqual(await readdir(team),['Shared.md']);
+  assert.deepEqual((await readdir(team)).sort(),['File Storage','Shared.md']);
+  assert.deepEqual(await readdir(path.join(team,'File Storage')),[]);
   assert.equal(await readFile(path.join(team,'Shared.md'),'utf8'),'# 팀 기록\nTeam can save');
   await page.getByRole('region',{name:'개인 노트 · vault',exact:true}).getByTitle(journal,{exact:true}).click();
   await page.getByRole('button',{name:'달력과 일지',exact:true}).click();

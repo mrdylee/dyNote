@@ -40,7 +40,7 @@ export class CopilotController {
       });
     });
     this.clientPromise = null;
-    this.job = null;
+    this.jobs = new Map();
     this.loginJob = null;
     this.closed = false;
   }
@@ -74,10 +74,11 @@ export class CopilotController {
   }
 
   send(input) {
-    if (this.job || this.loginJob) throw new Error("Copilot 작업이 진행 중입니다.");
     const args = prepareRequest(input);
+    if (this.closed) throw new Error("Copilot이 종료되었습니다.");
+    if (this.loginJob || this.jobs.has(args.requestId)) throw new Error("Copilot 작업이 진행 중입니다.");
     const job = { id: args.requestId, canceled: false, session: null };
-    this.job = job;
+    this.jobs.set(job.id, job);
     job.promise = this.run(job, args);
     return { requestId: job.id };
   }
@@ -166,23 +167,24 @@ export class CopilotController {
         if (failed || job.canceled) await job.session.abort().catch(() => {});
         await client.deleteSession(job.session.sessionId).catch(() => {});
       }
-      if (this.job === job) this.job = null;
+      this.jobs.delete(job.id);
       if (job.canceled) emit("canceled");
       else if (terminal) emit(terminal.type, terminal);
     }
   }
 
   async cancel(requestId) {
-    const job = this.job;
-    if (!job || (requestId && job.id !== requestId)) return;
-    job.canceled = true;
-    await job.session?.abort().catch(() => {});
+    const jobs = requestId ? [this.jobs.get(requestId)].filter(Boolean) : [...this.jobs.values()];
+    await Promise.all(jobs.map(async job => {
+      job.canceled = true;
+      await job.session?.abort().catch(() => {});
+    }));
   }
 
-  settled() { return this.job?.promise ?? Promise.resolve(); }
+  async settled() { await Promise.all([...this.jobs.values()].map(job => job.promise)); }
 
   login() {
-    if (this.job || this.loginJob) throw new Error("Copilot 작업이 진행 중입니다.");
+    if (this.jobs.size || this.loginJob) throw new Error("Copilot 작업이 진행 중입니다.");
     const job = { canceled: false, session: null };
     this.loginJob = job;
     job.promise = this.runLogin(job);
@@ -229,11 +231,11 @@ export class CopilotController {
       clearTimeout(timeout);
       if (job.flowId) await job.session.rpc.accounts.login.cancel({ flowId: job.flowId }).catch(() => {});
       if (job.session) await client.deleteSession(job.session.sessionId).catch(() => {});
-      if (this.loginJob === job) this.loginJob = null;
       if (terminal?.phase === "connected") {
         await client.stop().catch(() => {});
         this.clientPromise = null;
       }
+      if (this.loginJob === job) this.loginJob = null;
       if (job.canceled) emit({ phase: "canceled", message: "로그인을 취소했습니다." });
       else if (terminal) emit(terminal);
     }

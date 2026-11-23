@@ -12,7 +12,7 @@ import {
   readFile,
 } from "node:fs/promises";
 import { constants } from "node:fs";
-import { attachmentMime, validateAttachment } from "./attachments.mjs";
+import { attachmentMime, validateAttachment, decodeHtml } from "./attachments.mjs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createLinkIndex, resolvePath, rewriteLinks, rewriteLinkPaths, scanLinks } from "./links.mjs";
@@ -20,6 +20,9 @@ import { renamedTreePath } from "./file-tree.mjs";
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
 import { parseCanvas, rewriteCanvas, rewriteCanvasPaths } from "./canvas.mjs";
 import { noteAliases, parseMetadata } from "./metadata.mjs";
+import { officeKind } from "./office-types.mjs";
+import { officePreview } from "./office-package.mjs";
+import { readSource, decodePreviewText } from "./file-source.mjs";
 import { readWordContent } from "./word-documents.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -54,8 +57,23 @@ function validRelativePath(value) {
   );
 }
 
+function unusedCopyName(filename, entries) {
+  const fold = name => name.normalize("NFC").toLowerCase();
+  const taken = new Set(entries.map(fold));
+  const { name: stem, ext } = path.parse(filename);
+  let candidate = filename;
+  for (let index = 1; taken.has(fold(candidate)); index++)
+    candidate = `${stem} (복사본${index === 1 ? "" : " " + index})${ext}`;
+  return candidate;
+}
+
+export const FILE_STORAGE_FOLDER = "File Storage";
+
 export const validFilePath = (value) =>
-  validRelativePath(value) && /\.(?:md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
+  validRelativePath(value) && !(officeKind(value) && path.posix.basename(value).startsWith("~$")) && /\.(?:html?|xlsx|pptx|md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
+export const validPersonalFilePath = value =>
+  validRelativePath(value) && !/[\x00-\x1f\x7f]/u.test(value) && !path.posix.basename(value).startsWith("~$") &&
+  (validFilePath(value) || /\.zip$/i.test(value));
 const validWordPath = (value) =>
   validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
 const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
@@ -69,11 +87,13 @@ export class Vault {
   #tail = Promise.resolve();
   #wordIndex = new Map();
 
-  static async open(root, recoveryRoot) {
+  static async open(root, recoveryRoot, purpose) {
     const canonical = await realpath(root);
     if (!(await lstat(canonical)).isDirectory())
       throw new Error("폴더를 선택해 주세요.");
-    return new Vault(canonical, recoveryRoot);
+    const vault = new Vault(canonical, recoveryRoot);
+    if (purpose === "personal" || purpose === "team") await vault.prepareFileStorage();
+    return vault;
   }
 
   constructor(root, recoveryRoot) {
@@ -81,6 +101,18 @@ export class Vault {
     this.id = digest(root).slice(0, 16);
     this.name = path.basename(root);
     this.recoveryRoot = path.join(recoveryRoot, this.id);
+  }
+
+  async prepareFileStorage() {
+    const folder = path.join(this.root, FILE_STORAGE_FOLDER);
+    this.fileStorageWarning = "";
+    try {
+      if (await realpath(this.root) !== this.root) throw new Error("보관함 위치가 변경되었습니다.");
+      await mkdir(folder);
+    } catch (error) {
+      if (error.code === "EEXIST" && (await lstat(folder).catch(() => null))?.isDirectory()) return;
+      this.fileStorageWarning = "File Storage 폴더를 준비하지 못했습니다. 같은 이름의 항목이나 폴더 권한을 확인해 주세요.";
+    }
   }
 
   #enqueue(operation) {
@@ -141,7 +173,9 @@ export class Vault {
 
   async snapshot() {
     await this.#tail;
-    return this.#snapshot();
+    const snapshot = await this.#snapshot();
+    if (this.fileStorageWarning) snapshot.warnings.push(this.fileStorageWarning);
+    return snapshot;
   }
 
   captureFiles() { return this.#enqueue(() => this.#captureFiles()); }
@@ -240,11 +274,31 @@ export class Vault {
     return { files, revision: digest(JSON.stringify(files.map((file) => [file.path, file.revision]))) };
   }
 
-  async #restoreTarget(relative) {
-    if (!validFilePath(relative)) throw new Error("잘못된 복원 경로입니다.");
+  async #captureSelection(paths) {
+    const files = [];
+    for (const name of paths) {
+      if (!validPersonalFilePath(name)) throw new Error("잘못된 파일 경로입니다.");
+      const file = await this.#binary(name, validPersonalFilePath).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (file) files.push(file);
+    }
+    return { files, revision: digest(JSON.stringify(files.map(file => [file.path, file.revision]))) };
+  }
+
+  captureSelection(paths) { return this.#enqueue(() => this.#captureSelection(paths)); }
+  applyPersonalSync(operation) { return this.#enqueue(operation); }
+
+  async #restoreTarget(relative, validPath = validFilePath) {
+    if (!validPath(relative)) throw new Error("잘못된 복원 경로입니다.");
     let target = this.root;
     const parts = relative.split("/");
     for (let i = 0; i < parts.length; i++) {
+      if (validPath === validPersonalFilePath) {
+        const entries = await readdir(target).catch(error => { if (error.code !== "ENOENT") throw error; return []; });
+        if (entries.some(name => name !== parts[i] && name.normalize("NFC").toLowerCase() === parts[i].normalize("NFC").toLowerCase()))
+          throw new Error("대소문자 또는 유니코드 표기만 다른 파일이 있습니다.");
+      }
       target = path.join(target, parts[i]);
       const info = await lstat(target).catch((error) => { if (error.code !== "ENOENT") throw error; });
       if (info && (info.isSymbolicLink() || (i < parts.length - 1 ? !info.isDirectory() : !info.isFile())))
@@ -253,19 +307,22 @@ export class Vault {
     return target;
   }
 
-  applySnapshot(files, expectedRevision) {
+  applySnapshot(files, expectedRevision, selection = null) {
+    const capture = () => selection ? this.#captureSelection(selection) : this.#captureFiles();
+    const validPath = selection ? validPersonalFilePath : validFilePath;
+    if (selection && files.some(file => !selection.includes(file.path))) throw new Error("복원 대상이 변경되었습니다.");
     return this.#enqueue(async () => {
       await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });
       const recoveryRoot = await realpath(this.recoveryRoot);
       if (recoveryRoot === this.root || recoveryRoot.startsWith(this.root + path.sep))
         throw new Error("복구 사본 폴더가 보관함 안에 있습니다. 별도 노트 폴더를 선택해 주세요.");
-      const before = await this.#captureFiles();
+      const before = await capture();
       if (before.revision !== expectedRevision) throw new Error("미리보기 이후 파일이 변경되었습니다. 복원 내용을 다시 확인해 주세요.");
       const current = new Map(before.files.map((file) => [file.path, file]));
       const target = new Map();
       const names = new Map();
       for (const file of [...before.files, ...files]) {
-        if (!validFilePath(file.path)) throw new Error("잘못된 복원 경로입니다.");
+        if (!validPath(file.path)) throw new Error("잘못된 복원 경로입니다.");
         const parts = file.path.split("/");
         for (let i = 1; i <= parts.length; i++) {
           const name = parts.slice(0, i).join("/"), key = name.normalize("NFC").toLowerCase();
@@ -280,7 +337,7 @@ export class Vault {
           throw new Error("잘못되었거나 너무 큰 복원 파일입니다.");
         total += file.bytes.length;
         if (total > 512 * 1024 * 1024) throw new Error("복원 파일은 총 512MB 이하여야 합니다.");
-        await this.#restoreTarget(file.path);
+        await this.#restoreTarget(file.path, validPath);
         target.set(file.path, { ...file, revision: digest(file.bytes) });
       }
       const changes = [...new Set([...current.keys(), ...target.keys()])]
@@ -296,12 +353,12 @@ export class Vault {
         createdAt: new Date().toISOString(), revision: before.revision,
         files: before.files.map(({ path, revision }) => ({ path, revision })),
       }), { flag: "wx", mode: 0o600 });
-      if ((await this.#captureFiles()).revision !== expectedRevision)
+      if ((await capture()).revision !== expectedRevision)
         throw new Error(`복구 사본 생성 중 파일이 변경되었습니다. 다시 확인해 주세요. 복구 사본: ${recoveryPath}`);
-      const readCurrent = (name) => this.#binary(name).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
+      const readCurrent = (name) => this.#binary(name, validPath).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
       const replace = async (name, file) => {
-        if (!file) { await unlink(await this.#file(name)); return; }
-        const destination = await this.#file(name, true);
+        if (!file) { await unlink(await this.#file(name, false, validPath)); return; }
+        const destination = await this.#file(name, true, validPath);
         const temporary = path.join(path.dirname(destination), `.open-notes-${randomUUID()}.tmp`);
         try {
           await writeFile(temporary, file.bytes, { flag: "wx", mode: 0o600 });
@@ -333,6 +390,7 @@ export class Vault {
     const attachments = [];
     const documents = [];
     const wordDocuments = [];
+    const otherFiles = [];
     const folders = [];
     const walk = async (directory, prefix = "") => {
       const items = await readdir(directory, { withFileTypes: true });
@@ -360,6 +418,8 @@ export class Vault {
           } catch (error) {
             warnings.push(`${relative}: ${error.message}`);
           }
+        } else if (item.isFile() && validRelativePath(relative) && !item.name.startsWith("~$")) {
+          otherFiles.push({ path: relative, kind: "other" });
         }
       }
     };
@@ -371,7 +431,20 @@ export class Vault {
     for (const relative of this.#wordIndex.keys()) {
       if (!indexedPaths.has(relative)) this.#wordIndex.delete(relative);
     }
-    return { id: this.id, name: this.name, notes, documents, wordDocuments, attachments, folders, warnings };
+    return { id: this.id, name: this.name, notes, documents, wordDocuments, attachments, otherFiles, folders, warnings };
+  }
+
+  async officeFilePath(relative) {
+    await this.#tail;
+    if (!officeKind(relative)) throw new Error("Excel 또는 PowerPoint 파일을 선택해 주세요.");
+    const file = await this.#file(relative);
+    if (await realpath(file) !== file) throw new Error("보관함 안의 원본 파일을 선택해 주세요.");
+    return file;
+  }
+
+  async readOfficeDocument(relative, previousRevision) {
+    const data = await readSource(await this.officeFilePath(relative), previousRevision, 25 * 1024 * 1024);
+    return data && { path: relative, revision: data.revision, ...await officePreview(officeKind(relative), data.bytes) };
   }
 
   async wordFilePath(relative) {
@@ -529,8 +602,8 @@ export class Vault {
     };
   }
 
-  async #binary(relative) {
-    const target = await this.#file(relative);
+  async #binary(relative, validPath = validFilePath) {
+    const target = await this.#file(relative, false, validPath);
     const handle = await open(
       target,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
@@ -644,38 +717,117 @@ export class Vault {
     }
   }
 
-  async #writeCopy(file, to, content, parent) {
-    if (file.kind && Buffer.byteLength(content) > MAX_BYTES)
-      throw new Error("8MB보다 큰 문서는 이 버전에서 열 수 없습니다.");
+  async #createCopy(to, parent, validPath, write, staged = false) {
     const changed = () => new Error("복사 중 대상 폴더가 변경되었습니다. 다시 시도해 주세요.");
-    const destination = await this.#file(to);
+    const destination = await this.#file(to, false, validPath);
     if (!sameEntry(await lstat(path.dirname(destination), { bigint: true }), parent)) throw changed();
-    const handle = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600)
+    const working = staged ? path.join(path.dirname(destination), ".dynote-drop-" + randomUUID()) : destination;
+    const handle = await open(working, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600)
       .catch(error => {
         if (error.code === "EEXIST") throw new Error("대상 폴더에 같은 이름의 문서가 있습니다.");
         if (error.code === "ELOOP") throw changed();
         throw error;
       });
-    let actual, opened;
+    let actual, opened, completed = false;
     try {
       opened = await handle.stat({ bigint: true });
-      actual = await realpath(destination);
+      actual = await realpath(working);
       // Verify the file descriptor before writing private bytes, then write through that descriptor.
       if (!actual.startsWith(path.join(this.root, path.sep)) ||
           !sameEntry(await lstat(path.dirname(actual), { bigint: true }), parent) ||
           !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
-      await handle.writeFile(content);
-      if (await realpath(destination) !== actual || !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
-      const stat = await handle.stat();
-      return { ...file, path: to, content, revision: digest(content), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs } };
-    } catch (error) {
-      const candidate = actual ?? destination;
-      const created = await lstat(candidate, { bigint: true }).catch(() => null);
-      if (created && opened && sameEntry(created, opened)) await unlink(candidate).catch(() => {});
-      throw error;
+      await write(handle);
+      if (await realpath(working) !== actual || !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
+      const result = await handle.stat({ bigint: staged });
+      if (staged) {
+        await handle.sync();
+        if (!sameEntry(await lstat(path.dirname(destination), { bigint: true }), parent)) throw changed();
+        await link(actual, destination);
+        if (!sameEntry(await lstat(destination, { bigint: true }), opened)) throw changed();
+      }
+      completed = true;
+      return result;
     } finally {
+      // Remove only the entry created by this operation.
+      const candidate = actual ?? working;
+      if (staged || !completed) {
+        const created = await lstat(candidate, { bigint: true }).catch(() => null);
+        if (created && opened && sameEntry(created, opened)) await unlink(candidate).catch(() => {});
+      }
       await handle.close();
     }
+  }
+
+  async #writeCopy(file, to, content, parent) {
+    if (file.kind && Buffer.byteLength(content) > MAX_BYTES)
+      throw new Error("8MB보다 큰 문서는 이 버전에서 열 수 없습니다.");
+    const stat = await this.#createCopy(to, parent, validFilePath, handle => handle.writeFile(content));
+    return { ...file, path: to, content, revision: digest(content), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs } };
+  }
+
+  transferDroppedFile(source, folder, operation) {
+    return this.#enqueue(async () => {
+      if (typeof source !== "string" || !path.isAbsolute(source) || typeof folder !== "string")
+        throw new Error("디스크에서 파일을 선택해 주세요.");
+      if (!["copy", "move"].includes(operation)) throw new Error("파일 작업을 선택해 주세요.");
+      const name = path.basename(source);
+      const inFolder = leaf => folder ? folder + "/" + leaf : leaf;
+      if (!validRelativePath(inFolder(name)) || name.startsWith("~$"))
+        throw new Error("보관함에서 사용할 수 없는 파일 이름입니다.");
+      const directory = path.dirname(await this.#file(inFolder(randomUUID() + ".md"), false, validRelativePath));
+      const parent = await lstat(directory, { bigint: true });
+      const stat = await lstat(source, { bigint: true });
+      if (!stat.isFile()) throw new Error("일반 파일만 복사할 수 있습니다.");
+      const original = await realpath(source);
+      if (operation === "move" && sameEntry(await lstat(path.dirname(original), { bigint: true }), parent))
+        return { path: inFolder(name), unchanged: true };
+      const copied = inFolder(unusedCopyName(name, await readdir(directory)));
+      const input = await open(original, constants.O_RDONLY | noFollow);
+      try {
+        const before = await input.stat({ bigint: true });
+        if (!sameEntry(stat, before)) throw new Error("원본 파일이 변경되었습니다.");
+        if (validFilePath(copied) && before.size > 25n * 1024n * 1024n)
+          throw new Error("Git 복원 대상 파일은 25MB 이하만 옮기거나 복사할 수 있습니다.");
+        if (documentKind(copied) && before.size > BigInt(MAX_BYTES))
+          throw new Error("Canvas와 Bases 문서는 8MB 이하여야 합니다.");
+        const revision = wordRevision(before);
+        const written = await this.#createCopy(copied, parent, validRelativePath, async output => {
+          if (attachmentMime(name) === "text/html") {
+            const data = await readSource(original, undefined, 25 * 1024 * 1024);
+            if (data.revision !== revision) throw new Error("원본 파일이 변경되었습니다.");
+            decodeHtml(data.bytes);
+            await output.writeFile(data.bytes);
+          } else if (before.size) {
+            await output.writeFile(input.createReadStream({ autoClose: false, end: Number(before.size - 1n) }));
+          }
+          if (operation === "move") {
+            if (process.platform !== "win32") await output.chmod(Number(before.mode & 0o777n));
+            await output.utimes(Number(before.atimeMs) / 1000, Number(before.mtimeMs) / 1000);
+          }
+          if (wordRevision(await input.stat({ bigint: true })) !== revision)
+            throw new Error("파일을 전송하는 동안 원본이 변경되었습니다.");
+        }, true);
+        if (operation === "move") {
+          try {
+            const target = await lstat(path.join(this.root, copied), { bigint: true });
+            if (wordRevision(await lstat(original, { bigint: true })) !== revision ||
+                !sameEntry(target, written) || target.size !== before.size || target.mtimeNs !== written.mtimeNs)
+              throw new Error("파일이 변경되었습니다.");
+            await unlink(original);
+          } catch (error) {
+            return { path: copied, warning: "대상에 복사했지만 원본을 이동할 수 없습니다. " + error.message };
+          }
+        }
+        return { path: copied };
+      } finally { await input.close(); }
+    });
+  }
+
+  async readOtherFile(relative) {
+    await this.#tail;
+    const file = await this.#file(relative, false, validRelativePath);
+    const { bytes } = await readSource(file, undefined, 25 * 1024 * 1024);
+    return attachmentMime(relative) === "text/html" ? decodeHtml(bytes) : decodePreviewText(bytes);
   }
 
   async copyDocument(from, folder, expectedRevision, source = this) {
@@ -699,13 +851,7 @@ export class Vault {
       const directory = path.dirname(await this.#file(inFolder(filename)));
       const parent = await lstat(directory, { bigint: true });
       if (!parent.isDirectory()) throw new Error("복사할 수 없는 폴더입니다.");
-      const key = name => name.normalize("NFC").toLowerCase();
-      const taken = new Set((await readdir(directory)).map(key));
-      const ext = path.extname(filename), stem = filename.slice(0, -ext.length);
-      let name = filename;
-      for (let index = 1; taken.has(key(name)); index++)
-        name = `${stem} (복사본${index === 1 ? "" : " " + index})${ext}`;
-      const to = inFolder(name);
+      const to = inFolder(unusedCopyName(filename, await readdir(directory)));
       let content = file.content;
       if (source === this && file.kind !== "base") {
         const { notes, documents, attachments } = await this.#snapshot();

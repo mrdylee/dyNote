@@ -68,6 +68,12 @@ export class StickyNotes {
       state.content = content;
       this.#schedule(state);
     });
+    ipcMain.on("sticky:received", (event,token) => {
+      const state=this.#sender(event), update=state?.received;
+      if (!update || update.token!==token || state.saved!==update.before || state.content!==update.before) return;
+      state.content=state.saved=update.content;
+      state.revision=update.revision;state.received=null;
+    });
     ipcMain.on("sticky:open-link", (event, target, kind, moveVersion) => {
       const state = this.#sender(event);
       if (!state || !this.canOpen() || typeof target !== "string" || !target.trim()
@@ -145,6 +151,17 @@ export class StickyNotes {
     });
   }
 
+  receive(vault,paths) {
+    return this.#enqueue(async()=>{
+      for(const state of this.#windows.values()) {
+        if(state.record.root!==vault.root || !paths.includes(state.record.path) || state.content!==state.saved)continue;
+        const file=await vault.readNote(state.record.path).catch(error=>{if(error.code!=="ENOENT")throw error;return null;});
+        if (file?.revision===state.revision || state.content!==state.saved || state.window.isDestroyed())continue;
+        state.received={before:state.saved,content:file?.content ?? "",revision:file?.revision,token:randomUUID()};
+        state.window.webContents.send("sticky:receive",state.received);
+      }
+    });
+  }
   hasNotesWithin(vault, folder) {
     return [...this.#records.values()].some(record => record.root === vault.root && record.path.startsWith(folder + '/'));
   }

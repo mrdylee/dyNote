@@ -47,14 +47,14 @@ try {
     shell.openPath = async file => { globalThis.openedExternalSource = file; return ""; };
   }, { source: path.join(root, "외부.MD"), cache });
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
-  const markdown = page.getByRole("dialog", { name: "외부.MD", exact: true });
+  const markdown = page.getByRole("region", { name: "외부.MD", exact: true });
   await markdown.getByRole("heading", { name: "외부 Markdown", exact: true }).waitFor();
   await markdown.getByRole("table").getByText("SWRS").waitFor();
   await markdown.locator("strong").getByText("굵게", { exact: true }).waitFor();
   await markdown.locator("pre code").getByText("const value = 1;", { exact: true }).waitFor();
   assert.notEqual(await page.evaluate(() => window.readablePwn), true);
   assert.ok((await app.evaluate(() => globalThis.externalFileFilters)).some(filter => filter.extensions.includes("md")));
-  await markdown.getByRole("button", { name: "원본을 기본 앱에서 열기", exact: true }).click();
+  await markdown.getByRole("button", { name: "앱에서 수정", exact: true }).click();
   assert.equal(await app.evaluate(() => globalThis.openedExternalSource), path.join(root, "외부.MD"));
   const updated = Buffer.from("# 갱신된 Markdown\n\n외부 저장 반영\n");
   await writeFile(path.join(root, "외부.MD.tmp"), updated); await rename(path.join(root, "외부.MD.tmp"), path.join(root, "외부.MD"));
@@ -63,22 +63,22 @@ try {
   await markdown.getByRole("heading", { name: "갱신된 Markdown", exact: true }).waitFor();
   await mkdir("output/playwright", { recursive: true });
   await page.screenshot({ path: "output/playwright/external-markdown-open.png" });
-  await markdown.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.getByRole("button", { name: "외부.MD 탭 닫기", exact: true }).click();
   await page.evaluate(() => { const input = document.createElement("input"); input.id = "readable-file-input"; input.type = "file"; document.body.append(input); });
   const drop = async name => {
     await page.locator("#readable-file-input").setInputFiles(path.join(root, name));
     await page.evaluate(() => {
       const dataTransfer = new DataTransfer(); dataTransfer.items.add(document.querySelector("#readable-file-input").files[0]);
-      document.querySelector(".cm-content").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
+      document.querySelector(".document-area").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
     });
-    return page.getByRole("dialog", { name, exact: true });
+    return page.getByRole("region", { name, exact: true });
   };
   let dialog = await drop("문자열.txt");
   await dialog.getByLabel("텍스트 미리보기").getByText('<script>window.readablePwn = true</script>\n한글 원문', { exact: true }).waitFor();
   assert.equal(await dialog.locator("script").count(), 0);
   dialog = await drop("source.py");
   await dialog.getByLabel("텍스트 미리보기").getByText('print("source preview")', { exact: true }).waitFor();
-  assert.equal(await dialog.getByRole("button", { name: "원본을 기본 앱에서 열기" }).count(), 0);
+  assert.equal(await dialog.getByRole("button", { name: "앱에서 수정" }).count(), 0);
   dialog = await drop("이미지.png");
   const image = dialog.getByRole("img", { name: "이미지.png" }); await image.waitFor();
   await page.waitForFunction(() => document.querySelector(".external-file-image")?.naturalWidth === 1);
@@ -99,8 +99,8 @@ try {
   assert.equal(await dialog.getByText("PRIVATE_VAULT_MARKER").count(), 0);
   await dialog.getByText("원문 보기", { exact: true }).click();
   await dialog.locator("pre").getByText(/외부 목록/).waitFor();
-  await drop("binary.xlsx");
-  await page.getByRole("dialog", { name: "파일 열기", exact: true }).getByRole("status").getByText(/UTF-8/).waitFor();
+  dialog = await drop("binary.xlsx");
+  await dialog.getByRole("status").getByText(/미리 볼 수 없습니다/).waitFor();
   await page.keyboard.press("Escape");
   for (const [name, bytes] of samples) assert.deepEqual(await readFile(path.join(root, name)), bytes);
   assert.equal(await readFile(path.join(vault, "Control.md"), "utf8"), control);
