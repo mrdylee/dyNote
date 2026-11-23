@@ -44,6 +44,8 @@ export default function PersonalVersionReview({path, count, action, onClose}) {
       setTimeout(()=>URL.revokeObjectURL(url),30000);
     } catch(e){setError(e.message);}
   }
+  const selectedText=hunks.length===1 && !Object.keys(picks).length && hunks[0].alternatives[selected]?.trim();
+  const applyName=selectedText && selectedText.length<=40 ? selectedText+"로 적용" : "선택한 버전으로 적용";
   return <section className="settings-section"><h3>{path}</h3>
     <fieldset disabled={busy}><legend>검토할 버전 {basis.length}개</legend>
       {rows.map(v=><div key={v.commit}><label><input type="radio" name="version" checked={selected===v.commit} onChange={()=>select(v.commit)} />
@@ -57,7 +59,7 @@ export default function PersonalVersionReview({path, count, action, onClose}) {
     {!/\.md$/i.test(path) && selected && <><label><input type="checkbox" checked={both} onChange={e=>setBoth(e.target.checked)}/>모두 유지</label>
       {both && rows.filter(v=>v.blob && v.commit!==selected).map(v=><label key={v.commit}>{v.device || v.author} 사본 경로<input value={names[v.commit] ?? copyPath(path,v.commit)} onChange={e=>setNames(old=>({...old,[v.commit]:e.target.value}))}/></label>)}</>}
     {error && <p role="alert">{error}</p>}
-    <div className="settings-actions"><button className="primary-button" disabled={busy || !selected || (both && rows.length!==basis.length)} onClick={apply}>선택한 버전으로 적용</button>
+    <div className="settings-actions"><button className="primary-button" disabled={busy || !selected || (both && rows.length!==basis.length)} onClick={apply}>{applyName}</button>
       <button disabled={busy} onClick={onClose}>나중에</button></div>
   </section>;
 }

@@ -159,10 +159,11 @@ export class GitController {
           if (!exists) await this.service.git(["init","--initial-branch="+config.branch]);
           await service.init();
           if (!await service.disk.job()) await this.service.assertReady(config);
-          const result=await service.sync(config,{register:true});
-          this.records[id]={...config,enabled:true,lastSuccess:result.lastSuccess};
-          await this.persist();this.publish({config,enabled:true,lastBackupDay:null,pendingCommit:null,...result});this.schedule();
-          return this.status();
+          // Persist the selected destination before a local checkpoint can enter its history.
+          this.records[id]={...config,enabled:true,registerPending:true};
+          await this.persist();
+          this.publish({config,enabled:true,lastSuccess:null,lastBackupDay:null,pendingCommit:null,changed:[],conflicts:[],devices:[]});
+          this.schedule();return this.perform();
         }
         const config = await this.service.connect(input);
         this.personal=null;
@@ -208,9 +209,11 @@ export class GitController {
         throw new Error("보관함 위치가 변경되었습니다. Git 설정을 다시 확인해 주세요.");
       if (this.current.config?.mode==="personal-sync") {
         const service=await this.startPersonal();
-        const result=await service.sync(this.current.config,{force:!automatic});
-        this.records[this.vault.id].lastSuccess=result.lastSuccess ?? this.current.lastSuccess;
-        if (result.changed.length || this.current.lastSuccess===undefined) await this.persist();
+        const record=this.records[this.vault.id],register=record.registerPending===true;
+        const result=await service.sync(this.current.config,{force:!automatic,register});
+        record.lastSuccess=result.lastSuccess ?? this.current.lastSuccess;
+        if(register && result.devices.some(d=>d.id===result.deviceId && d.name===this.current.config.deviceName))record.registerPending=false;
+        if (register || result.changed.length || this.current.lastSuccess===undefined) await this.persist();
         return this.publish(result);
       }
       const pending = this.current.pendingCommit;

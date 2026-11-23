@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { validateGitConfig } from "./git-backup.mjs";
 import { validPersonalFilePath } from "./vault.mjs";
-import { PersonalSyncStore, deviceRecord, devicePath, syncPrefix } from "./personal-sync-store.mjs";
+import { PersonalSyncStore, deviceRecord, devicePath, syncPrefix, conflictFolder } from "./personal-sync-store.mjs";
 import { checkTreeChanges, chooseVersion, integrate, normalizePublished } from "./personal-sync-merge.mjs";
 import { textChoices } from "./personal-sync-text.mjs";
 import { scanLinks,resolvePath,createLinkIndex } from "./links.mjs";
@@ -49,6 +49,10 @@ export class PersonalSync {
     this.waiting=new Map(); this.firstDirty=null; this.changed=[];
   }
   async init() {
+    if(!await this.store.repository())throw new Error("개인 노트 Git 저장소를 먼저 연결해 주세요.");
+    const directory=path.join(this.store.root,".git","dynote-personal");
+    await mkdir(directory,{mode:0o700}).catch(error=>{if(error.code!=="EEXIST")throw error;});
+    if(!(await lstat(directory)).isDirectory())throw new Error("로컬 동기화 관리 경로를 확인해 주세요.");
     if (this.disk) return;
     const format=(await this.store.git(["rev-parse","--show-object-format"])).stdout.trim();
     this.disk=new PersonalSyncDisk(this.store,format,this.limit);
@@ -176,8 +180,19 @@ export class PersonalSync {
     for(const row of refs) {
       const [ref,parent]=row.split(" ");
       const before=await this.store.tree(parent), after=await this.store.tree(ref);
-      checkTreeChanges(before,after);
-      await this.store.metadata(after);
+      const changes=checkTreeChanges(before,after);
+      const {groups}=await this.store.metadata(after);
+      for(const name of changes) {
+        if(!name.startsWith(syncPrefix+"conflicts/")) continue;
+        if(before.has(name))throw new Error("기존 버전 기록이 삭제되거나 변경되었습니다.");
+        if(!name.endsWith(".json") || name.endsWith(".choice.json"))continue;
+        const record=JSON.parse((await this.store.blob(after.get(name).oid)).toString("utf8"));
+        if(!groups.get(record.path)?.versions.has(record.commit) || name!==conflictFolder(record.path)+record.commit+".json" ||
+           (await this.store.git(["merge-base","--is-ancestor",record.commit,ref],{allow:[0,1]})).code)
+          throw new Error("버전 기록이 브랜치의 원본을 가리키지 않습니다.");
+        const original=(await this.store.tree(record.commit)).get(record.path);
+        if((original?.oid ?? null)!==record.blob)throw new Error("버전 기록과 원본 파일의 내용이 다릅니다.");
+      }
     }
   }
   async sync(input,{force=true,register=false}={}) {
@@ -214,8 +229,10 @@ export class PersonalSync {
       let remote=await this.store.remoteHead(config);
       if (seen && !remote)throw new Error("원격 브랜치가 삭제되었습니다. 로컬 기록을 보존했습니다.");
       if (remote) {
-        await this.store.git(["fetch","--no-tags","--no-recurse-submodules","--",config.remote,"refs/heads/"+config.branch]);
-        remote=await this.disk.head("FETCH_HEAD");
+        if(remote!==seen) {
+          await this.store.git(["fetch","--no-tags","--no-recurse-submodules","--",config.remote,"refs/heads/"+config.branch]);
+          remote=await this.disk.head("FETCH_HEAD");
+        }
         if (seen && (await this.store.git(["merge-base","--is-ancestor",seen,remote],{allow:[0,1]})).code)
           throw new Error("원격 Git 이력이 재작성되었습니다. 로컬 기록을 보존했습니다.");
         if (!seen && head && (await this.store.git(["merge-base",head,remote],{allow:[0,1]})).code)
@@ -265,6 +282,18 @@ export class PersonalSync {
     const basis=group?.pending ?? [];
     return {basis,current:files.get(name)?.oid ?? null,versions:basis.map(id=>group.versions.get(id)).sort((a,b)=>a.time.localeCompare(b.time)||a.commit.localeCompare(b.commit)).slice(skip,skip+50)};
   }
+  async checkpointFile(config,name,description) {
+    await this.init();await this.store.assertReady(config);
+    if(await this.disk.job())throw new Error("수신 중인 파일 적용이 끝난 뒤 복원해 주세요.");
+    const device=deviceRecord(this.deviceId,config.deviceName),head=await this.disk.head(),files=await this.store.tree(head);
+    const current=await this.disk.read(name);
+    if((current?.oid ?? null)===(files.get(name)?.oid ?? null))return;
+    const entry=current && await this.store.storeBytes(current.bytes);
+    const tree=await this.store.writeTree(head,new Map([[name,entry]]));
+    const commit=await this.store.commitTree(tree,[head],description+" · "+name,device,config);
+    await this.disk.begin(config.branch,head,commit,[name]);
+    await this.resume(device,config);
+  }
   async blockedSessions() {
     const head=await this.disk?.head();
     if(!head)return new Set();
@@ -300,6 +329,7 @@ export class PersonalSync {
     const device=deviceRecord(this.deviceId,config.deviceName);
     const state=await this.sync(config);
     if(await this.disk.job() || this.waiting.has(name))throw new Error("파일 수신이 완료되면 다시 적용해 주세요.");
+    for(const copy of Object.values(options?.copies ?? {})) if(await this.disk.read(copy)) throw new Error("이미 사용 중인 사본 경로입니다: "+copy);
     const head=await this.disk.head(),next=await chooseVersion(this.store,head,name,basis,id,device,config,options);
     await this.disk.begin(config.branch,head,next);this.changed.push(...state.changed);
     return this.sync(config);

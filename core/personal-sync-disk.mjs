@@ -13,7 +13,7 @@ export async function atomicJson(file, object) {
   await mkdir(path.dirname(file), {recursive:true,mode:0o700});
   const tmp = file + "." + randomUUID() + ".tmp";
   try {
-    await writeFile(tmp,JSON.stringify(object),{flag:"wx",mode:0o600});
+    await writeFile(tmp,JSON.stringify(object),{flag:"wx",mode:0o600,flush:true});
     await rename(tmp,file);
   } finally { await rm(tmp,{force:true}); }
 }
@@ -70,7 +70,20 @@ export class PersonalSyncDisk {
   }
   async read(name) { return readStable(await target(this.store.root,name),this.format); }
   async head(ref="HEAD") { return (await this.store.git(["rev-parse","--verify","-q",ref],{allow:[0,1]})).stdout.trim() || null; }
-  async job() { const raw=await readFile(this.journal,"utf8").catch(missing); return raw && JSON.parse(raw); }
+  async job() {
+    const raw=await readFile(this.journal,"utf8").catch(missing);
+    if(!raw)return null;
+    const job=JSON.parse(raw),uuid=s=>typeof s==="string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(s);
+    const oid=s=>typeof s==="string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(s);
+    if(!uuid(job.id) || !oid(job.next) || (job.previous!==null && !oid(job.previous)) ||
+      !Array.isArray(job.records) || !Array.isArray(job.captured) || !Number.isSafeInteger(job.offset) || job.offset<0 || job.offset>job.records.length)
+      throw new Error("중단된 동기화의 로컬 기록을 확인해 주세요.");
+    for(const row of job.records) {
+      assertSyncEntry(row.name,null);
+      if(!uuid(row.saved) || (row.before!==null && !oid(row.before)) || (row.after!==null && !oid(row.after)))throw new Error("파일 복구 기록이 손상되었습니다.");
+    }
+    return job;
+  }
 
   async begin(branch, previous, next, captured=[]) {
     if (previous===next) return;
@@ -93,6 +106,7 @@ export class PersonalSyncDisk {
       const [ours,theirs]=await Promise.all([stat(nextIndex,{bigint:true}),stat(lock,{bigint:true})]);
       if (ours.ino!==theirs.ino || ours.dev!==theirs.dev) throw new Error("다른 Git 작업이 인덱스를 사용 중입니다.");
     });
+    let locked=true;
     try {
       const check=path.join(this.dir,job.id+".check");
       await rm(check,{force:true});
@@ -105,9 +119,9 @@ export class PersonalSyncDisk {
       if ((await store.git(["symbolic-ref","HEAD"])).stdout.trim()!=="refs/heads/"+job.branch || (head!==job.previous && head!==job.next))
         throw new Error("적용 중 Git 브랜치가 변경되었습니다.");
       if (head!==job.next) await store.git(["update-ref","refs/heads/"+job.branch,job.next,head ?? "0".repeat(job.next.length)]);
-      await rename(lock,actual);
+      await rename(lock,actual);locked=false;
       await rm(check,{force:true});
-    } finally {await rm(lock,{force:true});}
+    } finally {if(locked)await rm(lock,{force:true});}
     await rm(this.journal,{force:true});
     await rm(nextIndex,{force:true});
     await store.git(["update-ref","-d","refs/dynote-sync/apply",job.next]);
@@ -126,7 +140,7 @@ export class PersonalSyncDisk {
       const file=await target(this.store.root,row.name,true);
       const backup=path.join(this.dir,row.saved);
       const current=await readStable(file,this.format);
-      if ((current?.oid ?? null)===row.after) continue;
+      if ((current?.oid ?? null)===row.after) {row.verified=current?.signature ?? null;continue;}
       const displaced=await lstat(backup).catch(missing);
       if ((current?.oid ?? null)!==row.before && !(displaced && !current)) {
         if (row.name.startsWith(syncPrefix)) throw new Error("공유 메타데이터가 외부에서 변경되었습니다.");
@@ -148,16 +162,21 @@ export class PersonalSyncDisk {
         const bytes=await this.store.blob(row.after);
         const temp=path.join(this.dir,randomUUID()+".part");
         try {
-          await writeFile(temp,bytes,{flag:"wx",mode:row.mode==="100755"?0o755:0o644});
+          await writeFile(temp,bytes,{flag:"wx",mode:row.mode==="100755"?0o755:0o644,flush:true});
           await link(temp,file);
         } finally {await rm(temp,{force:true});}
       }
+      const applied=await readStable(file,this.format);
+      if((applied?.oid ?? null)===row.after)row.verified=applied?.signature ?? null;
       used+=row.size;
     }
     // A completed chunk might have been edited while the application was stopped.
     for (const row of job.records) {
       if (captured.has(row.name)) continue;
-      const current=await this.read(row.name);
+      const file=await target(this.store.root,row.name);
+      const info=await lstat(file,{bigint:true}).catch(missing);
+      if(row.verified===(info?signature(info):null))continue;
+      const current=await readStable(file,this.format);
       if ((current?.oid ?? null)!==row.after) {
         if(row.name.startsWith(syncPrefix)) throw new Error("수신 도중 공유 메타데이터가 변경되었습니다.");
         job.offset=job.records.indexOf(row);

@@ -1788,6 +1788,12 @@ kbd {
 .graph-error { color: #ac344c; padding: 12px 25px; font-size: 13px; }
 
 /* User font choices apply to presentation only, never to Markdown content. */
+.modal.version-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; overflow-wrap: anywhere; }
+.version-dialog .settings-section { margin: 0; padding: 0; border: 0; }
+.version-dialog fieldset { min-width: 0; margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; }
+.version-dialog .settings-section label:has(input[type=radio]), .version-dialog .settings-section label:has(input[type=checkbox]) { display: flex; align-items: baseline; gap: 8px; }
+.version-dialog input:is([type=radio],[type=checkbox]) { width: auto; flex: none; }
+.version-dialog pre { white-space: pre-wrap; }
 .modal.settings-modal { max-height: calc(100vh - 48px); overflow-y: auto; padding: 24px; }
 .settings-modal .modal-heading { padding: 0; }
 .markdown-preview, .canvas-card textarea {

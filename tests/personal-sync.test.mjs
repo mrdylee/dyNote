@@ -4,8 +4,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { PersonalSyncStore, devicePath, deviceRecord, conflictFolder } from "../core/personal-sync-store.mjs";
-import { integrate, chooseVersion, checkTreeChanges } from "../core/personal-sync-merge.mjs";
+import { PersonalSyncStore, devicePath, deviceRecord, conflictFolder, assertSyncEntry,blobLimit } from "../core/personal-sync-store.mjs";
+import { PersonalSync } from "../core/personal-sync.mjs";
+import { mergeCaptureBlocks } from "../core/personal-sync-text.mjs";
+import { integrate, chooseVersion, checkTreeChanges,normalizePublished } from "../core/personal-sync-merge.mjs";
 
 async function fixture(t) {
   const dir=await mkdtemp(path.join(tmpdir(),"dynote-sync-store-"));
@@ -84,5 +86,48 @@ test("simultaneous decisions survive even if one chooses the already published c
   const cb=await chooseVersion(store,head,name,basis,b,local,config);
   const merged=await integrate(store,ca,cb,cloud,config),state=await store.metadata(await store.tree(merged));
   assert.deepEqual(state.groups.get(name).pending,[ca,cb].sort());
+  const chosen=await chooseVersion(store,merged,name,[ca,cb],ca,local,config);
+  assert.equal((await store.blob((await store.tree(chosen)).get(name).oid)).toString(),"2시");
+});
+
+test("a new clone reconstructs edits published by a plain Git client while review was open",async t=>{
+  const {store,config,cloud,local,checkpoint}=await fixture(t);
+  const name="meeting.md",base=await checkpoint(null,cloud,{[name]:"1"});
+  const a=await checkpoint(base,cloud,{[name]:"2"}),b=await checkpoint(base,local,{[name]:"3"});
+  const review=await integrate(store,a,b,local,config);
+  const four=await checkpoint(review,cloud,{[name]:"4"}), five=await checkpoint(four,cloud,{[name]:"5"});
+  const normalized=await normalizePublished(store,five,local,config);
+  const files=await store.tree(normalized),state=await store.metadata(files);
+  assert.deepEqual(state.groups.get(name).pending,[a,b,four,five].sort());
+  assert.equal((await store.blob(files.get(name).oid)).toString(),"2");
+  assert.equal(await normalizePublished(store,normalized,local,config),normalized);
+});
+
+test("file, metadata and review-page limits are independent",async t=>{
+  const {root,store,local,config}=await fixture(t);
+  const device=await store.storeRecord(local);
+  assert.doesNotThrow(()=>assertSyncEntry("limit.pdf",{...device,size:blobLimit}));
+  assert.throws(()=>assertSyncEntry("limit.pdf",{...device,size:blobLimit+1}),/한도/);
+  assert.throws(()=>assertSyncEntry(devicePath(local.id),{...device,size:65537}),/한도/);
+  const name="time.md",entries=new Map(),file=await store.storeBytes(Buffer.from("2"));
+  entries.set(name,file);entries.set(conflictFolder(name)+file.oid+".blob",file);
+  for(let n=0;n<51;n++) {
+    const commit=n.toString(16).padStart(40,"0");
+    entries.set(conflictFolder(name)+commit+".json",await store.storeRecord({path:name,commit,blob:file.oid,author:"Writer",device:"PC",id:local.id,time:new Date(n*1000).toISOString()}));
+  }
+  const head=await store.commitTree(await store.writeTree(null,entries),[],"pages",local,config);
+  await store.git(["update-ref","refs/heads/main",head]);
+  const service=new PersonalSync({root},store.run,local.id);await service.init();
+  const first=await service.versions(name),second=await service.versions(name,50);
+  assert.equal(first.versions.length,50);assert.equal(second.versions.length,1);assert.equal(first.basis.length,51);
+});
+
+test("Journal union keeps original blocks and manual text in place and sorts only new links",()=>{
+  const block=i=>"<!-- dynote:copilot "+i+" -->\n- [[Copilot Note/"+i+"/"+i+".md|chat]]\n<!-- /dynote:copilot "+i+" -->\n";
+  const id=i=>i.repeat(20),base="intro\n\n"+block(id("a"))+"\nmanual after existing block\n";
+  const left=base+"\n"+block(id("c")),right=base+"\n"+block(id("b"));
+  const merged=mergeCaptureBlocks(base,left,right);
+  assert(merged.startsWith(base));assert(merged.indexOf(id("b"))<merged.indexOf(id("c")));
+  assert.equal(mergeCaptureBlocks(base,right,left),merged);
 });
 

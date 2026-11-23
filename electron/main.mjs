@@ -670,9 +670,19 @@ app
         return gitBackup.enqueue(async () => {
           checkVault(args, vault);
           const history = new GitHistory(vault);
+          const cfg=gitBackup.status().config;
+          const personal=gitBackup.status().enabled && cfg?.mode==="personal-sync" && args.filePath!==undefined;
+          if(personal) {
+            checkVault(args,vault);
+            const preview=await history.filePreview(args.filePath,args.commit);
+            if(preview.revision!==args.revision)throw new Error("미리보기 이후 파일이 변경되었습니다.");
+            await gitBackup.personal.checkpointFile(cfg,args.filePath,"복원 전 파일 보존");
+          }
           const result = args.filePath === undefined ? await history.restore(args.commit, args.revision)
             : await history.restoreFile(args.filePath, args.commit, args.revision);
+          if(personal) await gitBackup.personal.checkpointFile(cfg,args.filePath,"파일 버전 복원");
           gitBackup.markDirty(vault.id);
+          if(personal) gitBackup.sync(vault.id).catch(()=>{});
           return result;
         });
       },

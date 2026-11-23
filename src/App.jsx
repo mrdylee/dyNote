@@ -779,10 +779,16 @@ export default function App() {
     }
   }, [queue]);
 
-  const refreshPersonal=useEffectEvent(async (value)=>{
-    if (!value?.changed?.length || !vaultsRef.current[value.vaultId]) return;
-    const snapshot=await invoke(api.snapshot({vaultId:value.vaultId}));
-    if(vaultsRef.current[value.vaultId]) installVault(snapshot);
+  const refreshSequence=useRef(new Map());
+  const refreshPersonal=useEffectEvent(async ({vaultId,changed})=>{
+    if (!changed?.length || !vaultsRef.current[vaultId]) return;
+    const token=Symbol();refreshSequence.current.set(vaultId,token);
+    while(vaultsRef.current[vaultId] && refreshSequence.current.get(vaultId)===token) {
+      const generation=queue.generation(vaultId),snapshot=await invoke(api.snapshot({vaultId}));
+      if (generation!==queue.generation(vaultId))continue;
+      if(refreshSequence.current.get(vaultId)===token && vaultsRef.current[vaultId]) installVault(snapshot);
+      break;
+    }
   });
   const pollPersonal=useEffectEvent(async (poll)=>{
     const ids=Object.values(gitStates).filter(v=>v.enabled && v.config?.mode==="personal-sync").map(v=>v.vaultId);
@@ -3250,11 +3256,11 @@ export default function App() {
             onRecovery={() => invoke(api.showRecovery({ vaultId: gitVault.id })).catch((e) => setError(e.message))} />}
         </Modal>
       )}
-      {modal==="personal-review" && reviewFile && <Modal title="버전 확인" onClose={()=>setModal(null)}>
+      {modal==="personal-review" && reviewFile && <Modal title="버전 확인" className="version-dialog" onClose={()=>setModal(null)}>
         <PersonalVersionReview key={reviewFile.id+reviewFile.path} path={reviewFile.path} count={gitStates[reviewFile.id]?.conflicts?.find(f=>f.name===reviewFile.path)?.count}
           action={async args=>{if(args.action==="resolve") await flush(true);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={()=>setModal(null)}/>
       </Modal>}
-      {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" onClose={() => setModal(null)}>
+      {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" className="version-dialog" onClose={() => setModal(null)}>
         <FileVersionHistory key={vault.id + ":" + displayedPath} path={displayedPath}
           onList={(skip, anchor) => invoke(api.gitHistory({vaultId:vault.id, filePath:displayedPath, skip, anchor}))}
           onPreview={async commit => { await flush(); return invoke(api.previewGit({vaultId:vault.id, filePath:displayedPath, commit})); }}

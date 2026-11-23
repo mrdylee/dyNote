@@ -43,6 +43,8 @@ export async function textChoices(store, name, versions) {
       for(const edit of mine){output+=original.slice(cursor,edit.start).join("")+edit.chunk;cursor=edit.end;}
       alternatives[version.commit]=output+original.slice(cursor,group.end).join("");
     }
+    const originalText=original.slice(group.start,group.end).join("");
+    for(const version of versions) if(version.blob===base.oid && !Object.hasOwn(alternatives,version.commit)) alternatives[version.commit]=originalText;
     const distinct=[...new Set(Object.values(alternatives))];
     parts.push(distinct.length===1 ? distinct[0] : {original:original.slice(group.start,group.end).join(""),alternatives});
     at=group.end;
@@ -63,10 +65,12 @@ export function resolveText(parts, choices, defaultId) {
 
 // Only canonical marker/link/marker triplets belong to the collector.
 export function mergeCaptureBlocks(base, left, right) {
+  const existing=new Set(captureLinkRanges(base).map(group=>group.id));
   const split=source=>{
     const groups=captureLinkRanges(source), tokens=new Map();
     let plain=source;
     for(const {id,markers:[from,to],link} of groups.toReversed()) {
+      if(existing.has(id)) continue;
       if(from.to!==link.from || link.to!==to.from || tokens.has(id)) return null;
       tokens.set(id,source.slice(from.from,to.to).trimEnd());
       plain=plain.slice(0,from.from)+plain.slice(to.to);
