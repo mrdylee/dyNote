@@ -102,3 +102,45 @@ test("daily batch waits five minutes, rejects rewritten remotes and never publis
   await a.service.store.git(["-c","user.name=external","-c","user.email=external@example.invalid","commit","-m","external"]);
   await assert.rejects(a.sync(),/범위 밖/);assert.equal((await runGit(bare,["rev-parse","main"])).stdout.trim(),updated);
 });
+
+test("a 528 MiB incoming tree resumes past 512 MiB without losing an offline edit",async t=>{
+  const {pc}=await fixture(t),a=await pc("A");
+  await a.write("root.md","initial");await a.sync({register:true});
+  const head=await a.service.disk.head(), store=a.service.store;
+  const entry=await store.storeBytes(Buffer.alloc(24*1024*1024,65));
+  const names=Array.from({length:22},(_,i)=>"attachments/"+String(i).padStart(2,"0")+".png");
+  const tree=await store.writeTree(head,new Map(names.map(name=>[name,entry])));
+  const device={id:a.service.deviceId,name:"A"};
+  const remote=await store.commitTree(tree,[head],"large attachment batch",device,a.cfg);
+  await store.git(["push","--",a.cfg.remote,remote+":refs/heads/main"]);
+  const partial=await a.sync();assert.equal(partial.phase,"pending");
+  assert.equal(await a.service.disk.head(),head);
+  await a.write(names.at(-1),"bytes written between batches");
+  const restarted=new PersonalSync({root:a.root},store.run,a.service.deviceId);
+  const final=await restarted.sync(a.cfg);
+  assert.equal(final.conflicts[0].name,names.at(-1));
+  assert.equal((await restarted.store.tree(await restarted.disk.head())).get(names[0]).oid,entry.oid);
+  assert.equal((await restarted.versions(names.at(-1))).basis.length,2);
+});
+
+test("lost push acknowledgement, branch deletion and an invalid external copy",async t=>{
+  const {pc,bare,advance}=await fixture(t),a=await pc("A");
+  await a.write("file.md","base");await a.sync({register:true});
+  const run=a.service.store.run;
+  let lost=false;
+  a.service.store.run=async (root,args,opts)=>{
+    const result=await run(root,args,opts);
+    if(args[0]==="push" && !lost){lost=true;throw new Error("lost acknowledgement");}
+    return result;
+  };
+  await a.write("file.md","new");await a.sync();const head=await a.service.disk.head();await a.sync();
+  assert(lost);assert.equal(await a.service.disk.head(),head);
+  await a.write("draft.pdf","%PDF without final bytes");await a.write("link.md","![[draft.pdf]]");
+  await a.sync();advance(5000);const partial=await a.sync();
+  assert(partial.pendingFiles.some(f=>f.name==="link.md"));
+  const file=partial.pendingFiles.find(f=>f.name==="draft.pdf");
+  await a.service.confirm(file.name,file.oid);await a.sync();
+  const files=await a.service.store.tree(await a.service.disk.head());assert(files.has("link.md") && files.has("draft.pdf"));
+  await runGit(bare,["update-ref","-d","refs/heads/main"]);
+  await assert.rejects(a.sync(),/삭제/);
+});

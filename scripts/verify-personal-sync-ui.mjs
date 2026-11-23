@@ -49,16 +49,20 @@ try {
   await b.page.waitForFunction(async()=>{const {value:v}=await window.notes.snapshot({});return v.notes.some(n=>n.content.includes("Local에서 이어 씀"));});
   await b.sync();await a.sync();
   assert.match(await readFile(path.join(a.root,"회의록.md"),"utf8"),/Local에서 이어 씀/);
+  const third=await launch("Laptop",false);
   await a.sync();await b.sync();
-  await Promise.all([writeFile(path.join(a.root,"회의록.md"),"회의 3시\n"),writeFile(path.join(b.root,"회의록.md"),"회의 4시\n")]);
+  await Promise.all([writeFile(path.join(a.root,"회의록.md"),"회의 2시\n"),writeFile(path.join(b.root,"회의록.md"),"회의 3시\n")]);
   await a.sync();await b.sync();await a.sync();
   await b.page.getByRole("button",{name:/버전 확인 · 2개/}).click();
   const dialog=b.page.getByRole("dialog",{name:"버전 확인"});
-  await dialog.getByRole("radio",{name:/회의 3시.*Cloud/}).first().check();
+  const selection=dialog.getByRole("radio",{name:/회의 3시.*Local/}).first();
+  await selection.check();
+  await writeFile(path.join(third.root,"회의록.md"),"회의 4시\n");await third.sync();await b.sync();
+  await dialog.getByText("검토할 버전 3개").waitFor();assert(await selection.isChecked());
   await dialog.getByRole("button",{name:"선택한 버전으로 적용"}).click();
   await dialog.waitFor({state:"hidden"});await a.sync();
   assert.equal(await readFile(path.join(a.root,"회의록.md"),"utf8"),"회의 3시\n");
-  console.log("PASS two Electron profiles: focus receive into open editor, blur send, competing versions and selection");
+  console.log("PASS three Electron profiles: focus receive, blur send, late candidate retains selection, selected version reaches peer");
 } finally {
   for(const app of apps.reverse()) await app.close().catch(()=>app.process().kill());
   await rm(temp,{recursive:true,force:true,maxRetries:3});

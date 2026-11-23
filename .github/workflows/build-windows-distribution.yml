@@ -1,5 +1,7 @@
 name: Build Windows distribution
 on:
+  push:
+    branches: [validation/personal-vault-sync]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -43,6 +45,7 @@ jobs:
           node scripts/verify-vault-space-fixes.mjs
           node scripts/verify-sidebar-file-drop.mjs
           node scripts/verify-document-tabs.mjs
+          DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs
           node scripts/verify-update-install.mjs
       - run: node scripts/package-windows-distribution.mjs
       - name: Install native document editors for Windows handoff tests
