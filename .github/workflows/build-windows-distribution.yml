@@ -1,7 +1,5 @@
 name: Build Windows distribution
 on:
-  push:
-    branches: [validation/personal-vault-sync]
   workflow_dispatch:
   workflow_call:
     inputs:

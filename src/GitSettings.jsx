@@ -43,7 +43,7 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
       <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option></select></label>}
     {personal ? <><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
       <p>이 개인 노트 폴더를 아래 원격 브랜치와 양방향으로 동기화합니다. 다른 PC에서도 같은 저장소와 브랜치를 선택하세요.</p>
-      <details><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
+      <details open={zipPaths?.length>0 && status.config?.mode!=="personal-sync"}><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
         <ul>{zipPaths?.map(name=><li key={name}>{name}</li>)}</ul></details></> : <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>}
     <label>저장소 주소<input aria-label="Git 저장소 주소" placeholder="https://github.com/사용자/노트저장소.git" value={form.remote} disabled={busy} onChange={(e) => update("remote", e.target.value)} /></label>
     <div className="daily-backup-info"><strong>{personal?"편집 5분마다 전송 · 창을 떠날 때 전송":"하루 한 번 · 매일 밤 11시"}</strong>
@@ -57,14 +57,14 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
         <label>커밋 이메일<input aria-label="Git 커밋 이메일" placeholder="기존 Git 설정 사용" value={form.authorEmail} disabled={busy} onChange={(e) => update("authorEmail", e.target.value)} /></label>
       </div>
       {!personal && <label>저장 방식<select aria-label="Git 저장 방식" value={form.push ? "push" : "commit"} disabled={busy} onChange={(e) => update("push", e.target.value === "push")}><option value="push">커밋 후 원격 업로드</option><option value="commit">로컬 커밋만</option></select></label>}
-      <p className="muted">인증은 이 PC의 Git 로그인 또는 SSH 키를 사용합니다. 토큰·비밀번호를 주소에 넣지 마세요. 원격에 다른 변경사항이 있으면 업로드를 멈추고 알려드립니다.</p>
-      <p className="muted">보충 백업도 오늘의 백업으로 계산합니다. 변경이 없으면 커밋하지 않으며, 수동 백업은 추가 커밋을 만들 수 있습니다.</p>
+      <p className="muted">인증은 이 PC의 Git 로그인 또는 SSH 키를 사용합니다. {personal?"원격에서 받은 버전은 이 기기에서도 열어볼 수 있습니다.":"원격에 다른 변경사항이 있으면 업로드를 멈추고 알려드립니다."}</p>
+      {!personal && <p className="muted">보충 백업도 오늘의 백업으로 계산합니다. 변경이 없으면 커밋하지 않으며, 수동 백업은 추가 커밋을 만들 수 있습니다.</p>}
     </details>
     <div className="settings-actions">
       <button className="primary-button" disabled={busy || !form.remote || personal && (!form.deviceName?.trim() || zipPaths===null)} onClick={() => run(() => onConnect(personal?{...form,zipPaths}:form))}>{personal?"이 설정으로 동기화":status.enabled ? "백업 설정 적용" : "연결하고 백업 시작"}</button>
       <button className="secondary-button" disabled={busy || !form.remote || personal && !form.deviceName?.trim()} onClick={() => run(() => onClone(form))}>기존 저장소 가져오기</button>
       <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onSync)}>{personal?"지금 동기화":"지금 백업"}</button>
-      <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onDisconnect)}>자동 백업 끄기</button>
+      <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onDisconnect)}>{personal?"이 기기 동기화 끄기":"자동 백업 끄기"}</button>
     </div>
     <p className={`settings-message ${status.phase}`} role="status">{status.message}</p>
     {status.enabled && status.config?.mode==="personal-sync" && <>
