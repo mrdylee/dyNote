@@ -71,6 +71,9 @@ export const FILE_STORAGE_FOLDER = "File Storage";
 
 export const validFilePath = (value) =>
   validRelativePath(value) && !(officeKind(value) && path.posix.basename(value).startsWith("~$")) && /\.(?:html?|xlsx|pptx|md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
+export const validPersonalFilePath = value =>
+  validRelativePath(value) && !/[\x00-\x1f\x7f]/u.test(value) && !path.posix.basename(value).startsWith("~$") &&
+  (validFilePath(value) || /\.zip$/i.test(value));
 const validWordPath = (value) =>
   validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
 const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
@@ -271,11 +274,31 @@ export class Vault {
     return { files, revision: digest(JSON.stringify(files.map((file) => [file.path, file.revision]))) };
   }
 
-  async #restoreTarget(relative) {
-    if (!validFilePath(relative)) throw new Error("잘못된 복원 경로입니다.");
+  async #captureSelection(paths) {
+    const files = [];
+    for (const name of paths) {
+      if (!validPersonalFilePath(name)) throw new Error("잘못된 파일 경로입니다.");
+      const file = await this.#binary(name, validPersonalFilePath).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (file) files.push(file);
+    }
+    return { files, revision: digest(JSON.stringify(files.map(file => [file.path, file.revision]))) };
+  }
+
+  captureSelection(paths) { return this.#enqueue(() => this.#captureSelection(paths)); }
+  applyPersonalSync(operation) { return this.#enqueue(operation); }
+
+  async #restoreTarget(relative, validPath = validFilePath) {
+    if (!validPath(relative)) throw new Error("잘못된 복원 경로입니다.");
     let target = this.root;
     const parts = relative.split("/");
     for (let i = 0; i < parts.length; i++) {
+      if (validPath === validPersonalFilePath) {
+        const entries = await readdir(target).catch(error => { if (error.code !== "ENOENT") throw error; return []; });
+        if (entries.some(name => name !== parts[i] && name.normalize("NFC").toLowerCase() === parts[i].normalize("NFC").toLowerCase()))
+          throw new Error("대소문자 또는 유니코드 표기만 다른 파일이 있습니다.");
+      }
       target = path.join(target, parts[i]);
       const info = await lstat(target).catch((error) => { if (error.code !== "ENOENT") throw error; });
       if (info && (info.isSymbolicLink() || (i < parts.length - 1 ? !info.isDirectory() : !info.isFile())))
@@ -284,19 +307,22 @@ export class Vault {
     return target;
   }
 
-  applySnapshot(files, expectedRevision) {
+  applySnapshot(files, expectedRevision, selection = null) {
+    const capture = () => selection ? this.#captureSelection(selection) : this.#captureFiles();
+    const validPath = selection ? validPersonalFilePath : validFilePath;
+    if (selection && files.some(file => !selection.includes(file.path))) throw new Error("복원 대상이 변경되었습니다.");
     return this.#enqueue(async () => {
       await mkdir(this.recoveryRoot, { recursive: true, mode: 0o700 });
       const recoveryRoot = await realpath(this.recoveryRoot);
       if (recoveryRoot === this.root || recoveryRoot.startsWith(this.root + path.sep))
         throw new Error("복구 사본 폴더가 보관함 안에 있습니다. 별도 노트 폴더를 선택해 주세요.");
-      const before = await this.#captureFiles();
+      const before = await capture();
       if (before.revision !== expectedRevision) throw new Error("미리보기 이후 파일이 변경되었습니다. 복원 내용을 다시 확인해 주세요.");
       const current = new Map(before.files.map((file) => [file.path, file]));
       const target = new Map();
       const names = new Map();
       for (const file of [...before.files, ...files]) {
-        if (!validFilePath(file.path)) throw new Error("잘못된 복원 경로입니다.");
+        if (!validPath(file.path)) throw new Error("잘못된 복원 경로입니다.");
         const parts = file.path.split("/");
         for (let i = 1; i <= parts.length; i++) {
           const name = parts.slice(0, i).join("/"), key = name.normalize("NFC").toLowerCase();
@@ -311,7 +337,7 @@ export class Vault {
           throw new Error("잘못되었거나 너무 큰 복원 파일입니다.");
         total += file.bytes.length;
         if (total > 512 * 1024 * 1024) throw new Error("복원 파일은 총 512MB 이하여야 합니다.");
-        await this.#restoreTarget(file.path);
+        await this.#restoreTarget(file.path, validPath);
         target.set(file.path, { ...file, revision: digest(file.bytes) });
       }
       const changes = [...new Set([...current.keys(), ...target.keys()])]
@@ -327,12 +353,12 @@ export class Vault {
         createdAt: new Date().toISOString(), revision: before.revision,
         files: before.files.map(({ path, revision }) => ({ path, revision })),
       }), { flag: "wx", mode: 0o600 });
-      if ((await this.#captureFiles()).revision !== expectedRevision)
+      if ((await capture()).revision !== expectedRevision)
         throw new Error(`복구 사본 생성 중 파일이 변경되었습니다. 다시 확인해 주세요. 복구 사본: ${recoveryPath}`);
-      const readCurrent = (name) => this.#binary(name).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
+      const readCurrent = (name) => this.#binary(name, validPath).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
       const replace = async (name, file) => {
-        if (!file) { await unlink(await this.#file(name)); return; }
-        const destination = await this.#file(name, true);
+        if (!file) { await unlink(await this.#file(name, false, validPath)); return; }
+        const destination = await this.#file(name, true, validPath);
         const temporary = path.join(path.dirname(destination), `.open-notes-${randomUUID()}.tmp`);
         try {
           await writeFile(temporary, file.bytes, { flag: "wx", mode: 0o600 });
@@ -576,8 +602,8 @@ export class Vault {
     };
   }
 
-  async #binary(relative) {
-    const target = await this.#file(relative);
+  async #binary(relative, validPath = validFilePath) {
+    const target = await this.#file(relative, false, validPath);
     const handle = await open(
       target,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),

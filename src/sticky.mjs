@@ -32,7 +32,7 @@ updatePin(initial.pinned === true);
 updateTitle(initial.content);
 
 const lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
-let moveVersion = 0;
+let moveVersion = 0, receiving=false;
 const publish = state => {
   const content = state.doc.sliceString(0, state.doc.length, lineBreak);
   updateTitle(content);
@@ -51,9 +51,19 @@ const view = new EditorView({
     keymap.of([{ key: "Enter", run: startJournalBullet }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
     EditorView.contentAttributes.of({ "aria-label": "Sticky Note 메모", spellcheck: "false" }),
     EditorView.updateListener.of(({ docChanged, state }) => {
-      if (docChanged) publish(state);
+      if (docChanged && !receiving) publish(state);
     }),
   ],
+});
+window.sticky.onReceive(({before,content,token})=>{
+  if(view.state.doc.toString()!==before.replace(/\r\n?/g,"\n"))return;
+  receiving=true;
+  try {
+    const previous=view.state.doc.toString(),after=content.replace(/\r\n?/g,"\n");
+    const change=changedRange(previous,after);
+    if(change) view.dispatch({changes:{from:change.from,to:previous.length-after.length+change.to,insert:after.slice(change.from,change.to)},annotations:Transaction.addToHistory.of(false)});
+    updateTitle(content);window.sticky.received(token);
+  } finally {receiving=false;}
 });
 window.sticky.onMoved(({ from, to, files, version }) => {
   moveVersion = version;

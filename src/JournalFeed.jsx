@@ -5,7 +5,19 @@ import {renderMarkdown} from '../core/knowledge.mjs';
 import DiagramPreview from './DiagramPreview.jsx';
 import Editor from './Editor.jsx';
 import CopilotJournalEntries,{CopilotJournalToolbar} from './CopilotJournalEntries.jsx';
-import {withoutCaptureLinks} from '../core/copilot-journal-links.mjs';
+import {captureLinkRanges,withoutCaptureLinks} from '../core/copilot-journal-links.mjs';
+
+function ReceivedLinks({note,records,notes,onOpen}) {
+  const known=new Set((records ?? []).filter(r=>r.journalPath===note.path).flatMap(r=>r.sessions.map(s=>s.path)));
+  const links=new Map();
+  for(const {link} of captureLinkRanges(note.content)){
+    const match=/^- \[\[([^|]+)\|([^\]]+)\]\]$/.exec(link.text);
+    if(match && !known.has(match[1]))links.set(match[1],match[2]);
+  }
+  return [...links].map(([name,title])=>notes.some(n=>n.path===name)
+    ? <button className="capture-record-title" key={name} onClick={()=>onOpen(name)}>{title}</button>
+    : <p key={name}>연결된 대화 파일 확인 필요 · {title}</p>);
+}
 export default function JournalFeed({notes,preferences,vault,currentDate,pendingDate,onOpen,onChange,onImportFiles,onLink,jump,fonts,onFontSettings,disabled,capture}) {
   const [editingDate,setEditingDate]=useState(null),[count,setCount]=useState(14);
   const today=editingDate??currentDate;
@@ -37,6 +49,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
     {current&&<article className="journal-entry" data-document-path={current.path} data-vault-id={vault.id}
       onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEditingDate(null);}}>
       <header><h2>{today}</h2></header>
+      <ReceivedLinks note={current} notes={notes} records={capture?.state?.records} onOpen={onOpen}/>
       {capture&&<CopilotJournalEntries records={capture.state?.records?.filter(record=>record.journalPath===current.path)} disabled={disabled} onOpen={onOpen} onTrash={capture.onTrash}/>}
       <Editor key={current.path} note={current} notes={notes} journal live editorRef={editor}
         onChange={content=>{setEditingDate(today);onChange(current.path,content);}} vaultId={vault.id} attachments={vault.attachments}
@@ -45,6 +58,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
     </article>}
     {entries.slice(0,count).map(note=><article className="journal-entry" key={note.path} data-document-path={note.path} data-vault-id={vault.id}>
       <header><h2><button className="journal-date" disabled={disabled} onClick={()=>onOpen(note.path)}>{note.date}</button></h2></header>
+      <ReceivedLinks note={note} notes={notes} records={capture?.state?.records} onOpen={onOpen}/>
       {capture&&<CopilotJournalEntries records={capture.state?.records?.filter(record=>record.journalPath===note.path)} disabled={disabled} onOpen={onOpen} onTrash={capture.onTrash}/>}
       <DiagramPreview html={DOMPurify.sanitize(renderMarkdown(withoutCaptureLinks(note.content),notes,note.path,{vaultId:vault.id,attachments:vault.attachments??[]}),{FORBID_TAGS:['input','iframe','form','style'],ADD_ATTR:['data-note'],ADD_URI_SAFE_ATTR:['src']})} onClick={e=>{if(e.target.closest('a'))e.preventDefault();}}/>
     </article>)}

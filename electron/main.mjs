@@ -12,7 +12,7 @@ import {
   powerMonitor,
 } from "electron";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, lstat, realpath } from "node:fs/promises";
+import { readFile, writeFile, mkdir, lstat, realpath, readdir } from "node:fs/promises";
 import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,7 +117,9 @@ function openVaultController(target, refresh = false) {
   }
   const git = new GitController({
     settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
+    isPersonal: target => registry.purposes[target.root] === "personal",
     onStatus: status => {
+      if(status.changed?.length) stickyNotes?.receive(target,status.changed).catch(error=>console.warn("Sticky Note 동기화",error.message));
       if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:git-status", status);
     },
   });
@@ -150,7 +152,7 @@ async function saveStickyNote(root, relative, content, revision) {
   activeMutations++;
   try {
     const { vault: target, git } = await stickyVault(root);
-    const saved = revision ? await target.save(relative, content, revision) : await target.create(relative, content);
+    const saved = revision ? await git.saveNote(relative,content,revision,()=>target.save(relative,content,revision)) : await target.create(relative, content);
     git.markDirty(target.id);
     if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:sticky-saved", { vaultId: target.id, note: saved });
     return saved;
@@ -501,7 +503,7 @@ app
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
-      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone",
+      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
@@ -596,8 +598,11 @@ app
       },
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
-        if (args.checkOnly === true) return copilotJournal.sync(vault,args.dailyOptions,false,{checkOnly:true});
-        return gitBackup.enqueue(()=>{checkVault(args, vault);return copilotJournal.sync(vault,args.dailyOptions,args.manual===true,{sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds});});
+        const run=async()=>{checkVault(args,vault);
+          const protectedPaths=gitBackup.status().enabled && gitBackup.status().config?.mode==="personal-sync" ? await gitBackup.personal.blockedSessions() : undefined;
+          return copilotJournal.sync(vault,args.dailyOptions,args.checkOnly!==true && args.manual===true,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
+        };
+        return args.checkOnly===true ? run() : gitBackup.enqueue(run);
       },
       "capture-trash": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 삭제해 주세요.");
@@ -613,6 +618,7 @@ app
       "set-vault-purpose": async (args) => {
         await registry.setPurpose(args?.root, args?.purpose);
         const entry = [...openedVaults.values()].find(entry => entry.vault.root === args.root);
+        if (entry && args.purpose!=="personal" && entry.git.status().config?.mode==="personal-sync") await entry.git.disconnect(entry.vault.id);
         if (entry) await entry.vault.prepareFileStorage();
         else await Vault.open(args.root, recovery, args.purpose);
         pruneVaultControllers();
@@ -623,7 +629,11 @@ app
         return selectVault(args.root);
       },
       "forget-vault": async (args) => { await registry.forget(args?.root); pruneVaultControllers(); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
-      "git-history": (args, vault) => { checkVault(args, vault); return new GitHistory(vault).list(args.month); },
+      "git-history": (args, vault) => {
+        checkVault(args, vault);
+        const history = new GitHistory(vault);
+        return args.filePath === undefined ? history.list(args.month) : history.fileVersions(args.filePath, args.skip, args.anchor);
+      },
       "classification-preview": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args, vault);return new JournalClassifier(vault).preview(args.input);}); },
       "classification-apply": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async()=>{const {JournalClassifier}=await import("../core/journal-classification.mjs");checkVault(args, vault);return new JournalClassifier(vault).apply(args.input,args.revision);}); },
       "composer-preview": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.enqueue(async () => { const { NoteComposer } = await import("../core/note-composer.mjs"); checkVault(args, vault); return new NoteComposer(vault).preview(args.input); }); },
@@ -650,12 +660,18 @@ app
           return { status, snapshot };
         });
       },
-      "git-preview": (args, vault) => { checkVault(args, vault); return new GitHistory(vault).preview(args.commit); },
+      "git-preview": (args, vault) => {
+        checkVault(args, vault);
+        const history = new GitHistory(vault);
+        return args.filePath === undefined ? history.preview(args.commit) : history.filePreview(args.filePath, args.commit);
+      },
       "git-restore": (args, vault, gitBackup) => {
         checkVault(args, vault);
         return gitBackup.enqueue(async () => {
           checkVault(args, vault);
-          const result = await new GitHistory(vault).restore(args.commit, args.revision);
+          const history = new GitHistory(vault);
+          const result = args.filePath === undefined ? await history.restore(args.commit, args.revision)
+            : await history.restoreFile(args.filePath, args.commit, args.revision);
           gitBackup.markDirty(vault.id);
           return result;
         });
@@ -670,21 +686,27 @@ app
       },
       "git-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.status(); },
       "git-connect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.connect(vault.id, args.config); },
-      "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id); },
+      "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id,{automatic:args.poll===true}); },
+      "personal-sync-zips": (args,vault,controller) => { checkVault(args,vault); return controller.enqueue(()=>controller.zipList()); },
+      "personal-sync-action": (args,vault,controller) => { checkVault(args,vault); return controller.personalAction(vault.id,args); },
       "git-disconnect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.disconnect(vault.id); },
       "git-clone": async (args, source) => {
         checkVault(args, source);
-        const config = validateGitConfig(args.config);
+        const personal=args.config?.mode==="personal-sync";
+        if(personal && registry.purposes[source.root]!=="personal") throw new Error("개인 보관함을 선택해 주세요.");
+        const config = personal ? {...validateGitConfig(args.config),mode:"personal-sync",deviceName:args.config.deviceName,zipPaths:[]} : validateGitConfig(args.config);
         const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
         if (result.canceled) return null;
         checkVault(args, source);
         const purpose = registry.purposes[source.root];
         await registry.checkConnection(result.filePaths[0], purpose);
-        await GitBackup.clone(result.filePaths[0], config);
+        if (personal) {
+          if ((await readdir(result.filePaths[0])).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+        } else await GitBackup.clone(result.filePaths[0], config);
         const snapshot = await selectVault(result.filePaths[0], purpose);
         try { await gitBackup.connect(vault.id, config); }
         catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
-        return snapshot;
+        return personal ? await vault.snapshot() : snapshot;
       },
       create: (args, vault) => {
         checkVault(args, vault);
@@ -694,9 +716,9 @@ app
         checkVault(args, vault);
         return vault.openOrCreate(args.path, args.content);
       },
-      save: (args, vault) => {
+      save: (args, vault, controller) => {
         checkVault(args, vault);
-        return vault.save(args.path, args.content, args.revision);
+        return controller.saveNote(args.path,args.content,args.revision,()=>vault.save(args.path, args.content, args.revision));
       },
       "create-document": (args, vault) => {
         checkVault(args, vault);
@@ -709,6 +731,11 @@ app
       "transfer-dropped-file": async (args, vault) => {
         checkVault(args, vault);
         const result = await vault.transferDroppedFile(args.source, args.folder, args.operation);
+        const sync=openedVaults.get(vault.id)?.git.personal;
+        if(sync?.disk && result.path && /\.(?:zip|pdf|pptx|xlsx)$/i.test(result.path)) {
+          const copy=await sync.disk.read(result.path).catch(()=>null);
+          if(copy) sync.confirmed.set(result.path,copy.oid);
+        }
         if (args.operation === "move" && !result.warning && !result.unchanged) {
           for (const { vault: source, git } of openedVaults.values()) {
             if (source.id !== vault.id && args.source.startsWith(source.root + path.sep)) {

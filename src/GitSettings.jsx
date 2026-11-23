@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect }) {
+export default function GitSettings({ status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview }) {
   const [form, setForm] = useState(() => ({ ...initial, ...status.config }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const [repository, setRepository] = useState(null), [refresh, setRefresh] = useState(0);
+  const [zipPaths,setZipPaths]=useState(null);
+  const personal=form.mode==="personal-sync" && space?.purpose==="personal";
+  useEffect(()=>{
+    let current=true; setZipPaths(null);
+    if(personal) onZips().then(list=>{if(current)setZipPaths(list);}).catch(e=>{if(current)setError(e.message);});
+    return ()=>{current=false;};
+  },[personal,space?.id]);
   useEffect(() => {
     let mounted = true;
     setRepository(null);
@@ -32,10 +39,15 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
       <p className="muted">개인·팀 표시는 Git 접근 권한을 바꾸지 않습니다. 업로드한 문서는 연결된 저장소의 접근 권한을 따릅니다.</p>
       <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
     </div>
-    <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>
+    {space?.purpose==="personal" && <label>Git 사용 방식<select value={personal?"personal-sync":"daily"} disabled={busy} onChange={e=>update("mode",e.target.value)}>
+      <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option></select></label>}
+    {personal ? <><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
+      <p>이 개인 노트 폴더를 아래 원격 브랜치와 양방향으로 동기화합니다. 다른 PC에서도 같은 저장소와 브랜치를 선택하세요.</p>
+      <details><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
+        <ul>{zipPaths?.map(name=><li key={name}>{name}</li>)}</ul></details></> : <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>}
     <label>저장소 주소<input aria-label="Git 저장소 주소" placeholder="https://github.com/사용자/노트저장소.git" value={form.remote} disabled={busy} onChange={(e) => update("remote", e.target.value)} /></label>
-    <div className="daily-backup-info"><strong>하루 한 번 · 매일 밤 11시</strong>
-      <p>이 PC의 시간 기준이며 앱이 열려 있을 때 실행됩니다. 놓친 백업은 다음 실행 시 보충합니다.</p>
+    <div className="daily-backup-info"><strong>{personal?"편집 5분마다 전송 · 창을 떠날 때 전송":"하루 한 번 · 매일 밤 11시"}</strong>
+      <p>{personal?"앱이 열려 있는 동안 약 1분마다 다른 PC의 변경을 확인합니다.":"이 PC의 시간 기준이며 앱이 열려 있을 때 실행됩니다. 놓친 백업은 다음 실행 시 보충합니다."}</p>
     </div>
     <details className="backup-details">
       <summary>세부 설정</summary>
@@ -44,17 +56,24 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
         <label>커밋 이름<input aria-label="Git 커밋 이름" placeholder="기존 Git 설정 사용" value={form.authorName} disabled={busy} onChange={(e) => update("authorName", e.target.value)} /></label>
         <label>커밋 이메일<input aria-label="Git 커밋 이메일" placeholder="기존 Git 설정 사용" value={form.authorEmail} disabled={busy} onChange={(e) => update("authorEmail", e.target.value)} /></label>
       </div>
-      <label>저장 방식<select aria-label="Git 저장 방식" value={form.push ? "push" : "commit"} disabled={busy} onChange={(e) => update("push", e.target.value === "push")}><option value="push">커밋 후 원격 업로드</option><option value="commit">로컬 커밋만</option></select></label>
+      {!personal && <label>저장 방식<select aria-label="Git 저장 방식" value={form.push ? "push" : "commit"} disabled={busy} onChange={(e) => update("push", e.target.value === "push")}><option value="push">커밋 후 원격 업로드</option><option value="commit">로컬 커밋만</option></select></label>}
       <p className="muted">인증은 이 PC의 Git 로그인 또는 SSH 키를 사용합니다. 토큰·비밀번호를 주소에 넣지 마세요. 원격에 다른 변경사항이 있으면 업로드를 멈추고 알려드립니다.</p>
       <p className="muted">보충 백업도 오늘의 백업으로 계산합니다. 변경이 없으면 커밋하지 않으며, 수동 백업은 추가 커밋을 만들 수 있습니다.</p>
     </details>
     <div className="settings-actions">
-      <button className="primary-button" disabled={busy || !form.remote} onClick={() => run(() => onConnect(form))}>{status.enabled ? "백업 설정 적용" : "연결하고 백업 시작"}</button>
-      <button className="secondary-button" disabled={busy || !form.remote} onClick={() => run(() => onClone(form))}>기존 저장소 가져오기</button>
-      <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onSync)}>지금 백업</button>
+      <button className="primary-button" disabled={busy || !form.remote || personal && (!form.deviceName?.trim() || zipPaths===null)} onClick={() => run(() => onConnect(personal?{...form,zipPaths}:form))}>{personal?"이 설정으로 동기화":status.enabled ? "백업 설정 적용" : "연결하고 백업 시작"}</button>
+      <button className="secondary-button" disabled={busy || !form.remote || personal && !form.deviceName?.trim()} onClick={() => run(() => onClone(form))}>기존 저장소 가져오기</button>
+      <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onSync)}>{personal?"지금 동기화":"지금 백업"}</button>
       <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onDisconnect)}>자동 백업 끄기</button>
     </div>
     <p className={`settings-message ${status.phase}`} role="status">{status.message}</p>
+    {status.enabled && status.config?.mode==="personal-sync" && <>
+      <p>열린 파일 복구 사본 · {((status.recoveryBytes ?? 0)/1048576).toFixed(1)} MiB · <code>{space?.root}/.git/dynote-personal</code></p>
+      <strong>등록 기기 {status.devices?.length ?? 0}대</strong>
+      <ul>{status.devices?.map(d=><li key={d.id}>{d.name} · {d.id.slice(0,8)} {d.id===status.deviceId?"(이 기기)":<button disabled={busy} onClick={()=>run(()=>onAction({action:"device",deviceId:d.id}))}>등록 해제</button>}</li>)}</ul>
+      {status.pendingFiles?.map(f=><p key={f.name}>{f.name} · {f.message} {f.oid && <button disabled={busy} onClick={()=>run(()=>onAction({action:"confirm",path:f.name,oid:f.oid}))}>복사 완료 확인</button>}</p>)}
+      {status.conflicts?.map(f=><button key={f.name} onClick={()=>onReview(f.name)}>{f.name} · 버전 확인 {f.count}개</button>)}
+    </>}
     {status.lastBackupDay && <p className="muted">마지막 일일 백업 확인: {status.lastBackupDay}</p>}
     {status.pendingCommit && <p className="muted">업로드 대기 중인 커밋이 있습니다. 재시도는 이 커밋만 전송하며 이후 편집은 다음 백업에 포함됩니다.</p>}
     {status.lastSuccess && <p className="muted">마지막 원격 저장: {new Date(status.lastSuccess).toLocaleString()}</p>}

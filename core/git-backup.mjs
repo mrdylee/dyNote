@@ -23,9 +23,10 @@ export function validateGitConfig(input) {
   return { remote, branch, authorName, authorEmail, schedule: "daily", push: input.push !== false };
 }
 
-export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8" } = {}) {
+export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8", privateIndex } = {}) {
   const gitEnv = { ...env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"]) delete gitEnv[key];
+  if (privateIndex) gitEnv.GIT_INDEX_FILE = privateIndex;
   return new Promise((resolve, reject) => {
     const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, "-c", "core.autocrlf=false", "-c", "submodule.recurse=false", ...args], {
       cwd: root, windowsHide: true, timeout: 60000, maxBuffer: 32 * 1024 * 1024, encoding,
@@ -35,6 +36,7 @@ export function runGit(root, args, { input, env = process.env, allow = [0], enco
       if (allow.includes(code)) return resolve({ code, stdout });
       const message = code === "ENOENT" ? "Git을 설치하고 Dynote를 다시 시작해 주세요."
         : error?.killed ? "Git 연결 시간이 초과되었습니다. 로컬 문서는 저장되어 있습니다."
+        : /quota|no space left|disk full|storage limit/i.test(stderr) ? "로컬 디스크 또는 원격 저장소 공간이 부족합니다. 공간 확보 후 다시 동기화해 주세요."
         : /authentication|permission denied|could not read Username|credential/i.test(stderr) ? "Git 인증에 실패했습니다. SSH 키 또는 Git 자격 증명 로그인을 확인해 주세요."
         : /non-fast-forward|fetch first|rejected/i.test(stderr) ? "원격에 다른 변경사항이 있습니다. Git에서 변경사항을 통합한 뒤 다시 시도해 주세요."
         : "Git 작업에 실패했습니다. 저장소 주소·접근 권한·네트워크와 Git 상태를 확인해 주세요.";

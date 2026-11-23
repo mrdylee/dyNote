@@ -65,7 +65,10 @@ export default function useVaultDocuments(api, invoke) {
       map.set(file.path, file.revision);
       return file;
     });
-    update(id, old => ({ ...old, ...snapshot, notes: installFiles(snapshot.notes), documents: installFiles(snapshot.documents ?? []) }));
+    update(id, old => {
+      const keepDrafts=(files,previous=[])=>[...installFiles(files),...previous.filter(file=>queue.get(id,file.path) && !files.some(incoming=>incoming.path===file.path))];
+      return {...old,...snapshot,notes:keepDrafts(snapshot.notes,old?.notes),documents:keepDrafts(snapshot.documents ?? [],old?.documents)};
+    });
   }, [queue, revisionMap, update]);
   return { vaults, current, revisionMap, update, remove, queue, install };
 }

@@ -304,7 +304,7 @@ export class CopilotJournal{
    return this.commit(vault,previous,{...config,...pending},new Set(recreate));
   }
  }
- async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false,projectIds}={}){
+ async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false,projectIds,protectedPaths=new Set()}={}){
   const previous=this.config(vault);if(!previous.enabled&&!manual)return {changed:false,status:await this.status(vault)};
   const migrating=legacyLayout(previous),importAll=manual&&allSessions===true;
   let available,requested;
@@ -321,7 +321,7 @@ export class CopilotJournal{
    if(checkOnly)return {pending:true};
    const recovered=await this.finishPending(vault);
    if(!selected&&!importAll)return recovered;
-   const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions,projectIds});
+   const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions,projectIds,protectedPaths});
    return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
   if(manual&&migrating&&!selected&&!importAll)return this.commit(vault,previous,clone(previous));
@@ -343,6 +343,7 @@ export class CopilotJournal{
     if(next.blocked.includes(`s:${id}`)||next.blocked.includes(`s:${key}`))continue;
     cachedInScope++;
     matched.add(key);
+    if(protectedPaths.has(session.path))continue;
     try{await lstat(path.join(vault.root,session.path));}
     catch(error){if(error.code!=='ENOENT')throw error;recreate.add(id);}
    }
@@ -359,6 +360,7 @@ export class CopilotJournal{
     const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?legacyKey:sourceKey);
     if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
+    if(protectedPaths.has(existing?.path ?? `${folder}/${project.key}/${sessionId}.md`))continue;
     const seen=existing?.messages??new Map();
     let compatible;
     if(existing&&sessionId!==sourceKey&&!existing.sourceKey){

@@ -116,3 +116,35 @@ test("an empty backup removes supported files only after preserving a recovery s
   assert.equal(await readFile(path.join(result.recoveryPath, "files", "Draft.md"), "utf8"), "preserve before removal");
   assert.equal(f.git("rev-parse", "HEAD"), empty);
 });
+
+test("per-file version restores original bytes without reading unrelated attachments", async () => {
+  const f = await fixture();
+  const rel = "한글 #.md";
+  const unrelated = path.join(f.root, "Oversized.pdf");
+  await writeFile(unrelated, "");
+  const { truncate, stat } = await import("node:fs/promises");
+  await truncate(unrelated, 26 * 1024 ** 2);
+  const result = await f.history.fileVersions(rel);
+  assert.deepEqual(result.entries.map(entry => entry.hash), [f.head, f.before]);
+  const preview = await f.history.filePreview(rel, f.before);
+  assert.match(preview.text, /First/);
+  const restored = await f.history.restoreFile(rel, f.before, preview.revision);
+  assert.equal(await readFile(path.join(f.root, rel), "utf8"), "\ufeff# First\r\n");
+  assert.equal(await readFile(path.join(restored.recoveryPath, "files", rel), "utf8"), "# Second\n");
+  assert.equal((await stat(unrelated)).size, 26 * 1024 ** 2);
+  assert.equal(f.git("rev-parse", "HEAD"), f.head);
+});
+
+test("per-file restore guards staged work, unsafe paths and edits after preview", async () => {
+  const f = await fixture();
+  const rel = "한글 #.md";
+  const preview = await f.history.filePreview(rel, f.before);
+  await writeFile(path.join(f.root, rel), "new unsynced draft");
+  await assert.rejects(f.history.restoreFile(rel, f.before, preview.revision), /변경/);
+  const fresh = await f.history.filePreview(rel, f.before);
+  f.git("add", rel);
+  await assert.rejects(f.history.restoreFile(rel, f.before, fresh.revision), /스테이징/);
+  await assert.rejects(f.history.fileVersions("../secrets.md"), /경로/);
+  await assert.rejects(f.history.filePreview(rel, "--all"), /기록/);
+  assert.equal(await readFile(path.join(f.root, rel), "utf8"), "new unsynced draft");
+});

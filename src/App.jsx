@@ -72,6 +72,8 @@ import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
+import FileVersionHistory from "./FileVersionHistory.jsx";
+import PersonalVersionReview from "./PersonalVersionReview.jsx";
 import GitWorkspace from "./GitWorkspace.jsx";
 import UpdateSettings from "./UpdateSettings.jsx";
 import CopilotPanel from "./CopilotPanel.jsx";
@@ -556,6 +558,8 @@ export default function App() {
   const [propertiesDraft, setPropertiesDraft] = useState("");
   const [lastTrash, setLastTrash] = useState(null);
   const [gitStates, setGitStates] = useState({});
+  const [reviewFile,setReviewFile]=useState(null);
+  const openReview=(id,path)=>{setReviewFile({id,path});setModal("personal-review");};
   const gitStatus = gitStates[vault?.id] ?? checkingGit;
   const gitSettingsStatus = gitStates[gitVault?.id] ?? checkingGit;
   const acceptGitStatus = useCallback(value => {
@@ -763,6 +767,24 @@ export default function App() {
     }
   }, [queue]);
 
+  const refreshPersonal=useEffectEvent(async (value)=>{
+    if (!value?.changed?.length || !vaultsRef.current[value.vaultId]) return;
+    const snapshot=await invoke(api.snapshot({vaultId:value.vaultId}));
+    if(vaultsRef.current[value.vaultId]) installVault(snapshot);
+  });
+  const pollPersonal=useEffectEvent(async (poll)=>{
+    const ids=Object.values(gitStates).filter(v=>v.enabled && v.config?.mode==="personal-sync").map(v=>v.vaultId);
+    if(!ids.length)return;
+    if(!poll)await flush(true);
+    await Promise.all(ids.map(vaultId=>invoke(api.syncGit({vaultId,poll}))));
+  });
+  useEffect(()=>{
+    const focus=()=>pollPersonal(true).catch(e=>setError(e.message));
+    const blur=()=>pollPersonal(false).catch(e=>setError(e.message));
+    const off=api?.onGitStatus(value=>refreshPersonal(value).catch(e=>setError(e.message)));
+    window.addEventListener("online",focus);window.addEventListener("focus",focus);window.addEventListener("blur",blur);
+    return ()=>{off?.();window.removeEventListener("online",focus);window.removeEventListener("focus",focus);window.removeEventListener("blur",blur);};
+  },[]);
   const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
   const updateComposing = useRef(false);
   updateContext.current = { busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
@@ -2218,6 +2240,9 @@ export default function App() {
               </span>
             </div>
             <div className="toolbar-actions">
+              {gitStatus.enabled && gitStatus.conflicts?.some(f=>f.name===displayedPath) && <button className="text-action" onClick={()=>openReview(vault.id,displayedPath)}>버전 확인 · {gitStatus.conflicts.find(f=>f.name===displayedPath).count}개</button>}
+              {displayedPath && (note || structured || attachment) && !showingWord && !activeDocumentDraft && <button className="text-action" disabled={busy}
+                onClick={() => setModal("file-versions")}>버전 기록</button>}
               {note && <button className="text-action" disabled={busy} onClick={()=>{setModal("compare");}}>문서 나란히 보기</button>}
               {!["graph"].includes(section) && (note || structured) && (
                 <>
@@ -3158,6 +3183,9 @@ export default function App() {
           {["git", "history", "git-workspace"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {settingsTab === "git" && gitVault.id && <GitSettings key={`${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
             onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id, summaryOnly: true }))}
+            onZips={()=>invoke(api.personalSyncZips({vaultId:gitVault.id}))}
+            onAction={args=>invoke(api.personalSyncAction({vaultId:gitVault.id,...args})).then(acceptGitStatus)}
+            onReview={name=>openReview(gitVault.id,name)}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); }}
             onClone={async (config) => {
               await flush(); setBusy(true);
@@ -3180,6 +3208,23 @@ export default function App() {
             onRecovery={() => invoke(api.showRecovery({ vaultId: gitVault.id })).catch((e) => setError(e.message))} />}
         </Modal>
       )}
+      {modal==="personal-review" && reviewFile && <Modal title="버전 확인" onClose={()=>setModal(null)}>
+        <PersonalVersionReview key={reviewFile.id+reviewFile.path} path={reviewFile.path} count={gitStates[reviewFile.id]?.conflicts?.find(f=>f.name===reviewFile.path)?.count}
+          action={async args=>{if(args.action==="resolve") await flush(true);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={()=>setModal(null)}/>
+      </Modal>}
+      {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" onClose={() => setModal(null)}>
+        <FileVersionHistory key={vault.id + ":" + displayedPath} path={displayedPath}
+          onList={(skip, anchor) => invoke(api.gitHistory({vaultId:vault.id, filePath:displayedPath, skip, anchor}))}
+          onPreview={async commit => { await flush(); return invoke(api.previewGit({vaultId:vault.id, filePath:displayedPath, commit})); }}
+          onRestore={async item => {
+            setBusy(true);
+            try {
+              await flush();
+              const result = await invoke(api.restoreGit({vaultId:vault.id, filePath:item.path, commit:item.commit, revision:item.revision}));
+              install(result.snapshot);
+            } finally { setBusy(false); }
+          }}/>
+      </Modal>}
       {modal === "reload" && (
         <Modal title="디스크에서 다시 읽기" onClose={() => setModal(null)}>
           <p>

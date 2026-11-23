@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { GitBackup, runGit } from "./git-backup.mjs";
-import { validFilePath } from "./vault.mjs";
+import { validFilePath, validPersonalFilePath } from "./vault.mjs";
 
 const localDay = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -25,11 +25,52 @@ export class GitHistory {
     }).filter((entry) => entry.date.startsWith(month));
     return { entries: entries.slice(0, 1000), truncated: entries.length > 1000 };
   }
-  async files(commit) {
+  async checkCommit(commit) {
     await this.repository();
     if (typeof commit !== "string" || !/^[a-f0-9]{40,64}$/.test(commit)) throw new Error("잘못된 백업 기록입니다.");
     if ((await this.git(["merge-base", "--is-ancestor", commit, "HEAD"], { allow: [0, 1] })).code)
       throw new Error("현재 보관함 이력에 포함된 백업만 복원할 수 있습니다.");
+  }
+  async fileVersions(path, skip = 0, anchor = null) {
+    if (!validPersonalFilePath(path)) throw new Error("잘못된 파일 경로입니다.");
+    if (!Number.isSafeInteger(skip) || skip < 0) throw new Error("잘못된 기록 위치입니다.");
+    await this.repository();
+    const tip = anchor ?? (await this.git(["rev-parse", "--verify", "HEAD"], { allow: [0, 128] })).stdout.trim();
+    if (!tip) return { entries: [], more: false, anchor: null };
+    await this.checkCommit(tip);
+    const log = await this.git(["log", tip, "--full-history", "--no-show-signature", "--max-count=51", "--skip=" + skip,
+      "--diff-filter=AMT", "--format=%H%x00%cI%x00%an%x00%(trailers:key=Dynote-Device-Name,valueonly,separator=%x20)%x00", "-z", "--", path]);
+    const fields = log.stdout.split("\0"), entries = [];
+    for (let i = 0; i + 3 < fields.length; i += 5) {
+      const [hash, time, author, device] = fields.slice(i, i + 4);
+      entries.push({ hash, time, author, device: device.trim() });
+    }
+    return { entries: entries.slice(0, 50), more: entries.length > 50, anchor: tip };
+  }
+  async fileAt(path, commit) {
+    if (!validPersonalFilePath(path)) throw new Error("잘못된 파일 경로입니다.");
+    await this.checkCommit(commit);
+    const entry = (await this.git(["ls-tree", "-l", "-z", commit, "--", path])).stdout;
+    const header = entry.slice(0, entry.indexOf("\t")).trim().split(/\s+/);
+    if (entry.slice(entry.indexOf("\t") + 1) !== path + "\0" || !["100644", "100755"].includes(header[0]) || header[1] !== "blob")
+      throw new Error("해당 시점의 일반 파일을 찾을 수 없습니다.");
+    if (Number(header[3]) > 25 * 1024 ** 2) throw new Error("복원 파일은 25MB 이하여야 합니다.");
+    const bytes = (await this.git(["cat-file", "blob", header[2]], { encoding: null })).stdout;
+    return { path, bytes };
+  }
+  async filePreview(path, commit) {
+    const { bytes } = await this.fileAt(path, commit);
+    const current = await this.vault.captureSelection([path]);
+    return { path, commit, revision: current.revision, size: bytes.length, identical: current.files[0]?.revision === digest(bytes),
+      text: /\.md$/i.test(path) ? bytes.subarray(0, 16000).toString("utf8") : null };
+  }
+  async restoreFile(path, commit, revision) {
+    const branch = (await this.git(["symbolic-ref", "--quiet", "--short", "HEAD"])).stdout.trim();
+    await this.backup.assertReady({ branch });
+    return this.vault.applySnapshot([await this.fileAt(path, commit)], revision, [path]);
+  }
+  async files(commit) {
+    await this.checkCommit(commit);
     const tree = (await this.git(["ls-tree", "-r", "-l", "-z", commit])).stdout;
     const files = [], names = new Set();
     let total = 0;
