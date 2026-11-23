@@ -124,6 +124,23 @@ test('importing a selected project rebuilds its missing notes after the Copilot 
  assert.equal((await f.controller.sync(f.vault,{},true,options)).changed,false);
  assert.equal(await readFile(note,'utf8'),'내가 수정한 대화');
 });
+test('selected project history restores cached conversations after VS Code removes both source transcripts',async t=>{
+ const f=await fixture(t);await f.configure(false);
+ const otherSource=path.join(f.source,'other/chatSessions/other.json');
+ await f.put();await f.put('other','다른 프로젝트',f.now(),otherSource);
+ const first=await f.controller.sync(f.vault,{},true,{allSessions:true});
+ const fileFor=label=>path.join(f.vault.root,first.status.records.find(record=>record.label===label).sessions[0].path);
+ const expected=await readFile(fileFor('Work'),'utf8');
+ await rename(path.join(f.vault.root,'Copilot Note'),path.join(f.root,'trash'));
+ await rm(f.sourceFile);await rm(otherSource);
+ const restarted=new CopilotJournal({file:path.join(f.profile,'capture.json'),sourceRoot:f.source,sessionRoot:f.controller.sessionRoot,now:f.now});
+ await restarted.load();
+ const options={allSessions:true,projectIds:['project']};
+ assert.equal((await restarted.sync(f.vault,{},true,options)).changed,true);
+ assert.equal(await readFile(fileFor('Work'),'utf8'),expected);
+ await assert.rejects(readFile(fileFor('Other')),{code:'ENOENT'});
+ assert.equal((await restarted.sync(f.vault,{},true,options)).changed,false);
+});
 test('retrying an interrupted reimport recreates the missing file with the latest conversation',async t=>{
  const f=await fixture(t);await f.configure(true);await f.put();
  const options={allSessions:true,projectIds:['project']};

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,realpath,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,rename} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -50,6 +50,12 @@ try{
  const status=await page.evaluate(async id=>(await window.notes.captureStatus({vaultId:id})).value,personalVault.id);
  assert.equal(status.records.length,1);
  assert.match(await readFile(path.join(personal,status.records[0].sessions[0].path),'utf8'),/질문/);
+ const importedPath=path.join(personal,status.records[0].sessions[0].path),before=await readFile(importedPath);
+ await rename(path.join(personal,'Copilot Note'),path.join(root,'trashed'));
+ await rm(path.join(source,'project/chatSessions/session.json'));
+ await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
+ await page.waitForFunction(async id=>(await window.notes.snapshot({vaultId:id})).value.notes.some(note=>note.path.startsWith('Copilot Note/')),personalVault.id);
+ assert.deepEqual(await readFile(importedPath),before);
  assert.equal(await readFile(path.join(team,'Home.md'),'utf8'),'# Original\n');
  assert.deepEqual(await page.evaluate(id=>JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`)),teamVault.id),drafts[teamVault.id]);
  await settings().getByRole('button',{name:'닫기',exact:true}).click();

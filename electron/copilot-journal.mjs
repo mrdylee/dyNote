@@ -332,7 +332,22 @@ export class CopilotJournal{
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
   const projects=(available??await this.projects(previous.sourceRoot)).filter(project=>requested?requested.has(project.id):importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
-  const sources=await this.projectSessions(previous,projects,selected!==null||importAll),matched=new Set();
+  const matched=new Set();
+  let cachedInScope=0;
+  if(previous.sessionLayout&&(importAll||selected)){
+   const projectKeys=new Set(projects.map(project=>project.key));
+   for(const [id,session] of sessions){
+    const projectKey=path.posix.basename(path.posix.dirname(session.path));
+    const key=session.sourceKey??id;
+    if(!projectKeys.has(projectKey)||(selected&&!selected.has(key)))continue;
+    if(next.blocked.includes(`s:${id}`)||next.blocked.includes(`s:${key}`))continue;
+    cachedInScope++;
+    matched.add(key);
+    try{await lstat(path.join(vault.root,session.path));}
+    catch(error){if(error.code!=='ENOENT')throw error;recreate.add(id);}
+   }
+  }
+  const sources=await this.projectSessions(previous,projects,selected!==null||importAll);
   const nativeKeys=new Set(sources.sessions.map(({project,source})=>captureId(project.key,source.sessionId)));
   for(const session of sessions.values())if(session.sourceKey)nativeKeys.add(session.sourceKey);
   for(const {project,source} of sources.sessions){
@@ -344,10 +359,6 @@ export class CopilotJournal{
     const sessionId=sourceKeys.get(sourceKey)??(legacy&&!legacy.sourceKey?legacyKey:sourceKey);
     if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
-    if((importAll||selected)&&previous.sessionLayout&&existing?.path){
-     try{await lstat(path.join(vault.root,existing.path));}
-     catch(error){if(error.code!=='ENOENT')throw error;recreate.add(sessionId);}
-    }
     const seen=existing?.messages??new Map();
     let compatible;
     if(existing&&sessionId!==sourceKey&&!existing.sourceKey){
@@ -388,6 +399,7 @@ export class CopilotJournal{
   const changed=migrating||updated.size>0||recreate.size>0;
   if(checkOnly&&changed)return {pending:true};
   const result=changed?await this.commit(vault,previous,next,recreate):{changed:false,status:await this.status(vault)};
+  if(importAll&&!result.changed&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length))result.noConversationHistory=true;
   if(sources.error||incompatible)result.status.error=[sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }

@@ -44,7 +44,7 @@ export default function CopilotJournalSettings({state,destination,importNotice,p
    </label>)}
   </fieldset>
   <label className="capture-toggle"><input type="checkbox" checked={autoEnabled} disabled={busy||!personal||!projectIds.length} onChange={e=>setEnabled(e.target.checked)}/>대화 자동 저장</label>
-  <p className="muted">자동 저장을 켜고 설정을 적용하면 앱 실행 중 1시간마다 선택한 프로젝트에서 활성화 이후의 대화를 확인합니다. 이미 가져온 대화와 삭제한 항목은 다시 가져오지 않습니다.</p>
+  <p className="muted">자동 저장을 켜고 설정을 적용하면 앱 실행 중 1시간마다 선택한 프로젝트에서 활성화 이후의 대화를 확인합니다. 왼쪽 파일 목록에서 삭제한 대화 파일은 선택한 프로젝트를 다시 가져오면 남아 있는 기록으로 복구합니다. 저널에서 삭제한 기록은 삭제 되돌리기로 복구하세요.</p>
   <p className="muted">수집 문서는 이 개인 보관함의 Git 백업 설정을 따릅니다. 내부 추론·도구 출력·첨부파일은 가져오지 않습니다.</p>
   <div className="settings-actions"><button className="primary-button" disabled={busy||!personal} onClick={()=>run(()=>onSave(preferences))}>설정 적용</button></div>
   {importBlocked&&<div role="status">

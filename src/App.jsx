@@ -882,7 +882,9 @@ export default function App() {
       if (!vaultsRef.current[id]) return;
       if (manual && action === "sync") {
         const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
-          ? "대화를 개인 노트에 가져왔습니다." : "새로 가져올 완료된 대화가 없습니다.";
+          ? "대화를 개인 노트에 가져왔습니다." : result.noConversationHistory
+            ? "선택한 프로젝트에서 완료된 원본 대화나 Dynote에 저장된 이전 기록을 찾지 못했습니다. 위의 기록 폴더를 확인해 주세요."
+            : "새로 가져올 완료된 대화가 없습니다.";
         setCaptureImportResult({ vaultId: id, notice });
       }
       updateCaptureState(id, () => result.status);
@@ -3104,17 +3106,17 @@ export default function App() {
             onOpenGit={id => { setGitSettingsId(id); setSettingsTab("git"); }}
             onPick={async (purpose) => {
               setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } }
+              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } return snapshot?.id; }
               finally { setBusy(false); }
             }}
             onSelect={async (root) => {
               setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter("all"); install(snapshot, true); }
+              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter("all"); install(snapshot, true); return snapshot.id; }
               finally { setBusy(false); }
             }}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
-            destination={captureVault?.name} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
+            destination={captureVault?.root ?? captureVault?.name} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
             pendingEdits={editState.drafts[captureVaultId] ?? emptyFiles}
             importBlocked={editState.blocked(captureVaultId) || editState.forVault(captureVaultId).working}
             onReviewEdit={path => { setModal(null); openNote(path, captureVaultId); }}
