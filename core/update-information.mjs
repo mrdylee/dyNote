@@ -1,3 +1,4 @@
+import {gitAssetRevision, gitAssetUrl, isGitUpdateSource, readGitUpdateManifest} from './git-update-source.mjs';
 const repository='https://github.com/mrdylee/dyNote';
 function version(value) {
   const match=/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.exec(value || '');
@@ -31,7 +32,7 @@ export function matchesUpdateAsset(name, {platform, arch, installed}) {
 export function validateInternalFeedUrl(value) {
   const url = typeof value === 'string' && URL.parse(value);
   if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname.endsWith('/')) {
-    throw new Error('사내 latest.json 파일의 HTTPS 주소를 입력해 주세요.');
+    throw new Error('사내 Git 저장소(.git) 또는 latest.json 파일의 HTTPS 주소를 입력해 주세요.');
   }
   return url.href;
 }
@@ -39,6 +40,9 @@ export function validateInternalFeedUrl(value) {
 export function allowedUpdateAsset(url, name, internalFeedUrl) {
   if (url.username || url.password) return false;
   if (internalFeedUrl == null) return url.origin === 'https://github.com' && url.pathname.startsWith('/mrdylee/dyNote/releases/download/');
+  if (isGitUpdateSource(internalFeedUrl)) {
+    return /^Dynote-[a-z0-9._-]+$/i.test(name) && !!gitAssetRevision(internalFeedUrl, url, name);
+  }
   return /^Dynote-[a-z0-9._-]+$/i.test(name) && url.href === new URL(name, validateInternalFeedUrl(internalFeedUrl)).href;
 }
 
@@ -69,15 +73,20 @@ export function releaseInformation(feed,current,includePrerelease=false,target,i
 export async function checkReleaseInformation(current,includePrerelease=false,target,internalFeedUrl=null,fetcher=fetch) {
   if (internalFeedUrl !== null) {
     const url = validateInternalFeedUrl(internalFeedUrl);
-    const response = await fetcher(url, {redirect:'error', cache:'no-store', signal:AbortSignal.timeout(10000)});
-    if (!response.ok) throw new Error(`사내 업데이트 정보를 가져오지 못했습니다. 서버 응답 ${response.status}`);
-    const manifest = await response.json();
+    let manifest, revision;
+    if (isGitUpdateSource(url)) {
+      ({manifest, revision} = await readGitUpdateManifest(url));
+    } else {
+      const response = await fetcher(url, {redirect:'error', cache:'no-store', signal:AbortSignal.timeout(10000)});
+      if (!response.ok) throw new Error(`사내 업데이트 정보를 가져오지 못했습니다. 서버 응답 ${response.status}`);
+      manifest = await response.json();
+    }
     const {version:number, name, size, sha256} = manifest ?? {};
     if (typeof number !== 'string' || number.startsWith('v') || !version(number) || name !== `Dynote-${number}-windows-x64-Setup.exe`
         || !Number.isSafeInteger(size) || size <= 0 || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) {
       throw new Error('사내 latest.json의 버전 또는 설치 파일 검증 정보가 올바르지 않습니다.');
     }
-    const asset = {name, size, digest:'sha256:'+sha256, browser_download_url:new URL(name, url).href};
+    const asset = {name, size, digest:'sha256:'+sha256, browser_download_url:revision ? gitAssetUrl(url, revision, name) : new URL(name, url).href};
     return {...releaseInformation([{tag_name:'v'+number, assets:[asset]}], current, includePrerelease, target, url), checkedAt:new Date().toISOString()};
   }
   const response=await fetcher('https://api.github.com/repos/mrdylee/dyNote/releases?per_page=30',{headers:{Accept:'application/vnd.github+json','User-Agent':`Dynote/${current}`},signal:AbortSignal.timeout(10000)});

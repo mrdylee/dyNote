@@ -23,16 +23,16 @@ export function validateGitConfig(input) {
   return { remote, branch, authorName, authorEmail, schedule: "daily", push: input.push !== false };
 }
 
-export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8", privateIndex } = {}) {
+export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8", privateIndex, timeout = 60000 } = {}) {
   const gitEnv = { ...env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"]) delete gitEnv[key];
   if (privateIndex) gitEnv.GIT_INDEX_FILE = privateIndex;
   return new Promise((resolve, reject) => {
     const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, "-c", "core.autocrlf=false", "-c", "submodule.recurse=false", ...args], {
-      cwd: root, windowsHide: true, timeout: 60000, maxBuffer: 32 * 1024 * 1024, encoding,
+      cwd: root, windowsHide: true, timeout, maxBuffer: 32 * 1024 * 1024, encoding,
       env: { ...gitEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes", GIT_LITERAL_PATHSPECS: "1" },
     }, (error, stdout, stderr) => {
-      const code = error?.code ?? 0;
+      const code = error ? (error.code ?? -1) : 0;
       if (allow.includes(code)) return resolve({ code, stdout });
       const message = code === "ENOENT" ? "Git을 설치하고 Dynote를 다시 시작해 주세요."
         : error?.killed ? "Git 연결 시간이 초과되었습니다. 로컬 문서는 저장되어 있습니다."
