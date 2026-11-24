@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld(
     aiAddSkills: () => call("ai-add-skills"),
     aiRemoveExtension: args => call("ai-remove-extension", args),
     copilotStatus: () => call("copilot-status"),
+    cloudAskView: args => call("copilot-bridge-view", args),
+    cloudAskSubmit: args => call("copilot-bridge-submit", args),
     codexStatus: () => call("codex-status"),
     codexLogin: () => call("codex-login"),
     codexCancelLogin: () => call("codex-cancel-login"),

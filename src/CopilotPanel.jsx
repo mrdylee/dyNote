@@ -4,6 +4,7 @@ import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import DiagramPreview from "./DiagramPreview.jsx";
+import CloudAskPanel from "./CloudAskPanel.jsx";
 import { captureContext, applyProposal, prepareRequest } from "../core/copilot.mjs";
 
 const invoke = async (promise) => {
@@ -17,6 +18,9 @@ markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(`[�
 const answerHtml = (text) => DOMPurify.sanitize(markdown.render(text), { FORBID_TAGS: ["img", "a"] });
 
 export default function CopilotPanel({ api, vaultId, session, ...props }) {
+  if (session.provider === "copilot" && session.connection.bridge)
+    return <CloudAskPanel key={vaultId} api={api} session={session} vaultId={vaultId} visible={props.visible} busy={props.busy}
+      renderAnswer={text => <DiagramPreview className="copilot-message-content markdown-answer" html={answerHtml(text)} renderDiagrams />} />;
   return <ProviderPanel key={`${vaultId}:${session.provider}`} {...props} api={api} vaultId={vaultId} session={session} provider={session.provider} onProvider={session.setProvider} />;
 }
 
@@ -201,6 +205,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
             <GitBranch size={13}/><span>{connection.authenticated ? connection.login || accountLabel : `${accountLabel} 연결`}</span><ChevronDown size={11}/>
           </summary>
           <div className="copilot-account-options" role="group" aria-label={`${accountLabel} 연결 설정`}>
+            {connection.worker && <p>Cloud Worker · {connection.worker.error || (connection.worker.lastChecked ? "Git 확인 " + new Date(connection.worker.lastChecked).toLocaleTimeString() : "연결 확인 중")}</p>}
             <p>{connection.authenticated ? `${accountLabel} · ${connection.login || "연결됨"}` : `${accountLabel} 계정으로 연결하세요.`}</p>
             {provider !== "copilot" && <p>{label} 로그인은 브라우저에서 진행하며, Dynote에서 한 번 완료하면 유지됩니다.</p>}
             <button type="button" disabled={checking || running || applying || authBusy || session.activity.planner} onClick={() => { accountMenu.current.open = false; login(); }}>{connection.authenticated ? "계정 다시 연결" : provider === "copilot" ? "GitHub로 연결" : `${label} 로그인`}</button>

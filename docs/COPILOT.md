@@ -1,5 +1,7 @@
 # Copilot in Dynote
 
+관리자가 회사 Git 채널을 배포한 Local PC에서는 오른쪽 Copilot 탭으로 Cloud PC에 질문할 수 있습니다. [Cloud Copilot Ask 사용 안내](CLOUD-COPILOT-BRIDGE.md)
+
 Open **AI 채팅** in the right panel to use **GitHub Copilot**. The sparkle button in the document
 toolbar opens it again when the panel is closed. The document outline and
 backlinks remain available under **문서 정보**.
