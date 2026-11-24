@@ -15,7 +15,7 @@ const channel = randomUUID();
 const question = "합성 질문 " + randomUUID();
 const keys = { client: generateKeyPairSync("ed25519"), worker: generateKeyPairSync("ed25519") };
 const apps = new Set();
-let server;
+let server, offline = false;
 try {
   execFileSync("git", ["init", "--quiet", "--bare", repo]);
   execFileSync("git", ["-C", repo, "config", "http.receivepack", "true"]);
@@ -24,6 +24,7 @@ try {
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
     "-addext", "subjectAltName=IP:127.0.0.1", "-out", cert, "-keyout", key], {stdio: "ignore"});
   server = createServer({cert: await readFile(cert), key: await readFile(key)}, (request, response) => {
+    if (offline) { response.writeHead(503).end(); return; }
     const url = new URL(request.url, "https://127.0.0.1");
     if (!["/test.git/info/refs", "/test.git/git-receive-pack", "/test.git/git-upload-pack"].includes(url.pathname)) {
       response.writeHead(404).end(); return;
@@ -125,10 +126,15 @@ try {
   await reopened.page.getByLabel("Cloud Copilot 질문").fill(delayed);
   await reopened.page.getByRole("button", {name:"Cloud 질문 보내기"}).click();
   await reopened.page.getByText("Cloud Copilot 답변 생성 중", {exact:true}).waitFor();
-  // Move only the client clock; the worker still finishes inside the signed request deadline.
+  // Local can see expiry while disconnected; Cloud still has time to finish.
+  offline = true;
   await reopened.app.evaluate(() => { const now = Date.now; Date.now = () => now() + 11 * 60000; });
+  await reopened.page.getByText("기한 경과 · 서버 확인 대기", {exact:true}).waitFor();
+  await reopened.page.getByText(/Git 연결 또는 채널 서명/).waitFor();
   const recheck = reopened.page.getByRole("button", {name:"기존 답변 다시 확인"});
   await recheck.waitFor();
+  offline = false;
+  await reopened.page.getByText("대기 시간이 지났습니다. 도착한 답변을 다시 확인할 수 있습니다.", {exact:true}).waitFor();
   await rm(pause);
   const request = JSON.parse(execFileSync("git", ["-C", repo, "show", "refs/heads/dynote-bridge/" + channel + "/request:packet.json"], {encoding:"utf8"})).data.value;
   const resultRef = "refs/heads/dynote-bridge/" + channel + "/job/" + request.id + ":packet.json";
@@ -146,7 +152,7 @@ try {
     assert.deepEqual(input.context, {kind:"none"}); assert.deepEqual(input.references, []); assert.deepEqual(input.dialogue, []);
     assert.equal(input.vaultAccess, false);
   }
-  console.log("PASS: Electron Cloud Ask over HTTPS Git; restart and timeout recovery; two fixture questions, two model calls, zero Local SDK calls.");
+  console.log("PASS: Electron Cloud Ask over HTTPS Git, restart and offline expiry recovery. Two fixture questions, two Cloud model calls, zero Local SDK calls.");
 } finally {
   for (const app of apps) await app.close().catch(() => {});
   if (server?.listening) await new Promise(resolve => server.close(resolve));

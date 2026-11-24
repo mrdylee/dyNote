@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { BridgeGit } from "../electron/bridge-git.mjs";
 import { BridgeClient, BridgeWorker } from "../electron/cloud-bridge.mjs";
-import { openBridge } from "../electron/bridge-policy.mjs";
+import { managedBridgePath, openBridge } from "../electron/bridge-policy.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "dynote-bridge-"));
@@ -184,4 +184,83 @@ test("absent policy retains Direct; unreadable keys or malformed policy block Cl
   assert.equal((await openBridge(file, dir)).role, "client");
   await writeFile(file, JSON.stringify({ ...policy, role: "worker", model: "auto" }));
   assert.equal((await openBridge(file, dir)).role, "blocked");
+});
+
+test("Windows policy uses the machine folder and blocks Direct on discovery failure", async () => {
+  assert.equal(managedBridgePath("win32", () => "D:\\공용 데이터"), "D:\\공용 데이터\\Dynote\\cloud-bridge.json");
+  const missing = managedBridgePath("win32", () => { throw new Error("known folder unavailable"); });
+  assert.equal(missing, null);
+  assert.equal((await openBridge(missing)).role, "blocked");
+});
+
+test("Windows native policy discovery returns an absolute machine path", { skip: process.platform !== "win32" }, () => {
+  const file = managedBridgePath();
+  assert.ok(file && path.win32.isAbsolute(file));
+  assert.equal(path.win32.basename(path.win32.dirname(file)), "Dynote");
+});
+
+test("offline expiry releases other vaults and recovers an existing timely answer", async t => {
+  const { client, local, cloud, receipt, dir } = await fixture(t);
+  let clock = Date.now(), calls = 0;
+  t.mock.method(Date, "now", () => clock);
+  const { requestId } = await client.submit("one", "original");
+  await client.tick();
+  const worker = new BridgeWorker(cloud, path.join(dir, "pending.json"), async () => { calls++; return "saved"; });
+  await worker.tick();
+  const read = t.mock.method(local, "read", async () => { throw new Error("offline"); });
+  clock += 10 * 60000;
+  const reopened = new BridgeClient(local, receipt);
+  await assert.rejects(reopened.tick(), /offline/);
+  const expired = await reopened.view("one");
+  assert.equal(expired.state, "TIMEOUT");
+  assert.equal(expired.awaitingConfirmation, true);
+  assert.equal((await reopened.view("two")).state, "IDLE");
+  await assert.rejects(reopened.recheck("two", requestId));
+  read.mock.restore();
+  await reopened.tick();
+  assert.equal((await reopened.view("one")).answer, "saved");
+  assert.equal(calls, 1);
+});
+
+test("an unsent question can be replaced after its offline deadline", async t => {
+  const { client, local, cloud } = await fixture(t);
+  let clock = Date.now();
+  t.mock.method(Date, "now", () => clock);
+  await client.submit("one", "old");
+  clock += 10 * 60000;
+  const read = t.mock.method(local, "read", async () => { throw new Error("offline"); });
+  await assert.rejects(client.tick(), /offline/);
+  const next = await client.submit("two", "new");
+  read.mock.restore();
+  await client.tick();
+  assert.equal((await cloud.read("request")).value.id, next.requestId);
+});
+
+test("worker retires an orphaned result only for a new signed request and never repeats it", async t => {
+  const { local, cloud, dir } = await fixture(t);
+  const first = { id: randomUUID(), created: Date.now(), prompt: "first" };
+  const firstTip = await local.write("request", first);
+  const calls = [];
+  const restart = () => new BridgeWorker(cloud, path.join(dir, "pending.json"), async (prompt, id, deadline) => {
+    calls.push({ id, deadline });
+    return prompt;
+  });
+  const write = cloud.write.bind(cloud);
+  cloud.write = async (...args) => {
+    if (args[1].state === "COMPLETED") throw new Error("upload offline");
+    return write(...args);
+  };
+  await assert.rejects(restart().tick(), /upload offline/);
+  cloud.write = write;
+  execFileSync("git", ["-C", local.remote, "update-ref", "-d", cloud.ref("job/" + first.id)]);
+  await assert.rejects(restart().tick(), /변경/);
+  const next = { id: randomUUID(), created: Date.now(), prompt: "next" };
+  const nextTip = await local.write("request", next, firstTip);
+  await restart().tick();
+  await restart().tick();
+  assert.equal((await local.read("job/" + next.id)).value.answer, "next");
+  await local.write("request", first, nextTip);
+  await restart().tick();
+  assert.equal(await local.read("job/" + first.id), null);
+  assert.deepEqual(calls, [first, next].map(r => ({ id: r.id, deadline: r.created + 10 * 60000 })));
 });

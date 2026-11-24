@@ -78,21 +78,22 @@ export class CopilotController {
     return { requestId: job.id };
   }
 
-  async askOnCloud({ prompt, requestId, model, login }) {
+  async askOnCloud({ prompt, requestId, model, login, deadline }) {
     if (typeof login !== "string" || !login.trim()) throw new Error("Cloud 실행 계정을 확인해 주세요.");
+    if (!Number.isSafeInteger(deadline) || Date.now() >= deadline) throw new Error("Cloud 질문 기한이 지났습니다.");
     const job = this.#startJob({ requestId, model, prompt, vaultId: "cloud-ask", mode: "chat",
-      context: { kind: "none" }, references: [], history: [], vaultAccess: false }, login);
+      context: { kind: "none" }, references: [], history: [], vaultAccess: false }, login, deadline);
     const terminal = await job.promise;
     if (terminal?.type !== "done") throw new Error("Cloud Copilot 실행 실패");
     return terminal.content;
   }
 
-  #startJob(input, login) {
+  #startJob(input, login, deadline) {
     const args = prepareRequest(input);
     if (this.closed) throw new Error("Copilot이 종료되었습니다.");
     const id = login ? "cloud:" + args.requestId : args.requestId;
     if (this.loginJob || this.jobs.has(id)) throw new Error("Copilot 작업이 진행 중입니다.");
-    const job = { id, login, canceled: false, session: null };
+    const job = { id, login, deadline, canceled: false, session: null };
     this.jobs.set(job.id, job);
     job.promise = this.run(job, args);
     return job;
@@ -165,10 +166,15 @@ export class CopilotController {
         }
         if (event.type === "session.error") job.failure = message(event.data.message);
       });
+      let timeout = args.mode === "agent" ? 240000 : 120000;
+      if (job.deadline !== undefined) {
+        timeout = Math.min(timeout, job.deadline - Date.now());
+        if (timeout <= 0) throw new Error("Cloud 질문 기한이 지났습니다.");
+      }
       const result = await job.session.sendAndWait({
         prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history }),
         ...(args.image ? { attachments: [{ type: 'blob', ...args.image, displayName: 'Schedule capture' }] } : {}),
-      }, args.mode === "agent" ? 240000 : 120000);
+      }, timeout);
       if (job.canceled) return;
       if (job.failure) throw new Error(job.failure);
       content = result?.data?.content ?? content;

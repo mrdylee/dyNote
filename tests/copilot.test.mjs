@@ -188,7 +188,7 @@ test("Cloud Ask validates the managed login inside the session and survives desk
   const response = new Promise(resolve => { finish = resolve; });
   const f = fixture({ respond: async () => { started(); return response; } });
   try {
-    const input = { prompt: "합성", requestId: "cloud-id", model: "test-model", login: "test-user" };
+    const input = { prompt: "합성", requestId: "cloud-id", model: "test-model", login: "test-user", deadline: Date.now() + 60000 };
     await assert.rejects(f.controller.askOnCloud({ ...input, login: "other-user" }));
     assert.equal(f.configurations.length, 0);
     const result = f.controller.askOnCloud(input);
@@ -198,6 +198,25 @@ test("Cloud Ask validates the managed login inside the session and survives desk
     assert.equal(f.aborted, 0);
     finish({ data: { content: "Cloud only" } });
     assert.equal(await result, "Cloud only");
+    assert.deepEqual(f.events, []);
+  } finally { await f.controller.close(); }
+});
+
+test("a Cloud Ask expiring during SDK setup cleans up without sending to the model", async t => {
+  let clock = Date.now(), sends = 0;
+  const deadline = clock + 100;
+  t.mock.method(Date, "now", () => clock);
+  const f = fixture({ respond: async () => { sends++; return { data: { content: "test" } }; } });
+  const create = f.client.createSession;
+  f.client.createSession = async options => {
+    const session = await create(options);
+    session.rpc.options.update = async () => { clock = deadline; };
+    return session;
+  };
+  try {
+    await assert.rejects(f.controller.askOnCloud({ prompt: "late", requestId: "late", model: "test-model", login: "test-user", deadline }));
+    assert.equal(sends, 0);
+    assert.deepEqual(f.deleted, ["session-1"]);
     assert.deepEqual(f.events, []);
   } finally { await f.controller.close(); }
 });

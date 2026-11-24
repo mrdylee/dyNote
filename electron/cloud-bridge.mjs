@@ -8,6 +8,11 @@ const lifetime = 10 * 60000;
 const active = state => ["SUBMITTED", "QUEUED", "RUNNING"].includes(state);
 const textFits = (value, size) => typeof value === "string" && !!value.trim() && Buffer.byteLength(value) <= size;
 
+function clientState(job) {
+  if (active(job?.state) && Date.now() >= job.request.created + lifetime) return "TIMEOUT";
+  return job?.state;
+}
+
 async function load(file) {
   try { return JSON.parse(await readFile(file, "utf8")); }
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
@@ -35,14 +40,16 @@ export class BridgeClient {
 
   async view(vaultId) {
     const job = await load(this.file);
-    if (!job || job.vaultId !== vaultId) return { state: job && active(job.state) ? "BUSY" : "IDLE" };
-    return { state: job.state, requestId: job.request.id, prompt: job.request.prompt, answer: job.answer, reason: job.reason, lastChecked: job.lastChecked };
+    const state = clientState(job);
+    if (!job || job.vaultId !== vaultId) return { state: active(state) ? "BUSY" : "IDLE" };
+    return { state, awaitingConfirmation: state !== job.state, requestId: job.request.id,
+      prompt: job.request.prompt, answer: job.answer, reason: job.reason, lastChecked: job.lastChecked };
   }
 
   submit(vaultId, prompt) {
     return this.enqueue(async () => {
       if (!vaultId || !textFits(prompt, 8192)) throw new Error("질문을 8 KiB 이내로 입력해 주세요.");
-      if (active((await load(this.file))?.state)) throw new Error("이전 Cloud 질문이 진행 중입니다.");
+      if (active(clientState(await load(this.file)))) throw new Error("이전 Cloud 질문이 진행 중입니다.");
       const request = { id: randomUUID(), created: Date.now(), prompt: prompt.trim() };
       await save(this.file, { vaultId, state: "SUBMITTED", request });
       return this.view(vaultId);
@@ -59,7 +66,7 @@ export class BridgeClient {
   recheck(vaultId, requestId) {
     return this.enqueue(async () => {
       const job = await load(this.file);
-      if (!job || job.vaultId !== vaultId || job.request.id !== requestId || job.state !== "TIMEOUT")
+      if (!job || job.vaultId !== vaultId || job.request.id !== requestId || clientState(job) !== "TIMEOUT")
         throw new Error("다시 확인할 질문을 선택해 주세요.");
       await this.update(job);
       return this.view(vaultId);
@@ -92,7 +99,7 @@ export class BridgeClient {
       }
       job.state = "QUEUED";
     }
-    if (active(job.state) && Date.now() >= deadline) job.state = "TIMEOUT";
+    job.state = clientState(job);
     job.lastChecked = Date.now();
     await save(this.file, job);
   }
@@ -103,18 +110,40 @@ export class BridgeWorker {
     Object.assign(this, { git, file, ask });
   }
 
+  async readRequest() {
+    const latest = await this.git.read("request");
+    if (!latest) return null;
+    const request = latest.value;
+    if (!uuid(request?.id) || !textFits(request.prompt, 8192) || !Number.isSafeInteger(request.created) ||
+        request.created > Date.now() + 60000 || Object.keys(request).sort().join(",") !== "created,id,prompt")
+      throw new Error("유효하지 않은 Cloud 질문입니다.");
+    return request;
+  }
+
+  retiredFile(id) {
+    return this.file + "." + id + ".retired";
+  }
+
   async publish(pending) {
     const name = "job/" + pending.result.id;
     const tip = await this.git.read(name, true);
     if (tip?.oid === pending.claim) await this.git.write(name, pending.result, pending.claim);
-    else if (!tip || digest(tip.value) !== digest(pending.result)) throw new Error("Cloud 실행 기록이 변경되었습니다.");
+    else if (!tip || digest(tip.value) !== digest(pending.result)) {
+      const next = await this.readRequest();
+      if (!next || next.id === pending.result.id || Date.now() >= next.created + lifetime)
+        throw new Error("Cloud 실행 기록이 변경되었습니다.");
+      // Keep the result and its request ID together if the old claim was retired.
+      await rename(this.file, this.retiredFile(pending.result.id));
+      return;
+    }
     await save(this.file, null);
   }
 
   async execute({ request, receipt }) {
+    const deadline = request.created + lifetime;
     const name = "job/" + request.id;
     const tip = await this.git.read(name, true);
-    if ((tip && digest(tip.value) !== digest(receipt)) || Date.now() >= request.created + lifetime) {
+    if ((tip && digest(tip.value) !== digest(receipt)) || Date.now() >= deadline) {
       await save(this.file, null);
       return;
     }
@@ -123,10 +152,10 @@ export class BridgeWorker {
     await save(this.file, { claim, result: { ...receipt, state: "FAILED", reason: "OUTCOME_UNKNOWN" } });
     let answer;
     try {
-      if (Date.now() < request.created + lifetime) answer = await this.ask(request.prompt, request.id);
+      if (Date.now() < deadline) answer = await this.ask(request.prompt, request.id, deadline);
     } catch { /* Only the signed failure code crosses the transport. */ }
     const at = Date.now();
-    const result = textFits(answer, MAX_ANSWER) && at <= request.created + lifetime
+    const result = textFits(answer, MAX_ANSWER) && at <= deadline
       ? { ...receipt, at, state: "COMPLETED", answer } : { ...receipt, at, state: "FAILED" };
     const completed = { claim, result };
     await save(this.file, completed);
@@ -139,18 +168,14 @@ export class BridgeWorker {
     try {
       const pending = await load(this.file);
       if (pending?.result) return await this.publish(pending);
-      const latest = await this.git.read("request");
-      if (!latest) return;
-      const request = latest.value;
-      if (!uuid(request?.id) || !textFits(request.prompt, 8192) || !Number.isSafeInteger(request.created) ||
-          request.created > Date.now() + 60000 || Object.keys(request).sort().join(",") !== "created,id,prompt")
-        throw new Error("유효하지 않은 Cloud 질문입니다.");
+      const request = await this.readRequest();
+      if (!request) return;
       if (pending?.receipt?.requestDigest === digest(request))
         return await this.execute({ request, receipt: pending.receipt });
       if (pending) await save(this.file, null);
       if (Date.now() >= request.created + lifetime) return;
       const name = "job/" + request.id;
-      if (await this.git.read(name, true)) return;
+      if (await this.git.read(name, true) || await load(this.retiredFile(request.id))) return;
       const receipt = { id: request.id, requestDigest: digest(request), claimId: randomUUID(), state: "RUNNING", at: Date.now() };
       await save(this.file, { receipt });
       await this.execute({ request, receipt });

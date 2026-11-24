@@ -341,9 +341,9 @@ app
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
       },
     });
-    cloudBridge = await openBridge(managedBridgePath(), app.getPath("userData"), (prompt, requestId, model, login) => {
+    cloudBridge = await openBridge(managedBridgePath(), app.getPath("userData"), request => {
       if (quitRequested) throw new Error("Cloud PC가 종료 중입니다.");
-      return copilot.askOnCloud({ prompt, requestId, model, login });
+      return copilot.askOnCloud(request);
     });
     if (cloudBridge?.service) {
       if (!app.requestSingleInstanceLock()) { app.exit(0); return; }

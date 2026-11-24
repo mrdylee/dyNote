@@ -11,6 +11,7 @@ const arch = platform === "darwin" ? "arm64" : "x64";
 const metadata = JSON.parse(await readFile("package.json", "utf8"));
 const sdkVersion = metadata.dependencies["@github/copilot-sdk"];
 const runtimePackage = `@github/copilot-sdk-${platform}-${arch}`;
+const windowsBinding = `@koromix/koffi-win32-${arch}`;
 const installTargetRuntime = async (buildPath) => {
   const runtimeRoot = path.join(buildPath, "node_modules", runtimePackage);
   // npm installs optional native dependencies only for the build host. When
@@ -25,11 +26,15 @@ const installTargetRuntime = async (buildPath) => {
       await promisify(execFile)(process.execPath, [
         process.env.npm_execpath, "install", "--no-save", "--package-lock=false",
         "--ignore-scripts", "--force", "--no-audit", "--no-fund", `${runtimePackage}@${sdkVersion}`,
+        ...(platform === "win32" ? [`${windowsBinding}@${metadata.dependencies.koffi}`] : []),
       ], { cwd: staging, maxBuffer: 4 * 1024 * 1024 });
       await cp(path.join(staging, "node_modules", runtimePackage), runtimeRoot, { recursive: true });
+      if (platform === "win32") await cp(path.join(staging, "node_modules", windowsBinding),
+        path.join(buildPath, "node_modules", windowsBinding), { recursive: true });
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
   await access(path.join(runtimeRoot, "prebuilds", `${platform}-${arch}`, platform === "win32" ? "copilot-runtime.exe" : "copilot-runtime"));
+  if (platform === "win32") await access(path.join(buildPath, "node_modules", windowsBinding, `win32_${arch}`, "koffi.node"));
   const sdkScope = path.join(buildPath, "node_modules", "@github");
   for (const name of await readdir(sdkScope)) {
     if (name.startsWith("copilot-sdk-") && `@github/${name}` !== runtimePackage) {
@@ -50,7 +55,7 @@ const outputs = await packager({
     optionsForFile: () => ({ hardenedRuntime: false, timestamp: "none" }),
   } : undefined,
   extendInfo: platform === "darwin" ? { CFBundleIconFile: "dynote.icns", NSMicrophoneUsageDescription: "선택한 보관함에 음성을 녹음하려면 마이크 사용을 허용해 주세요." } : undefined,
-  asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi}/**" },
+  asar: { unpackDir: "node_modules/{@github/copilot-sdk-*,koffi,@koromix/koffi-win32-*}/**" },
   ignore: /^\/(?:(src|public|branding|tests|docs|release|assembly|installer|scripts|output|examples|node_modules\/@napi-rs)(\/|$)|HANDOFF\.md$)/,
   afterPrune: [async ({ buildPath }) => {
     await installTargetRuntime(buildPath);

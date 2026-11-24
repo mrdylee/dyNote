@@ -61,6 +61,7 @@ export default function CloudAskPanel({ api, session, vaultId, visible, busy, re
     </div>
     <p role="status" className="copilot-send-status">{job?.reason === "OUTCOME_UNKNOWN"
       ? "Cloud 실행이 중단되어 답변 생성 여부를 확인할 수 없습니다. 다시 보내면 새 요청으로 처리됩니다."
+      : job?.awaitingConfirmation ? "기한 경과 · 서버 확인 대기"
       : vaultId ? (labels[job?.state] || "작업 확인 중…") : "질문을 보낼 보관함을 열어 주세요."}</p>
     {job?.state === "TIMEOUT" && <button type="button" className="text-action" disabled={sending || busy} onClick={() => run(true)}>기존 답변 다시 확인</button>}
     {(error || refreshError) && <p role="alert" className="copilot-error">{error || refreshError}</p>}
