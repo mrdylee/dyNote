@@ -5,6 +5,7 @@ import os from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { PersonalSync, installDevice } from "../core/personal-sync.mjs";
+import { conflictFolder } from "../core/personal-sync-store.mjs";
 import { runGit } from "../core/git-backup.mjs";
 
 async function fixture(t) {
@@ -70,6 +71,77 @@ test("independent working copies register, hand off Markdown and stable PDF, and
   assert.equal(await b.service.disk.head(), head);
   assert.equal(await a.service.disk.head(), head);
   assert.equal((await a.service.store.git(["status", "--porcelain"])).stdout, "");
+});
+
+test("a CRLF checkout registers, receives device changes, and still rejects edited registration data", async (t) => {
+  const { pc, bare } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  await local.sync({ register: true });
+  // Reproduce a Git for Windows checkout in the existing Cloud vault.
+  await cloud.service.store.git(["fetch", "--", bare, "main"]);
+  await cloud.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  const record = `.dynote-sync/devices/${local.service.deviceId}.json`;
+  assert.match((await cloud.read(record)).toString(), /\r\n$/);
+  const registered = await cloud.sync({ register: true });
+  assert.deepEqual(registered.devices.map(d => d.name).sort(), ["Cloud", "Local"]);
+  const attachment = "File Storage/test.png", bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  await mkdir(path.join(local.root, "File Storage"));
+  await local.write(attachment, bytes);
+  local.cfg.deviceName = "Local renamed";
+  await local.sync({ register: true });
+  const received = await cloud.sync();
+  assert.equal(received.phase, "synced");
+  assert.equal(JSON.parse(await cloud.read(record)).name, "Local renamed");
+  assert.deepEqual(await cloud.read(attachment), bytes);
+  const edited = JSON.stringify({ ...JSON.parse(await cloud.read(record)), active: false }) + "\r\n";
+  await cloud.write(record, edited);
+  await assert.rejects(cloud.sync({ force: false }), /동기화 관리 파일/);
+  assert.equal((await cloud.read(record)).toString(), edited);
+});
+
+test("a CRLF clone of existing conflict history can join and preserves original versions", async t => {
+  const { pc, bare } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  const file = "meeting.md";
+  await local.write(file, "before\n");
+  await local.write("photo.png", Buffer.from([137, 0, 10]));
+  await local.sync({ register: true });
+  await cloud.sync({ register: true });
+  await local.write(file, "local edit\n");
+  await cloud.write(file, "cloud edit\n");
+  await local.write("photo.png", Buffer.from([137, 0, 1, 10]));
+  await cloud.write("photo.png", Buffer.from([137, 0, 2, 10]));
+  await local.sync();
+  await cloud.sync();
+  const fresh = await pc("New PC");
+  await fresh.service.store.git(["fetch", "--", bare, "main"]);
+  await fresh.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  const versions = (await cloud.service.versions(file)).versions;
+  const state = await fresh.sync({ register: true });
+  assert.equal(state.devices.length, 3);
+  assert.equal((await fresh.sync({ force: false })).phase, "synced");
+  assert.equal((await fresh.service.store.tree(await fresh.service.disk.head())).get(file).oid,
+    (await cloud.service.store.tree(await cloud.service.disk.head())).get(file).oid);
+  for (const { commit } of versions)
+    assert.deepEqual(await fresh.service.preview(file, commit), await cloud.service.preview(file, commit));
+  await cloud.write("new.md", "available");
+  await cloud.sync();
+  await fresh.sync();
+  assert.equal((await fresh.read("new.md")).toString(), "available");
+  const files = await fresh.service.store.tree(await fresh.service.disk.head());
+  const body = [...files.keys()].find(name => name.startsWith(conflictFolder("photo.png")) && name.endsWith(".blob"));
+  const original = await fresh.read(body);
+  await fresh.write(body, Buffer.concat([original.subarray(0, -1), Buffer.from("\r\n")]));
+  await assert.rejects(fresh.sync({ force: false }), error => error.message.includes(body));
+  await fresh.write(body, original);
+  const unknown = ".dynote-sync/devices/unknown.json";
+  await fresh.write(unknown, "{}\n");
+  await assert.rejects(fresh.sync({ force: false }), error => error.message.includes(unknown));
+  await rm(path.join(fresh.root, unknown));
+  const record = [...files.keys()].find(name => name.startsWith(".dynote-sync/conflicts/") && name.endsWith(".json"));
+  await fresh.write(record, "{}\r\n");
+  await assert.rejects(fresh.sync(), error => error.message.includes(record));
+  assert.equal((await fresh.read(record)).toString(), "{}\r\n");
 });
 
 test("remote receive retains a displaced open writer and publishes the late bytes as a separate version", async (t) => {

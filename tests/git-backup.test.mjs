@@ -52,6 +52,19 @@ test("personal setup verifies the remote branch and shared history without repla
   assert.equal(await readFile(path.join(other, "draft.md"), "utf8"), "my draft");
 });
 
+test("the first repository probe identifies ownership rejection and leaves trust settings intact", async t => {
+  const { dir, root, cfg, git } = await fixture();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  git(root, "init", "--initial-branch=main");
+  const before = await readFile(cfg);
+  const run = (cwd, args, options) => runGit(cwd, args, { ...options, env: {
+    ...process.env, LC_ALL: "C", GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: "1"
+  } });
+  await assert.rejects(new GitBackup(root, run).repository(), error =>
+    error.message.includes("소유권") && error.message.includes(root) && error.message.includes("safe.directory"));
+  assert.deepEqual(await readFile(cfg), before);
+});
+
 test("legacy minute settings migrate to a daily schedule", () => {
   const normalized = validateGitConfig(config);
   assert.equal(normalized.schedule, "daily");

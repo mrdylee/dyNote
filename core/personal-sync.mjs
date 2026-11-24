@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { validateGitConfig } from "./git-backup.mjs";
 import { validPersonalFilePath } from "./vault.mjs";
-import { PersonalSyncStore, deviceRecord, devicePath, syncPrefix, conflictFolder } from "./personal-sync-store.mjs";
+import { PersonalSyncStore, deviceRecord, devicePath, isSyncDocumentText, isSyncRecordText, textConflictFolders, syncPrefix, conflictFolder } from "./personal-sync-store.mjs";
 import { checkTreeChanges, chooseVersion, integrate, normalizePublished } from "./personal-sync-merge.mjs";
 import { textChoices } from "./personal-sync-text.mjs";
 import { scanLinks, resolvePath, createLinkIndex } from "./links.mjs";
@@ -75,9 +75,34 @@ export class PersonalSync {
     const format = (await this.store.git(["rev-parse", "--show-object-format"])).stdout.trim();
     this.disk = new PersonalSyncDisk(this.store, format, this.limit);
   }
-  async dirty() {
+  async dirty(head) {
     const list = (await this.store.git(["ls-files", "-m", "-d", "-o", "--exclude-standard", "-z"])).stdout;
-    return [...new Set(list.split("\0").filter(Boolean))];
+    const paths = [...new Set(list.split("\0").filter(Boolean))];
+    if (!paths.some(name => name.startsWith(syncPrefix) || isSyncDocumentText(name))) return paths;
+    const files = await this.store.tree(head);
+    const folders = paths.some(name => name.startsWith(syncPrefix) && name.endsWith(".blob"))
+      ? textConflictFolders((await this.store.metadata(files)).groups) : new Set();
+    const changes = [];
+    for (const name of paths) {
+      const managed = name.startsWith(syncPrefix), entry = files.get(name);
+      if (entry && (isSyncDocumentText(name) || isSyncRecordText(name, folders))) {
+        const current = await this.disk.read(name).catch(error => {
+          if (managed) throw error;
+          return null; // Let capture report pending reads of ordinary documents.
+        });
+        if (await this.disk.matchesBlob(name, current, entry.oid, folders)) {
+          if (!managed) continue;
+          const diff = await this.store.git(
+            ["diff", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-cr-at-eol", head, "--", name],
+            { allow: [0, 1] }
+          );
+          if (!diff.code) continue; // A mode or type change still needs attention.
+        }
+      }
+      if (managed) throw new Error("동기화 관리 파일의 변경을 확인해 주세요: " + name);
+      changes.push(name);
+    }
+    return changes;
   }
   async previewZip() {
     const result = await this.store.git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
@@ -336,14 +361,14 @@ export class PersonalSync {
       .digest("hex");
     const ref = "refs/dynote-sync/remotes/" + remoteKey;
     let seen = await this.disk.head(ref);
-    const dirty = await this.dirty();
+    const dirty = await this.dirty(head);
     if (dirty.some(validPersonalFilePath)) this.firstDirty ??= this.now();
     else {
       this.firstDirty = null;
       this.waiting.clear();
     }
     const checkpoint = async (registerNow = false) => {
-      await this.capture(head, device, config, await this.dirty(), registerNow);
+      await this.capture(head, device, config, await this.dirty(head), registerNow);
       const done = await this.resume(device, config);
       head = await this.disk.head();
       this.firstDirty = this.waiting.size ? this.firstDirty : null;
@@ -383,7 +408,7 @@ export class PersonalSync {
         await this.store.git(["update-ref", ref, remote]);
         seen = remote;
       }
-      if (remote && !head && (await this.dirty()).some(validPersonalFilePath))
+      if (remote && !head && (await this.dirty(head)).some(validPersonalFilePath))
         throw new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. 기존 Git 저장소에서 가져오기로 빈 폴더를 선택해 주세요.");
       if (remote !== head && head && this.firstDirty !== null && !(await checkpoint())) return status(true);
       const normalized = await normalizePublished(this.store, remote, device, config);

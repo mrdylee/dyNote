@@ -43,6 +43,18 @@ function metaType(name) {
   return null;
 }
 
+export const isSyncDocumentText = name => /\.(?:md|canvas|base|html?)$/i.test(name) && validPersonalFilePath(name);
+
+export function textConflictFolders(groups) {
+  return new Set([...groups.keys()].filter(isSyncDocumentText).map(conflictFolder));
+}
+
+export function isSyncRecordText(name, folders) {
+  const kind = metaType(name);
+  if (kind === "body") return folders.has(name.slice(0, name.lastIndexOf("/") + 1));
+  return kind !== null;
+}
+
 export function assertSyncEntry(name, entry) {
   const kind = metaType(name);
   if (!kind && !validPersonalFilePath(name)) throw new Error("동기화 범위 밖의 경로입니다: " + name);

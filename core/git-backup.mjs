@@ -27,12 +27,16 @@ export function runGit(root, args, { input, env = process.env, allow = [0], enco
   const gitEnv = { ...env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"]) delete gitEnv[key];
   if (privateIndex) gitEnv.GIT_INDEX_FILE = privateIndex;
+  const checkingRoot = args[0] === "rev-parse" && args[1] === "--show-toplevel";
+  if (checkingRoot) Object.assign(gitEnv, { LC_ALL: "C", LANGUAGE: "C" });
   return new Promise((resolve, reject) => {
     const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, "-c", "core.autocrlf=false", "-c", "submodule.recurse=false", ...args], {
       cwd: root, windowsHide: true, timeout: 60000, maxBuffer: 32 * 1024 * 1024, encoding,
       env: { ...gitEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes", GIT_LITERAL_PATHSPECS: "1" },
     }, (error, stdout, stderr) => {
       const code = error?.code ?? 0;
+      if (checkingRoot && code === 128 && /^fatal: detected dubious ownership in repository at /m.test(stderr))
+        return reject(Object.assign(new Error(`Git이 보관함의 소유권을 확인하지 못했습니다. 폴더: ${root}\n해당 폴더에서 Git Bash를 열고 git status를 실행하세요. Git이 표시한 경로가 본인의 보관함과 일치하면 안내된 safe.directory 명령을 실행한 뒤 다시 시도해 주세요.`), { code }));
       if (allow.includes(code)) return resolve({ code, stdout });
       const message = code === "ENOENT" ? "Git을 설치하고 Dynote를 다시 시작해 주세요."
         : error?.killed ? "Git 연결 시간이 초과되었습니다. 로컬 문서는 저장되어 있습니다."

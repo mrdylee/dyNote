@@ -15,7 +15,7 @@ import {
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { assertSyncEntry, blobLimit, syncPrefix } from "./personal-sync-store.mjs";
+import { assertSyncEntry, blobLimit, isSyncDocumentText, isSyncRecordText, textConflictFolders, syncPrefix } from "./personal-sync-store.mjs";
 import { checkTreeChanges } from "./personal-sync-merge.mjs";
 
 export const batchLimit = 512 * 1024 * 1024;
@@ -105,6 +105,14 @@ export class PersonalSyncDisk {
   }
   async read(name) {
     return readStable(await target(this.store.root, name), this.format);
+  }
+  async matchesBlob(name, current, oid, folders) {
+    if ((current?.oid ?? null) === oid) return true;
+    if (!current || !oid || !(isSyncRecordText(name, folders) || isSyncDocumentText(name)) || !current.bytes.includes("\r\n")) return false;
+    const stored = await this.store.blob(oid);
+    // Compare the complete Windows checkout representation without decoding or rewriting either file.
+    if (stored.includes(13) || stored.includes(0) || stored.length >= current.bytes.length) return false;
+    return stored.toString("latin1").replaceAll("\n", "\r\n") === current.bytes.toString("latin1");
   }
   async head(ref = "HEAD") {
     return (await this.store.git(["rev-parse", "--verify", "-q", ref], { allow: [0, 1] })).stdout.trim() || null;
@@ -201,6 +209,13 @@ export class PersonalSyncDisk {
     const job = await this.job();
     if (!job) return { changed: [] };
     const captured = new Set(job.captured);
+    const folders = new Set();
+    if (job.records.some(row => row.name.startsWith(syncPrefix) && row.name.endsWith(".blob"))) {
+      for (const ref of [job.previous, job.next]) {
+        const { groups } = await this.store.metadata(await this.store.tree(ref));
+        for (const folder of textConflictFolders(groups)) folders.add(folder);
+      }
+    }
     let used = 0;
     if ((await this.head()) !== job.previous && (await this.head()) !== job.next)
       throw new Error("적용 중 브랜치가 변경되었습니다.");
@@ -214,12 +229,12 @@ export class PersonalSyncDisk {
       const file = await target(this.store.root, row.name, true);
       const backup = path.join(this.dir, row.saved);
       const current = await readStable(file, this.format);
-      if ((current?.oid ?? null) === row.after) {
+      if (await this.matchesBlob(row.name, current, row.after, folders)) {
         row.verified = current?.signature ?? null;
         continue;
       }
       const displaced = await lstat(backup).catch(missing);
-      if ((current?.oid ?? null) !== row.before && !(displaced && !current)) {
+      if (!(await this.matchesBlob(row.name, current, row.before, folders)) && !(displaced && !current)) {
         if (row.name.startsWith(syncPrefix)) throw new Error("공유 메타데이터가 외부에서 변경되었습니다.");
         // Reconcile this independent input against its actual parent on the next pass.
         return {
@@ -233,7 +248,7 @@ export class PersonalSyncDisk {
           await atomicJson(backup + ".source.json", { name: row.name, parent: job.previous, oid: row.before });
         await rename(file, backup);
         const observed = await readStable(backup, this.format);
-        if (observed.oid !== row.before)
+        if (!(await this.matchesBlob(row.name, observed, row.before, folders)))
           return {
             diverged: { name: row.name, entry: await this.store.storeBytes(observed.bytes), job },
             changed: [],
@@ -260,7 +275,7 @@ export class PersonalSyncDisk {
         }
       }
       const applied = await readStable(file, this.format);
-      if ((applied?.oid ?? null) === row.after) row.verified = applied?.signature ?? null;
+      if (await this.matchesBlob(row.name, applied, row.after, folders)) row.verified = applied?.signature ?? null;
       used += row.size;
     }
     // A completed chunk might have been edited while the application was stopped.
@@ -270,7 +285,7 @@ export class PersonalSyncDisk {
       const info = await lstat(file, { bigint: true }).catch(missing);
       if (row.verified === (info ? signature(info) : null)) continue;
       const current = await readStable(file, this.format);
-      if ((current?.oid ?? null) !== row.after) {
+      if (!(await this.matchesBlob(row.name, current, row.after, folders))) {
         if (row.name.startsWith(syncPrefix)) throw new Error("수신 도중 공유 메타데이터가 변경되었습니다.");
         job.offset = job.records.indexOf(row);
         return {

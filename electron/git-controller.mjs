@@ -255,7 +255,7 @@ export class GitController {
       return this.publish({ ...result, ...(revision !== this.revision ? { phase: "pending", message: "새 변경사항 Git 저장 대기 중" } : {}) });
     } catch (error) {
       this.retryAfter = this.now().getTime() + 10 * 60 * 1000;
-      const message=this.current.config?.mode==="personal-sync" ? "기기 간 동기화 대기 · "+error.message : error.message;
+      const message=this.current.config?.mode==="personal-sync" ? "기기 간 동기화 중단 · "+error.message : error.message;
       return this.publish({ phase: "error", message });
     }
   }
