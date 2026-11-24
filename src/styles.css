@@ -1850,6 +1850,8 @@ kbd {
 .theme-swatch { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(90deg, var(--swatch) 60%, color-mix(in srgb, var(--swatch) 22%, white) 60%); }
 .theme-options input[type="radio"] { flex: none; width: 15px; height: 15px; margin: 0 0 0 auto; padding: 0; accent-color: var(--swatch); cursor: pointer; }
 .settings-tabs + .settings-section { border-top: 0; margin-top: 0; }
+.cloud-repository-settings p { overflow-wrap: anywhere; }
+.cloud-repository-settings select { max-width: 100%; }
 .conversation-document { padding: 0 22px 22px; }
 .document-draft-panel { flex:1; min-height:0; overflow:auto; padding:24px; }
 .document-draft-panel[hidden] { display:none; }

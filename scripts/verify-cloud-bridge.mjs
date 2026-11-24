@@ -17,8 +17,11 @@ const keys = { client: generateKeyPairSync("ed25519"), worker: generateKeyPairSy
 const apps = new Set();
 let server, offline = false;
 try {
-  execFileSync("git", ["init", "--quiet", "--bare", repo]);
-  execFileSync("git", ["-C", repo, "config", "http.receivepack", "true"]);
+  for (const name of ["test.git", "default.git", "notes.git"]) {
+    const mailbox = path.join(root, name);
+    execFileSync("git", ["init", "--quiet", "--bare", mailbox]);
+    execFileSync("git", ["-C", mailbox, "config", "http.receivepack", "true"]);
+  }
   await writeFile(gitConfig, "");
   const cert = path.join(root, "test-cert.pem"), key = path.join(root, "test-key.pem");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
@@ -26,7 +29,7 @@ try {
   server = createServer({cert: await readFile(cert), key: await readFile(key)}, (request, response) => {
     if (offline) { response.writeHead(503).end(); return; }
     const url = new URL(request.url, "https://127.0.0.1");
-    if (!["/test.git/info/refs", "/test.git/git-receive-pack", "/test.git/git-upload-pack"].includes(url.pathname)) {
+    if (!/^\/(test|default|notes)\.git\/(info\/refs|git-receive-pack|git-upload-pack)$/.test(url.pathname)) {
       response.writeHead(404).end(); return;
     }
     const cgi = spawn("git", ["http-backend"], {env: { ...process.env, GIT_PROJECT_ROOT: root, GIT_HTTP_EXPORT_ALL: "1",
@@ -48,16 +51,21 @@ try {
   });
   await new Promise((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
   const remote = "https://127.0.0.1:" + server.address().port + "/test.git";
+  const defaultRemote = remote.replace("/test.git", "/default.git");
+  const noteRemote = remote.replace("/test.git", "/notes.git");
   for (const role of ["client", "worker"]) {
     const dir = path.join(root, role);
     const vault = path.join(dir, "vault"), profile = path.join(dir, "profile");
     await mkdir(vault, { recursive: true }); await mkdir(profile);
+    execFileSync("git", ["init", "--quiet", vault]);
+    execFileSync("git", ["-C", vault, "remote", "add", "origin", noteRemote]);
     await writeFile(path.join(vault, "Home.md"), "# 원본\nprivate-canary\n");
     await writeFile(path.join(profile, "settings.json"), JSON.stringify({ vaultRoot: vault, vaultPurposes: { [vault]: "personal" } }));
     const privateKeyFile = path.join(dir, "private.pem"), peerPublicKeyFile = path.join(dir, "peer.pem");
     await writeFile(privateKeyFile, keys[role].privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
     await writeFile(peerPublicKeyFile, keys[role === "client" ? "worker" : "client"].publicKey.export({ type: "spki", format: "pem" }));
-    await writeFile(path.join(dir, "managed.json"), JSON.stringify({ channel, role, remote, privateKeyFile, peerPublicKeyFile, model: "auto", copilotLogin: "fixture" }));
+    await writeFile(path.join(dir, "managed.json"), JSON.stringify({ channel, role, remote: defaultRemote,
+      additionalRemotes: [noteRemote, remote], privateKeyFile, peerPublicKeyFile, model: "auto", copilotLogin: "fixture" }));
     await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "bridge-ui-fixture", version: "0.0.1", main: "main.cjs" }));
     // Only the disposable launcher redirects the managed policy and replaces SDK inference.
     await writeFile(path.join(dir, "main.cjs"), `
@@ -110,8 +118,23 @@ try {
     await tab.click();
     await page.getByLabel("Cloud Copilot 질문").waitFor();
   }
-  await launch("worker");
+  async function chooseMailbox(page) {
+    await page.getByRole("button", {name:"공간 전환·관리", exact:true}).click();
+    const settings = page.getByRole("dialog", {name:"설정", exact:true});
+    await settings.getByRole("button", {name:"Copilot 중계 Git", exact:true}).click();
+    const chooser = settings.getByLabel("승인된 중계 저장소");
+    assert.equal(await chooser.inputValue(), defaultRemote);
+    const save = settings.getByRole("button", {name:"중계 저장소 적용", exact:true});
+    await chooser.selectOption(noteRemote); await save.click();
+    await settings.getByRole("alert").filter({hasText:"노트 Git"}).waitFor();
+    await chooser.selectOption(remote); await save.click();
+    await settings.getByRole("status").filter({hasText:"이 PC에 적용"}).waitFor();
+    await settings.getByRole("button", {name:"닫기", exact:true}).click();
+  }
+  const worker = await launch("worker");
+  await chooseMailbox(worker.page);
   const local = await launch("client");
+  await chooseMailbox(local.page);
   await openPanel(local.page);
   await local.page.getByLabel("Cloud Copilot 질문").fill(question);
   await local.page.getByRole("button", {name:"Cloud 질문 보내기"}).click();
@@ -136,7 +159,10 @@ try {
   offline = false;
   await reopened.page.getByText("대기 시간이 지났습니다. 도착한 답변을 다시 확인할 수 있습니다.", {exact:true}).waitFor();
   await rm(pause);
-  const request = JSON.parse(execFileSync("git", ["-C", repo, "show", "refs/heads/dynote-bridge/" + channel + "/request:packet.json"], {encoding:"utf8"})).data.value;
+  const packet = JSON.parse(execFileSync("git", ["-C", repo, "show", "refs/heads/dynote-bridge/" + channel + "/request:packet.json"], {encoding:"utf8"})).data;
+  assert.equal(packet.v, 2);
+  assert.match(packet.repository, /^[a-f0-9]{64}$/);
+  const request = packet.value;
   const resultRef = "refs/heads/dynote-bridge/" + channel + "/job/" + request.id + ":packet.json";
   const until = Date.now() + 30000;
   while (JSON.parse(execFileSync("git", ["-C", repo, "show", resultRef], {encoding:"utf8"})).data.value.state !== "COMPLETED") {
@@ -148,6 +174,8 @@ try {
   await assert.rejects(readFile(path.join(root, "client", "unexpected-sdk")), {code:"ENOENT"});
   const calls = (await readFile(path.join(root, "worker", "calls"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(calls.map(input => input.request), [question, delayed]);
+  for (const name of ["notes.git", "default.git"])
+    assert.equal(execFileSync("git", ["-C", path.join(root, name), "for-each-ref"], {encoding:"utf8"}), "");
   for (const input of calls) {
     assert.deepEqual(input.context, {kind:"none"}); assert.deepEqual(input.references, []); assert.deepEqual(input.dialogue, []);
     assert.equal(input.vaultAccess, false);

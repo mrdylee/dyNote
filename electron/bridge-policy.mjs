@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { BridgeGit, digest, uuid } from "./bridge-git.mjs";
 import { BridgeClient, BridgeWorker } from "./cloud-bridge.mjs";
+import { BridgeRepositories } from "./bridge-repositories.mjs";
 import { validateGitConfig } from "../core/git-backup.mjs";
 
 function windowsProgramData() {
@@ -30,7 +31,7 @@ export function managedBridgePath(platform = process.platform, getProgramData = 
   return "/etc/dynote/cloud-bridge.json";
 }
 
-export async function openBridge(file, dataRoot, ask) {
+export async function openBridge(file, dataRoot, ask, getNoteRemotes = async () => []) {
   if (!file) return { role: "blocked", error: "Windows의 공용 관리 설정 위치를 확인할 수 없습니다." };
   let bytes;
   try { bytes = await readFile(file, "utf8"); }
@@ -42,21 +43,31 @@ export async function openBridge(file, dataRoot, ask) {
     const policy = JSON.parse(bytes);
     if (!["client", "worker"].includes(policy.role) || !uuid(policy.channel) ||
         !path.isAbsolute(policy.privateKeyFile) || !path.isAbsolute(policy.peerPublicKeyFile)) throw new Error();
-    const { remote } = validateGitConfig({ remote: policy.remote, branch: "main" });
-    if (!remote.startsWith("https://")) throw new Error();
+    const extra = policy.additionalRemotes ?? [];
+    if (!Array.isArray(extra)) throw new Error();
+    const remotes = [...new Set([policy.remote, ...extra].map(address => {
+      const { remote } = validateGitConfig({ remote: address, branch: "main" });
+      if (!remote.startsWith("https://")) throw new Error();
+      return remote;
+    }))];
     const privateKey = createPrivateKey(await readFile(policy.privateKeyFile));
     const peerKey = createPublicKey(await readFile(policy.peerPublicKeyFile));
     if ([privateKey, peerKey].some(key => key.asymmetricKeyType !== "ed25519") || createPublicKey(privateKey).equals(peerKey)) throw new Error();
     const keyId = key => key.export({ format: "der", type: "spki" }).toString("base64");
-    const route = digest([policy.channel, remote, keyId(createPublicKey(privateKey)), keyId(peerKey)]);
-    const directory = path.join(dataRoot, "cloud-bridge", policy.role, route);
-    const git = new BridgeGit({ directory: path.join(directory, "cache.git"), remote, channel: policy.channel, privateKey, peerKey });
+    const keys = [keyId(createPublicKey(privateKey)), keyId(peerKey)];
+    const root = path.join(dataRoot, "cloud-bridge", policy.role);
     if (policy.role === "worker" && (typeof policy.model !== "string" || !policy.model.trim() || policy.model.length > 200 ||
         typeof policy.copilotLogin !== "string" || !policy.copilotLogin.trim())) throw new Error();
-    const service = policy.role === "client" ? new BridgeClient(git, path.join(directory, "last-question.json"))
-      : new BridgeWorker(git, path.join(directory, "pending-result.json"), (prompt, requestId, deadline) =>
-        ask({ prompt, requestId, deadline, model: policy.model, login: policy.copilotLogin }));
-    return { role: policy.role, service, error: "" };
+    const createService = remote => {
+      const directory = path.join(root, digest([policy.channel, remote, ...keys]));
+      const git = new BridgeGit({ directory: path.join(directory, "cache.git"), remote, channel: policy.channel, privateKey, peerKey,
+        repositoryScope: remote === remotes[0] ? undefined : digest(remote) });
+      return policy.role === "client" ? new BridgeClient(git, path.join(directory, "last-question.json"))
+        : new BridgeWorker(git, path.join(directory, "pending-result.json"), (prompt, requestId, deadline) =>
+          ask({ prompt, requestId, deadline, model: policy.model, login: policy.copilotLogin }));
+    };
+    return await new BridgeRepositories({ role: policy.role, remotes, getNoteRemotes, createService,
+      file: path.join(root, digest([policy.channel, ...keys]) + ".json") }).open();
   } catch {
     return { role: "blocked", error: "Cloud Bridge의 관리 설정 또는 역할 서명 키를 확인해 주세요." };
   }

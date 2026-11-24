@@ -11,7 +11,7 @@ const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-vault-entr
 const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1" };
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
 const remote = "https://notes.example.invalid/personal.git", bare = path.join(root, "personal.git");
-let app, page;
+let app, page, checkedCloudSettings = false;
 async function launch(name) {
   const profile = path.join(root,name); await mkdir(profile);
   app = await _electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || createRequire(import.meta.url)("electron"),
@@ -20,6 +20,15 @@ async function launch(name) {
   page.setDefaultTimeout(15000);
   await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].setSize(1050,700));
   await page.getByRole("button",{name:"공간 전환·관리",exact:true}).click();
+  if (!checkedCloudSettings) {
+    const settings = page.getByRole("dialog", {name:"설정", exact:true});
+    await settings.getByRole("button", {name:"Copilot 중계 Git", exact:true}).click();
+    await settings.getByText(/현재 Direct Copilot을 사용합니다/).waitFor();
+    await settings.getByRole("button", {name:"노트 백업 설정 열기", exact:true}).click();
+    await settings.getByRole("navigation", {name:"백업 작업"}).waitFor();
+    await settings.getByRole("button", {name:"보관함", exact:true}).click();
+    checkedCloudSettings = true;
+  }
   await page.getByRole("button",{name:"개인 노트",exact:true}).waitFor();
   const entries=page.locator(".vault-entry-list button");
   assert.equal(await entries.count(),2);

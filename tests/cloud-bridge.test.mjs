@@ -193,6 +193,40 @@ test("Windows policy uses the machine folder and blocks Direct on discovery fail
   assert.equal((await openBridge(missing)).role, "blocked");
 });
 
+test("managed repository selection persists independently, respects note remotes and holds outstanding jobs", async t => {
+  const { dir, a, b } = await fixture(t);
+  const file = path.join(dir, "policy.json"), primary = "https://git.example.test/team/ask.git", second = "https://git.example.test/team/second.git";
+  const policy = { role: "client", channel: randomUUID(), remote: primary, additionalRemotes: [second],
+    privateKeyFile: path.join(dir, "private"), peerPublicKeyFile: path.join(dir, "public") };
+  await writeFile(policy.privateKeyFile, a.privateKey.export({ format: "pem", type: "pkcs8" }));
+  await writeFile(policy.peerPublicKeyFile, b.publicKey.export({ format: "pem", type: "spki" }));
+  await writeFile(file, JSON.stringify(policy));
+  let notes = ["git@git.example.test:Team/Second.git"];
+  const reopen = () => openBridge(file, dir, undefined, async () => notes);
+  let bridge = await reopen();
+  assert.equal(bridge.settings().remote, primary);
+  assert.deepEqual(bridge.settings().remotes, [primary, second]);
+  await assert.rejects(bridge.select(second), /노트/);
+  await assert.rejects(bridge.select("https://git.example.test/team/unknown.git"), /승인/);
+  assert.throws(() => bridge.checkNoteRemote("ssh://git@git.example.test/team/Ask"), /중계/);
+  notes = [];
+  await bridge.select(second);
+  bridge = await reopen();
+  assert.equal(bridge.settings().remote, second);
+  await bridge.use("submit", "vault", "pending question");
+  await assert.rejects(bridge.select(primary), /진행|작업/);
+  notes = [second];
+  bridge = await reopen();
+  assert.match(bridge.settings().error, /노트/);
+  await assert.rejects(bridge.use("tick"), /노트/);
+  await writeFile(file, JSON.stringify({ ...policy, additionalRemotes: [] }));
+  bridge = await reopen();
+  assert.equal(bridge.settings().remote, "");
+  await assert.rejects(bridge.use("submit", "vault", "stale selection"), /승인/);
+  await bridge.select(primary);
+  assert.equal((await reopen()).settings().remote, primary);
+});
+
 test("Windows native policy discovery returns an absolute machine path", { skip: process.platform !== "win32" }, () => {
   const file = managedBridgePath();
   assert.ok(file && path.win32.isAbsolute(file));

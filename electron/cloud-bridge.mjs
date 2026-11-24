@@ -38,6 +38,8 @@ export class BridgeClient {
     return result;
   }
 
+  async hasPending() { return active(clientState(await load(this.file))); }
+
   async view(vaultId) {
     const job = await load(this.file);
     const state = clientState(job);
@@ -109,6 +111,8 @@ export class BridgeWorker {
   constructor(git, file, ask) {
     Object.assign(this, { git, file, ask });
   }
+
+  async hasPending() { return !!await load(this.file); }
 
   async readRequest() {
     const latest = await this.git.read("request");

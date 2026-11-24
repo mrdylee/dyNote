@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld(
     aiRemoveExtension: args => call("ai-remove-extension", args),
     copilotStatus: () => call("copilot-status"),
     cloudAskView: args => call("copilot-bridge-view", args),
+    cloudAskSettings: () => call("copilot-bridge-settings"),
+    selectCloudAskRepository: remote => call("copilot-bridge-select", { remote }),
     cloudAskSubmit: args => call("copilot-bridge-submit", args),
     cloudAskRecheck: args => call("copilot-bridge-recheck", args),
     codexStatus: () => call("codex-status"),

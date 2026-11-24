@@ -33,6 +33,7 @@ import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { PluginController } from "./plugin-controller.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
 import { managedBridgePath, openBridge } from "./bridge-policy.mjs";
+import { noteFolderRemotes, noteRemotes } from "./bridge-repositories.mjs";
 import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
@@ -266,6 +267,8 @@ function sendAi(controller, args) {
 
 async function selectVault(root, purpose) {
   const canonical = await registry.checkConnection(root, purpose);
+  if (cloudBridge?.checkNoteRemote && !registry.roots.includes(canonical))
+    for (const remote of await noteFolderRemotes(canonical)) cloudBridge.checkNoteRemote(remote);
   await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
   const existing = [...openedVaults.values()].find(entry => entry.vault.root === canonical);
   const selected = existing?.vault ?? await Vault.open(canonical, recovery, purpose ?? registry.purposes[canonical]);
@@ -344,13 +347,13 @@ app
     cloudBridge = await openBridge(managedBridgePath(), app.getPath("userData"), request => {
       if (quitRequested) throw new Error("Cloud PC가 종료 중입니다.");
       return copilot.askOnCloud(request);
-    });
-    if (cloudBridge?.service) {
+    }, () => noteRemotes(app.getPath("userData"), registry.roots));
+    if (cloudBridge?.settings) {
       if (!app.requestSingleInstanceLock()) { app.exit(0); return; }
       let timer, stopped = false;
       const poll = async () => {
-        if (!quitRequested) {
-          try { await cloudBridge.service.tick(); cloudBridge.error = ""; cloudBridge.lastChecked = Date.now(); }
+        if (!quitRequested && cloudBridge.service && !cloudBridge.changing) {
+          try { await cloudBridge.use("tick"); cloudBridge.error = ""; cloudBridge.lastChecked = Date.now(); }
           catch { cloudBridge.error = "Git 연결 또는 채널 서명을 확인해 주세요. 자동으로 다시 확인합니다."; }
         }
         if (!stopped) timer = setTimeout(poll, 5000);
@@ -572,24 +575,30 @@ app
         return selected.canceled ? aiExtensions.snapshot() : aiExtensions.addSkills(selected.filePaths[0]);
       }),
       "ai-remove-extension": args => changeAiExtensions(() => aiExtensions.remove(args)),
+      "copilot-bridge-settings": () => cloudBridge?.settings?.() ?? {
+        role: cloudBridge?.role || "direct", remote: "", remotes: [], error: cloudBridge?.error || "" },
+      "copilot-bridge-select": args => {
+        if (!cloudBridge?.select) throw new Error("관리자의 Cloud Bridge 설정이 필요합니다.");
+        return cloudBridge.select(args?.remote);
+      },
       "copilot-status": () => remoteOnly()
-        ? { bridge: true, authenticated: false, models: [], error: cloudBridge.error || "Copilot 탭에서 Cloud Ask를 사용해 주세요." }
+        ? { bridge: true, authenticated: false, models: [], error: cloudBridge.setupError || cloudBridge.error || "Copilot 탭에서 Cloud Ask를 사용해 주세요." }
         : startup.run("copilot.status", async () => ({ ...await copilot.status(),
           ...(cloudBridge?.role === "worker" ? { worker: { error: cloudBridge.error, lastChecked: cloudBridge.lastChecked } } : {}) })),
       "copilot-bridge-view": async args => {
         checkVault(args, workspaceVault(args?.vaultId));
         if (cloudBridge?.role !== "client") throw new Error(cloudBridge?.error || "Cloud Ask가 설정되지 않았습니다.");
-        return { ...await cloudBridge.service.view(args.vaultId), connectionError: cloudBridge.error };
+        return { ...await cloudBridge.use("view", args.vaultId), connectionError: cloudBridge.error };
       },
       "copilot-bridge-submit": args => {
         checkVault(args, workspaceVault(args?.vaultId));
         if (cloudBridge?.role !== "client") throw new Error(cloudBridge?.error || "Cloud Ask가 설정되지 않았습니다.");
-        return cloudBridge.service.submit(args.vaultId, args.prompt);
+        return cloudBridge.use("submit", args.vaultId, args.prompt);
       },
       "copilot-bridge-recheck": args => {
         checkVault(args, workspaceVault(args?.vaultId));
         if (cloudBridge?.role !== "client") throw new Error(cloudBridge?.error || "Cloud Ask가 설정되지 않았습니다.");
-        return cloudBridge.service.recheck(args.vaultId, args.requestId);
+        return cloudBridge.use("recheck", args.vaultId, args.requestId);
       },
       "codex-status": () => codex.status(),
       "codex-login": () => codex.login(),
@@ -772,6 +781,9 @@ app
             if (await registry.checkTeamRepositoryFolder(folder) !== folder)
               throw new Error("폴더 위치가 변경되었습니다. 폴더를 다시 선택해 주세요.");
             const config = validateGitConfig(repository);
+            cloudBridge?.checkNoteRemote?.(config.remote);
+            if (cloudBridge?.checkNoteRemote)
+              for (const remote of await noteFolderRemotes(folder)) cloudBridge.checkNoteRemote(remote);
             const git = new GitBackup(folder);
             if (!await git.repository()) {
               if (!await git.remoteHead(config)) throw new Error("원격 저장소에서 해당 브랜치를 찾을 수 없습니다.");
@@ -791,7 +803,11 @@ app
         return results;
       },
       "git-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.status(); },
-      "git-connect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.connect(vault.id, args.config); },
+      "git-connect": (args, vault, gitBackup) => {
+        checkVault(args, vault);
+        cloudBridge?.checkNoteRemote?.(args.config?.remote);
+        return gitBackup.connect(vault.id, args.config);
+      },
       "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id,{automatic:args.poll===true}); },
       "personal-sync-zips": (args,vault,controller) => { checkVault(args,vault); return controller.enqueue(()=>controller.zipList()); },
       "personal-sync-action": (args,vault,controller) => { checkVault(args,vault); return controller.personalAction(vault.id,args); },
@@ -802,6 +818,7 @@ app
         if (!newPersonal) checkVault(args, source);
         if (personal && !newPersonal && registry.purposes[source.root] !== "personal") throw new Error("개인 보관함을 선택해 주세요.");
         const config = personal ? { ...personalConfig(args.config), zipPaths: [] } : validateGitConfig(args.config);
+        cloudBridge?.checkNoteRemote?.(config.remote);
         const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
         if (result.canceled) return null;
         if (!newPersonal) checkVault(args, source);

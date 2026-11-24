@@ -70,6 +70,7 @@ import SpaceTrees from "./SpaceTrees.jsx";
 import { normalizePanelWidths, fitPanelWidths, panelWidthBudget } from "../core/panel-widths.mjs";
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
+import CloudRepositorySettings from "./CloudRepositorySettings.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
 import FileVersionHistory from "./FileVersionHistory.jsx";
@@ -3155,13 +3156,14 @@ export default function App() {
       {modal === "settings" && (
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
-            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
+            {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["cloud-repository", "Copilot 중계 Git"], ["updates", "업데이트"]].map(([key, label]) =>
               <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
             {[["git", "자동 백업"], ["history", "복원"], ["git-workspace", "고급 Git 관리"]].map(([key, label]) =>
               <button key={key} aria-pressed={settingsTab === key || (key === "git" && settingsTab === "personal-sync")} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
+          {settingsTab === "cloud-repository" && <CloudRepositorySettings api={api} openBackup={() => setSettingsTab("git")} />}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "theme" && <fieldset className="theme-picker">
             <legend>색상 테마</legend>

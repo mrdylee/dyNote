@@ -6,8 +6,8 @@ export const digest = value => createHash("sha256").update(JSON.stringify(value)
 export const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value);
 
 export class BridgeGit {
-  constructor({ directory, remote, channel, privateKey, peerKey }) {
-    Object.assign(this, { directory, remote, channel, privateKey, peerKey });
+  constructor({ directory, remote, channel, privateKey, peerKey, repositoryScope }) {
+    Object.assign(this, { directory, remote, channel, privateKey, peerKey, repositoryScope });
     this.ownKey = createPublicKey(privateKey);
     this.destination = "dynote-managed-" + randomUUID();
   }
@@ -52,14 +52,15 @@ export class BridgeGit {
     const key = own ? this.ownKey : this.peerKey;
     const bytes = Buffer.from(JSON.stringify(packet.data));
     if (!verify(null, bytes, key, Buffer.from(packet.signature, "base64")) ||
-        packet.data.channel !== this.channel || packet.data.ref !== ref || packet.data.v !== 1)
+        packet.data.channel !== this.channel || packet.data.ref !== ref ||
+        packet.data.v !== (this.repositoryScope ? 2 : 1) || packet.data.repository !== this.repositoryScope)
       throw new Error("승인된 채널 서명을 확인할 수 없습니다.");
     return { oid, value: packet.data.value };
   }
 
   async write(name, value, parent = "") {
     const ref = this.ref(name);
-    const data = { v: 1, channel: this.channel, ref, value };
+    const data = { v: this.repositoryScope ? 2 : 1, channel: this.channel, ref, value, repository: this.repositoryScope };
     const signature = sign(null, Buffer.from(JSON.stringify(data)), this.privateKey).toString("base64");
     const blob = await this.git(["hash-object", "-w", "--stdin"], { input: JSON.stringify({ data, signature }) });
     const tree = await this.git(["mktree"], { input: "100644 blob " + blob + "\tpacket.json\n" });
