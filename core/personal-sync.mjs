@@ -383,14 +383,8 @@ export class PersonalSync {
         await this.store.git(["update-ref", ref, remote]);
         seen = remote;
       }
-      if (remote && !head) {
-        const incoming = await this.store.tree(remote);
-        for (const name of dirty.filter(validPersonalFilePath))
-          if (incoming.has(name) && (await this.disk.read(name))?.oid !== incoming.get(name).oid)
-            throw new Error(
-              "원격과 다른 로컬 파일이 있습니다: " + name + " · 기존 저장소 가져오기로 빈 폴더를 선택해 주세요."
-            );
-      }
+      if (remote && !head && (await this.dirty()).some(validPersonalFilePath))
+        throw new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. 기존 Git 저장소에서 가져오기로 빈 폴더를 선택해 주세요.");
       if (remote !== head && head && this.firstDirty !== null && !(await checkpoint())) return status(true);
       const normalized = await normalizePublished(this.store, remote, device, config);
       let merged = await integrate(this.store, normalized, head, device, config);

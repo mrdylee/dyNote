@@ -32,6 +32,26 @@ test("Git inputs accept HTTPS/SSH and reject credentials, commands and invalid b
     assert.throws(() => validateGitConfig({ ...config, branch }), /브랜치/);
 });
 
+test("personal setup verifies the remote branch and shared history without replacing local notes", async t => {
+  const { dir, root, service, git } = await fixture();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await service.checkPersonalConnection(config, false);
+  await service.connect(config);
+  await service.sync(config);
+  await service.checkPersonalConnection(config, true);
+  await assert.rejects(service.checkPersonalConnection({ ...config, branch: "missing" }, true), /브랜치/);
+  const other = path.join(dir, "other");
+  await mkdir(other);
+  git(other, "init", "--initial-branch=main");
+  await writeFile(path.join(other, "draft.md"), "my draft");
+  git(other, "add", "draft.md");
+  git(other, "-c", "user.name=Local", "-c", "user.email=test@example.invalid", "commit", "-m", "local");
+  const original = git(other, "rev-parse", "HEAD");
+  await assert.rejects(new GitBackup(other, service.run).checkPersonalConnection(config, true), /공통 Git 이력/);
+  assert.equal(git(other, "rev-parse", "HEAD"), original);
+  assert.equal(await readFile(path.join(other, "draft.md"), "utf8"), "my draft");
+});
+
 test("legacy minute settings migrate to a daily schedule", () => {
   const normalized = validateGitConfig(config);
   assert.equal(normalized.schedule, "daily");

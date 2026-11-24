@@ -1,3 +1,4 @@
+import { openVaultSection } from "./vault-settings-navigation.mjs";
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -249,6 +250,7 @@ try {
   await restarted.locator('.attachment-view').waitFor();
   await restarted.getByRole('button', { name: '공간 전환·관리', exact: true }).click();
   const settings = restarted.getByRole('dialog', { name: '설정', exact: true });
+  await openVaultSection(restarted, '팀 노트');
   const registeredTeam = settings.getByRole('listitem').filter({ hasText: team });
   await registeredTeam.getByRole('button', { name: '목록에서 제거', exact: true }).click();
   await registeredTeam.waitFor({ state: 'hidden' });
@@ -264,6 +266,7 @@ try {
   await app.evaluate(({ dialog }, root) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] });
   }, team);
+  await openVaultSection(restarted, '팀 노트');
   await settings.getByRole('button', { name: '팀 공유 폴더 연결', exact: true }).click();
   await registeredTeam.getByText('사용 중', { exact: true }).waitFor();
   await settings.getByRole('button', { name: '닫기', exact: true }).click();

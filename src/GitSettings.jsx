@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview }) {
-  const [form, setForm] = useState(() => ({ ...initial, ...status.config }));
+export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview }) {
+  const [form, setForm] = useState(() => ({ ...initial, ...status.config, ...(startPersonal ? {mode:"personal-sync"} : {}) }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
+  const edited = useRef(new Set());
   const [repository, setRepository] = useState(null), [refresh, setRefresh] = useState(0);
   const [zipPaths,setZipPaths]=useState(null);
   const personal=form.mode==="personal-sync" && space?.purpose==="personal";
@@ -15,17 +16,24 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
   useEffect(() => {
     let mounted = true;
     setRepository(null);
-    onRepositoryStatus().then(value => { if (mounted) setRepository(value); }).catch(error => { if (mounted) setRepository({ error: error.message }); });
+    onRepositoryStatus().then(value => { if (!mounted) return;
+      setRepository(value);
+      if (startPersonal && !status.config?.remote && value.available) {
+        setForm(old => ({ ...old,
+          remote: edited.current.has("remote") ? old.remote : value.suggestedRemote || old.remote,
+          branch: edited.current.has("branch") ? old.branch : value.branchName || old.branch,
+        }));
+      } }).catch(error => { if (mounted) setRepository({ error: error.message }); });
     return () => { mounted = false; };
   }, [refresh]);
-  const update = (key, value) => setForm((previous) => ({ ...previous, [key]: value }));
+  const update = (key, value) => { edited.current.add(key); setForm(previous => ({ ...previous, [key]: value })); };
   const run = async (action) => {
     setPending(true); setError("");
     try { await action(); } catch (error) { setError(error.message); } finally { setPending(false); }
   };
   const busy = pending || status.phase === "saving";
   return <section className="settings-section">
-    <h3>자동 백업</h3>
+    <h3>{personal ? "개인 노트 동기화" : "자동 백업"}</h3>
     <div className="git-space-context" aria-label="현재 공간의 Git 연결">
       <strong>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"} · {space?.name ?? "현재 공간"}</strong>
       <dl><dt>노트 폴더</dt><dd>{space?.root ?? "폴더 정보를 불러오는 중…"}</dd>
@@ -42,7 +50,7 @@ export default function GitSettings({ status, space, onRepositoryStatus, onManag
     {space?.purpose==="personal" && <label>Git 사용 방식<select value={personal?"personal-sync":"daily"} disabled={busy} onChange={e=>update("mode",e.target.value)}>
       <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option></select></label>}
     {personal ? <><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
-      <p>이 개인 노트 폴더를 아래 원격 브랜치와 양방향으로 동기화합니다. 다른 PC에서도 같은 저장소와 브랜치를 선택하세요.</p>
+      <p>{repository?.available === false ? "이 폴더의 노트를 처음 올리려면 Git 서비스에서 빈 저장소를 만든 뒤 아래에 주소를 입력하세요." : "다른 PC에서도 같은 저장소와 브랜치를 선택하면 이 폴더의 노트를 이어 쓸 수 있습니다."}</p>
       <details open={zipPaths?.length>0 && status.config?.mode!=="personal-sync"}><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
         <ul>{zipPaths?.map(name=><li key={name}>{name}</li>)}</ul></details></> : <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>}
     <label>저장소 주소<input aria-label="Git 저장소 주소" placeholder="https://github.com/사용자/노트저장소.git" value={form.remote} disabled={busy} onChange={(e) => update("remote", e.target.value)} /></label>

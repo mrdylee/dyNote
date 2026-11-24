@@ -66,6 +66,30 @@ export class GitBackup {
     return result.stdout.split(/\s/)[0];
   }
 
+  async initialPersonalRemote(config) {
+    const { stdout } = await this.git(["ls-remote", "--refs", "--", config.remote]);
+    const refs = stdout.trim().split(/\r?\n/).filter(Boolean).map(line => line.split("\t"));
+    const ref = refs.find(([, name]) => name === "refs/heads/" + config.branch);
+    if (!ref && refs.length) throw new Error("원격 저장소에 지정한 브랜치가 없습니다. 브랜치 이름을 확인해 주세요.");
+    return ref?.[0];
+  }
+
+  async checkPersonalConnection(config, exists) {
+    const remote = await this.initialPersonalRemote(config);
+    if (!remote) return;
+    const head = exists && (await this.git(["rev-parse", "--verify", "-q", "HEAD"], { allow: [0, 1] })).stdout.trim();
+    if (head) {
+      await this.git(["fetch", "--no-write-fetch-head", "--no-tags", "--no-recurse-submodules", "--", config.remote, "refs/heads/" + config.branch]);
+      if (!(await this.git(["merge-base", head, remote], { allow: [0, 1] })).code) return;
+    } else {
+      const entries = await readdir(this.root, { withFileTypes: true });
+      const local = entries.filter(entry => entry.name !== ".git" && entry.name !== ".DS_Store" && entry.name !== "desktop.ini");
+      if (!local.length || (local.length === 1 && local[0].name === FILE_STORAGE_FOLDER && local[0].isDirectory() &&
+          !(await readdir(path.join(this.root, FILE_STORAGE_FOLDER))).length)) return;
+    }
+    throw new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. ‘기존 Git 저장소에서 가져오기’로 빈 폴더를 선택해 주세요.");
+  }
+
   async connect(input) {
     const config = validateGitConfig(input), exists = await this.repository();
     await this.git(["check-ref-format", "--branch", config.branch]);
@@ -80,8 +104,8 @@ export class GitBackup {
 
   async assertReady(config) {
     if (!await this.repository()) throw new Error("Git 저장소를 먼저 연결해 주세요.");
-    const branch = (await this.git(["symbolic-ref", "--quiet", "--short", "HEAD"], { allow: [0, 1] })).stdout.trim();
-    if (branch !== config.branch) throw new Error(`현재 브랜치가 설정과 다릅니다. Git에서 ${config.branch} 브랜치로 전환해 주세요.`);
+    const branch = (await this.git(["symbolic-ref", "--quiet", "HEAD"], { allow: [0, 1] })).stdout.trim();
+    if (branch !== "refs/heads/" + config.branch) throw new Error(`현재 브랜치가 설정과 다릅니다. Git에서 ${config.branch} 브랜치로 전환해 주세요.`);
     for (const marker of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG"]) {
       const exists = await lstat(path.join(this.root, ".git", marker)).catch((e) => { if (e.code !== "ENOENT") throw e; });
       if (exists) throw new Error("진행 중인 Git 작업을 먼저 완료해 주세요. 로컬 문서는 계속 저장됩니다.");

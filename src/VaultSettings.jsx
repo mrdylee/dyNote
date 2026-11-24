@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { UserRound, Users } from "lucide-react";
+import { ChevronRight, UserRound, Users } from "lucide-react";
 
 function SpaceGitInfo({ vaultId, onReadGit }) {
   const [info, setInfo] = useState(null);
@@ -25,16 +25,18 @@ function SpaceGitInfo({ vaultId, onReadGit }) {
   </div>;
 }
 
-export default function VaultSettings({ openSpaces, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
+export default function VaultSettings({ openSpaces, gitStates, currentId, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [teamRows, setTeamRows] = useState([]);
+  const [section, setSection] = useState(null);
+  const [importing, setImporting] = useState(false);
   const nextTeamRow = useRef(0);
   useEffect(() => {
     let mounted = true;
     onList().then((value) => { if (mounted) setData(value); }).catch((e) => { if (mounted) setError(e.message); });
     return () => { mounted = false; };
-  }, []);
+  }, [onList, currentId]);
   const run = async (action, message = "") => {
     setPending(true); setError(""); setMessage("");
     try {
@@ -70,30 +72,53 @@ export default function VaultSettings({ openSpaces, onReadGit, onList, onPick, o
     });
   };
   const personalSpaces = data.entries.filter(entry => entry.purpose === "personal");
-  const openPersonalGit = async entry => {
-    const open = entry && openSpaces.find(space => space.root === entry.root);
-    const id = open?.id ?? (entry ? await onSelect(entry.root) : await onPick("personal"));
-    if (id) onOpenGit(id);
-  };
+  const teams = data.entries.filter(entry => entry.purpose === "team");
+  const personalId = personalSpaces.length === 1 && openSpaces.find(space => space.root === personalSpaces[0].root)?.id;
+  const sync = gitStates[personalId];
+  const personalStatus = !personalSpaces.length ? "폴더 선택" : personalSpaces.length > 1 ? `폴더 ${personalSpaces.length}개`
+    : !sync ? personalSpaces[0].name : !sync.enabled ? "이 PC에만 저장 중"
+    : sync.config?.mode === "personal-sync" ? sync.message : "일일 백업 사용 중";
+  function enter(next) {
+    if (section === next) { setSection(null); return; }
+    setSection(next); setError(""); setMessage(""); setImporting(false);
+    if (next === "team" && !teams.length && !teamRows.length) addTeamRow();
+  }
+  function openSettings(entry, id) {
+    return run(async () => {
+      const target = id ?? await onSelect(entry.root);
+      if (target) onOpenGit(target, entry.purpose === "personal");
+    });
+  }
   return <section className="settings-section">
-    <h3>개인·팀 공간</h3>
-    <p>개인 기록과 팀 문서는 서로 다른 폴더에 보관하세요. 각 공간의 Git 저장소도 따로 연결합니다.</p>
-    <div className="space-choices">
-      <article className="space-choice personal"><UserRound size={22}/><h4>개인 노트</h4><p>저널·아이디어·작업 초안을 기록합니다. Git 백업은 개인용 저장소에 연결하세요.</p><button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("personal"))}>개인 노트 폴더 연결</button>
-        {(personalSpaces.length ? personalSpaces : [null]).map(entry =>
-          <button key={entry?.root ?? "connect"} className="secondary-button" disabled={pending || data.current === undefined}
-            onClick={() => run(() => openPersonalGit(entry))}>
-            개인 노트 Git 설정{personalSpaces.length > 1 && ` · ${entry.name}`}
-          </button>)}
-      </article>
-      <article className="space-choice team"><Users size={22}/><h4>팀 공유 노트</h4><p>설계서·회의록·결정 사항을 함께 관리합니다. 모델마다 별도 Git 저장소를 연결할 수 있습니다.</p>
-        <div className="team-repository-actions">
-          <button className="secondary-button" disabled={pending || teamRows.length > 0} onClick={addTeamRow}>팀 저장소 연결</button>
-          <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("team"))}>팀 공유 폴더 연결</button>
-        </div>
-      </article>
+    <h3>보관함</h3>
+    <div className="vault-entry-list">
+      <button type="button" aria-label="개인 노트" aria-expanded={section === "personal"} disabled={pending} onClick={() => enter("personal")}>
+        <UserRound size={20}/><strong>개인 노트</strong><span>{data.current === undefined ? "" : personalStatus}</span><ChevronRight size={16}/>
+      </button>
+      <button type="button" aria-label="팀 노트" aria-expanded={section === "team"} disabled={pending || (data.current === undefined && !error)} onClick={() => enter("team")}>
+        <Users size={20}/><strong>팀 노트</strong><span>{data.current === undefined ? "" : teams.length ? `모델 ${teams.length}개 연결됨` : "모델 추가"}</span><ChevronRight size={16}/>
+      </button>
     </div>
-    {teamRows.length > 0 && <form className="team-repositories" onSubmit={connectTeams} aria-label="팀 저장소 연결">
+    {section === "personal" && !personalSpaces.length && <p>이 PC에 노트가 있으면 폴더를 연결하세요. 다른 PC에서 동기화한 노트는 Git 저장소에서 가져올 수 있습니다.</p>}
+    {section === "personal" && <div className="settings-actions">
+      <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("personal"))}>개인 노트 폴더 연결</button>
+      <button className="secondary-button" aria-expanded={importing} disabled={pending} onClick={() => setImporting(!importing)}>기존 Git 저장소에서 가져오기</button>
+    </div>}
+    {section === "personal" && importing && <form aria-label="개인 노트 가져오기" onSubmit={event => {
+      event.preventDefault();
+      const input = Object.fromEntries(new FormData(event.currentTarget));
+      void run(() => onImportPersonal({ ...input, mode: "personal-sync" }));
+    }}>
+      <label>저장소 주소<input name="remote" required placeholder="HTTPS 또는 SSH" disabled={pending}/></label>
+      <label>브랜치<input name="branch" required defaultValue="main" disabled={pending}/></label>
+      <label>이 기기 이름<input name="deviceName" required maxLength={80} disabled={pending}/></label>
+      <button className="primary-button" disabled={pending}>빈 폴더 선택하고 가져오기</button>
+    </form>}
+    {section === "team" && <div className="settings-actions">
+      {!teamRows.length && <button className="primary-button" disabled={pending} onClick={addTeamRow}>모델 추가</button>}
+      <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("team"))}>팀 공유 폴더 연결</button>
+    </div>}
+    {section === "team" && teamRows.length > 0 && <form className="team-repositories" onSubmit={connectTeams} aria-label="팀 저장소 연결">
       <h4>팀 저장소 연결</h4>
       <p className="muted">모델마다 빈 폴더나 같은 저장소를 이미 가져온 폴더를 선택하세요.</p>
       {!personalSpaces.length && <p className="muted">연결한 팀은 아래 팀 공유 공간에서 열 수 있습니다. 개인 공간도 연결하면 왼쪽 파일 목록에서 모델을 함께 볼 수 있습니다.</p>}
@@ -113,24 +138,26 @@ export default function VaultSettings({ openSpaces, onReadGit, onList, onPick, o
         <button className="primary-button" disabled={pending || teamRows.some(row => !row.remote.trim() || !row.branch.trim() || !row.folder)}>입력한 저장소 연결</button>
       </div>
     </form>}
-    <div className="space-guide"><strong>서로 다른 폴더 + 서로 다른 Git 저장소</strong><div><span>개인 폴더 → 개인용 Git</span><span>팀 폴더 → 팀 Git</span></div><p>아래 ‘이 공간의 Git 설정’에서 공간별 저장소 주소를 연결합니다.</p></div>
-    <p className="muted">공간 용도는 앱의 구분 표시입니다. 용도를 바꿔도 파일을 옮기거나 Git 저장소의 접근 권한을 바꾸지 않습니다.</p>
     {(error || data.error) && <p role="alert" className="settings-message">{error || data.error}</p>}
     {message && <p role="status" className="settings-message">{message}</p>}
-    {[["personal", "개인 노트 공간"], ["team", "팀 공유 공간"], [null, "용도 미지정"]].map(([purpose, title]) => <div key={title} className="space-group">
+    {[["personal", "개인 노트 공간"], ["team", "팀 공유 공간"], [null, "용도 미지정"]].filter(([purpose]) => purpose ? purpose === section : data.entries.some(entry => !entry.purpose)).map(([purpose, title]) => <div key={title} className="space-group">
       <h4>{title}</h4>
       {purpose === null && data.entries.some(entry => !entry.purpose) && <p className="muted">기존 폴더는 개인·팀 용도를 직접 선택해 주세요. 현재 Git 연결은 그대로 유지됩니다.</p>}
       <ul className="vault-settings-list">
       {data.entries.filter(entry => (entry.purpose ?? null) === purpose).map((entry) => {
         const vaultId = openSpaces.find(space => space.root === entry.root)?.id;
         return <li key={entry.root}>
-          <div><strong>{entry.name} {entry.root === data.current && <small>사용 중</small>}</strong><p>{entry.root}</p>
-            {vaultId ? <SpaceGitInfo key={vaultId} vaultId={vaultId} onReadGit={onReadGit}/> : <p>공간을 열면 Git 정보를 확인할 수 있습니다.</p>}
-            <label>공간 용도<select aria-label={`${entry.name} 공간 용도`} value={entry.purpose ?? ""} disabled={pending} onChange={e => run(() => onPurpose(entry.root, e.target.value), "공간 용도를 저장했습니다.")}><option value="" disabled>용도 선택</option><option value="personal">개인 노트</option><option value="team">팀 공유 노트</option></select></label>
+          <div><strong>{purpose === "team" ? <button className="text-action" disabled={pending} onClick={() => openSettings(entry, vaultId)}>{entry.name}</button> : entry.name} {entry.root === data.current && <small>사용 중</small>}</strong><p>{entry.root}</p>
+            {purpose === "personal" && <button className="primary-button" disabled={pending} onClick={() => openSettings(entry, vaultId)}>동기화 설정</button>}
+            {vaultId ? <SpaceGitInfo key={vaultId + ':' + currentId} vaultId={vaultId} onReadGit={onReadGit}/> : <p>공간을 열면 Git 정보를 확인할 수 있습니다.</p>}
+            <label>공간 용도<select aria-label={`${entry.name} 공간 용도`} value={entry.purpose ?? ""} disabled={pending} onChange={e => {
+              const next = e.target.value;
+              void run(async () => { await onPurpose(entry.root, next); setSection(next); }, "공간 용도를 저장했습니다.");
+            }}><option value="" disabled>용도 선택</option><option value="personal">개인 노트</option><option value="team">팀 공유 노트</option></select></label>
           </div>
           <div className="settings-actions">
             <button className="secondary-button" disabled={pending || entry.root === data.current} onClick={() => run(() => onSelect(entry.root))}>열기</button>
-            {vaultId && <button className="secondary-button" disabled={pending} onClick={() => onOpenGit(vaultId)}>이 공간의 Git 설정</button>}
+            {!purpose && vaultId && <button className="secondary-button" disabled={pending} onClick={() => onOpenGit(vaultId)}>이 공간의 Git 설정</button>}
             <button className="secondary-button" disabled={pending || entry.active} onClick={() => run(() => onForget(entry.root))}>목록에서 제거</button>
           </div>
         </li>;
@@ -138,6 +165,6 @@ export default function VaultSettings({ openSpaces, onReadGit, onList, onPick, o
       </ul>
       {!data.entries.some(entry => (entry.purpose ?? null) === purpose) && <p className="muted">연결된 공간이 없습니다.</p>}
     </div>)}
-    <p className="muted">목록에서 제거해도 실제 폴더와 파일은 삭제되지 않습니다. 경로를 찾을 수 없으면 폴더를 다시 선택해 주세요.</p>
+
   </section>;
 }

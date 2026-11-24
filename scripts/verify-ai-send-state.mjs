@@ -1,3 +1,4 @@
+import { openVaultSection } from "./vault-settings-navigation.mjs";
 import {mkdtemp,mkdir,writeFile,readFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import assert from "node:assert/strict";
@@ -28,6 +29,7 @@ try {
  assert.match(await page.getByLabel("Copilot 전송 상태",{exact:true}).innerText(),/노트 폴더/);
  report.checks.push("missing vault reproduces disabled send with explicit reason and prompt retained");
  await page.getByRole("button",{name:"AI용 노트 폴더 열기",exact:true}).click();
+ await openVaultSection(page, "개인 노트");
  await page.getByRole("button",{name:"개인 노트 폴더 연결",exact:true}).click();
  await page.getByRole("dialog",{name:"설정",exact:true}).getByRole("button",{name:"닫기",exact:true}).click();
  await page.getByRole("button",{name:"파일 목록",exact:true}).click();
@@ -48,11 +50,11 @@ try {
  });
  await page.reload();await page.getByRole("button",{name:"파일 목록",exact:true}).click();await page.locator('.file-row[title="Other.md"]').click();
  await refresh();await prompt.fill("미확정 노트를 읽기만 해 줘");
- assert.equal(await send.isDisabled(),true);assert.match(await page.getByLabel("Copilot 전송 상태").innerText(),/미확정 AI 변경/);
- await page.getByRole("button",{name:"Ask로 대화",exact:true}).click();assert.equal(await send.isEnabled(),true);await send.click();
+ assert.equal(await page.locator(".copilot-pending-list").count(),1);
+ await page.getByLabel("Copilot 작업",{exact:true}).selectOption("chat");await prompt.fill("미확정 노트를 읽기만 해 줘");assert.equal(await send.isEnabled(),true);await send.click();
  await page.waitForFunction(()=>document.querySelector('[aria-label="Copilot 질문"]').value==="");
  assert.equal(await page.locator(".copilot-pending-list").count(),1);assert.equal(await readFile(`${vault}/Other.md`,"utf8"),"# Other\n새 현재 노트");
- report.checks.push("pending drafts protect Agent writes while Ask sends current visible note; original disk bytes and pending draft survive");
+ report.checks.push("Ask sends the current visible note alongside pending drafts; original disk bytes and pending draft survive");
  await prompt.fill("입력 유지 확인");
  await app.evaluate(()=>{globalThis.sendState={authenticated:false,models:[]};});
  await refresh();

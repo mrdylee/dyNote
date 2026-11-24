@@ -156,7 +156,7 @@ try {
       assert.equal(await page.getByRole('region', { name: '저널 피드', exact: true }).count(), 0);
       await page.screenshot({ path: 'output/playwright/journal-personal-required.png' });
       await page.getByRole('button', { name: '개인 노트 설정', exact: true }).click();
-      await page.getByRole('dialog', { name: '설정', exact: true }).getByRole('button', { name: '개인 노트 폴더 연결', exact: true }).waitFor();
+      await page.getByRole('dialog', { name: '설정', exact: true }).getByRole('button', { name: '개인 노트', exact: true }).waitFor();
     }
     await assert.rejects(readFile(path.join(current, todayPath)), { code: 'ENOENT' });
     await app.close();

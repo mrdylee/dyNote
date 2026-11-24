@@ -168,7 +168,13 @@ export class GitController {
           const zips=await this.zipList();
           if(!Array.isArray(input.zipPaths) || zips.some(name=>!input.zipPaths.includes(name))) throw new Error("전송할 ZIP 목록을 다시 확인해 주세요.");
           const exists=await this.service.repository();
-          if (!exists) await this.service.git(["init","--initial-branch="+config.branch]);
+          const prior=this.current.config;
+          if (!exists || !this.current.enabled || prior?.mode !== "personal-sync" || prior.remote !== config.remote || prior.branch !== config.branch)
+            await this.service.checkPersonalConnection(config, exists);
+          if (!exists) {
+            await this.service.git(["init","--initial-branch="+config.branch]);
+            await this.service.git(["remote","add","origin",config.remote]);
+          }
           await service.init();
           if (!await service.disk.job()) await this.service.assertReady(config);
           // Persist the selected destination before a local checkpoint can enter its history.

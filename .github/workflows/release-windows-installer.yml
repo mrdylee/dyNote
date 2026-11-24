@@ -1,7 +1,7 @@
-name: Publish Dynote beta v0.23.18
+name: Publish Dynote beta v0.23.19
 on:
   push:
-    branches: [validation/internal-updates-v0.23.18, release/dynote-v0.23.18]
+    branches: [validation/vault-entry-v0.23.19, release/dynote-v0.23.19]
 permissions:
   contents: read
 concurrency:
@@ -9,15 +9,15 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows:
-    if: github.ref == 'refs/heads/validation/internal-updates-v0.23.18'
+    if: github.ref == 'refs/heads/validation/vault-entry-v0.23.19'
     uses: ./.github/workflows/build-windows-distribution.yml
     with:
-      previous_version: '0.23.17'
+      previous_version: '0.23.18'
   macos:
-    if: github.ref == 'refs/heads/validation/internal-updates-v0.23.18'
+    if: github.ref == 'refs/heads/validation/vault-entry-v0.23.19'
     uses: ./.github/workflows/release-macos.yml
   publish:
-    if: github.ref == 'refs/heads/release/dynote-v0.23.18'
+    if: github.ref == 'refs/heads/release/dynote-v0.23.19'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -34,7 +34,7 @@ jobs:
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           run_id=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/release-windows-installer.yml/runs" \
-            -f branch=validation/internal-updates-v0.23.18 -f event=push -f status=success -f head_sha="$GITHUB_SHA" \
+            -f branch=validation/vault-entry-v0.23.19 -f event=push -f status=success -f head_sha="$GITHUB_SHA" \
             --jq '.workflow_runs[0].id // empty')
           test -n "$run_id"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
@@ -44,22 +44,22 @@ jobs:
           run-id: ${{ steps.verified.outputs.run_id }}
           pattern: dynote-*
           merge-multiple: true
-          path: release/v0.23.18
+          path: release/v0.23.19
       - name: Check artifacts and publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(node -p "require('./package.json').version")" = 0.23.18
-          test "$(git rev-parse origin/release/dynote-v0.23.18)" = "$GITHUB_SHA"
-          if gh release view v0.23.18 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          test "$(node -p "require('./package.json').version")" = 0.23.19
+          test "$(git rev-parse origin/release/dynote-v0.23.19)" = "$GITHUB_SHA"
+          if gh release view v0.23.19 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Release already exists; inspect it before retrying.' >&2
             exit 1
           fi
-          cd release/v0.23.18
+          cd release/v0.23.19
           sha256sum --check SHA256SUMS-windows-x64.txt SHA256SUMS-macos-arm64.txt
-          gh release create v0.23.18 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
-            --title 'Dynote v0.23.18 — 사내 배포처에서 Windows 업데이트' \
-            --notes-file ../../docs/RELEASE-NOTES-0.23.18.md \
-            Dynote-0.23.18-windows-x64-Setup.exe Dynote-0.23.18-windows-x64.zip SHA256SUMS-windows-x64.txt latest.json \
-            Dynote-0.23.18-macos-arm64.dmg Dynote-0.23.18-macos-arm64.zip SHA256SUMS-macos-arm64.txt
-          gh release edit v0.23.18 --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          gh release create v0.23.19 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+            --title 'Dynote v0.23.19 — 개인·팀 노트 연결 화면' \
+            --notes-file ../../docs/RELEASE-NOTES-0.23.19.md \
+            Dynote-0.23.19-windows-x64-Setup.exe Dynote-0.23.19-windows-x64.zip SHA256SUMS-windows-x64.txt latest.json \
+            Dynote-0.23.19-macos-arm64.dmg Dynote-0.23.19-macos-arm64.zip SHA256SUMS-macos-arm64.txt
+          gh release edit v0.23.19 --repo "$GITHUB_REPOSITORY" --draft=false --prerelease

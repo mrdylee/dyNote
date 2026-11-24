@@ -28,6 +28,7 @@ import { validateInternalFeedUrl } from "../core/update-information.mjs";
 import { UpdateManager } from "../core/update-manager.mjs";
 import { stageUpdate, launchUpdate } from "./update-installer.mjs";
 import { GitController } from "./git-controller.mjs";
+import { personalConfig } from "../core/personal-sync.mjs";
 import { GitBackup, validateGitConfig } from "../core/git-backup.mjs";
 import { PluginController } from "./plugin-controller.mjs";
 import { CopilotController } from "./copilot-controller.mjs";
@@ -753,22 +754,27 @@ app
       "personal-sync-action": (args,vault,controller) => { checkVault(args,vault); return controller.personalAction(vault.id,args); },
       "git-disconnect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.disconnect(vault.id); },
       "git-clone": async (args, source) => {
-        checkVault(args, source);
-        const personal=args.config?.mode==="personal-sync";
-        if(personal && registry.purposes[source.root]!=="personal") throw new Error("개인 보관함을 선택해 주세요.");
-        const config = personal ? {...validateGitConfig(args.config),mode:"personal-sync",deviceName:args.config.deviceName,zipPaths:[]} : validateGitConfig(args.config);
+        const personal = args?.config?.mode === "personal-sync";
+        const newPersonal = personal && args.personalImport === true;
+        if (!newPersonal) checkVault(args, source);
+        if (personal && !newPersonal && registry.purposes[source.root] !== "personal") throw new Error("개인 보관함을 선택해 주세요.");
+        const config = personal ? { ...personalConfig(args.config), zipPaths: [] } : validateGitConfig(args.config);
         const result = await dialog.showOpenDialog(window, { title: "저장소를 가져올 빈 폴더 선택", properties: ["openDirectory", "createDirectory"] });
         if (result.canceled) return null;
-        checkVault(args, source);
-        const purpose = registry.purposes[source.root];
-        await registry.checkConnection(result.filePaths[0], purpose);
+        if (!newPersonal) checkVault(args, source);
+        const purpose = personal ? "personal" : registry.purposes[source.root];
+        const folder = await registry.checkConnection(result.filePaths[0], purpose);
         if (personal) {
-          if ((await readdir(result.filePaths[0])).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
-        } else await GitBackup.clone(result.filePaths[0], config);
-        const snapshot = await selectVault(result.filePaths[0], purpose);
-        try { await gitBackup.connect(vault.id, config); }
-        catch (error) { gitBackup.publish({ phase: "error", message: error.message }); }
-        return personal ? await vault.snapshot() : snapshot;
+          if ((await readdir(folder)).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+          const target = new GitBackup(folder);
+          await target.repository();
+          if (!await target.initialPersonalRemote(config)) throw new Error("원격 저장소에 가져올 브랜치가 없습니다.");
+        } else await GitBackup.clone(folder, config);
+        const snapshot = await selectVault(folder, purpose);
+        let status;
+        try { status = await gitBackup.connect(vault.id, config); }
+        catch (error) { status = gitBackup.publish({ phase: "error", message: error.message }); }
+        return personal ? { ...await vault.snapshot(), importError: status.phase === "error" ? status.message : null } : snapshot;
       },
       create: (args, vault) => {
         checkVault(args, vault);

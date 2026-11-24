@@ -43,6 +43,7 @@ jobs:
           node scripts/verify-vault-space-fixes.mjs
           node scripts/verify-sidebar-file-drop.mjs
           node scripts/verify-document-tabs.mjs
+          node scripts/verify-vault-entry.mjs
           node scripts/verify-team-repositories.mjs
           DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs
           node scripts/verify-update-install.mjs

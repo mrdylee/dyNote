@@ -690,6 +690,17 @@ export default function App() {
     }
     if (!queue.dirty) setStatus("saved");
   }, [acceptSnapshot, queue, workspace.dispatch]);
+  const importGit = async (args) => {
+    await flush(); setBusy(true);
+    try {
+      const snapshot = await invoke(api.cloneGit(args));
+      if (!snapshot) return;
+      install(snapshot, true); setSpaceFilter("all");
+      if (snapshot.importError) {
+        setGitSettingsId(snapshot.id); setSettingsTab("personal-sync"); setError(snapshot.importError);
+      } else setModal(null);
+    } finally { setBusy(false); }
+  };
   const loadSpaces = useCallback(async ({ refresh = false } = {}) => {
     const selectedId = selectedVault.current;
     const load = ++spaceLoad.current;
@@ -3145,11 +3156,11 @@ export default function App() {
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
             {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["updates", "업데이트"]].map(([key, label]) =>
-              <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+              <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
-          {["git", "history", "git-workspace"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
+          {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
             {[["git", "자동 백업"], ["history", "복원"], ["git-workspace", "고급 Git 관리"]].map(([key, label]) =>
-              <button key={key} aria-pressed={settingsTab === key} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+              <button key={key} aria-pressed={settingsTab === key || (key === "git" && settingsTab === "personal-sync")} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "theme" && <fieldset className="theme-picker">
@@ -3169,14 +3180,15 @@ export default function App() {
             <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
           </section>}
-          {settingsTab === "vault" && <VaultSettings key={selectedVaultId ?? "missing"}
+          {settingsTab === "vault" && <VaultSettings currentId={selectedVaultId} gitStates={gitStates}
             onList={loadSpaces} openSpaces={connectedSpaces} onReadGit={readSpaceGit}
             onPurpose={async (root, purpose) => {
               await flush();
               await invoke(api.setVaultPurpose({ root, purpose }));
               if (root === spaces.current) acceptSnapshot(await invoke(api.snapshot({ vaultId: selectedVaultId })));
             }}
-            onOpenGit={id => { setGitSettingsId(id); setSettingsTab("git"); }}
+            onOpenGit={(id, sync) => { setGitSettingsId(id); setSettingsTab(sync ? "personal-sync" : "git"); }}
+            onImportPersonal={config => importGit({ personalImport: true, config })}
             onPickTeamRepositoryFolder={() => invoke(api.pickTeamRepositoryFolder())}
             onConnectTeamRepositories={async (repositories) => {
               setBusy(true);
@@ -3239,18 +3251,14 @@ export default function App() {
                 return result.status;
               } finally { setBusy(false); }
             }}/>}
-          {["git", "history", "git-workspace"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
-          {settingsTab === "git" && gitVault.id && <GitSettings key={`${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
+          {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
+          {["git", "personal-sync"].includes(settingsTab) && gitVault.id && <GitSettings startPersonal={settingsTab === "personal-sync"} key={`${settingsTab}:${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
             onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id, summaryOnly: true }))}
             onZips={()=>invoke(api.personalSyncZips({vaultId:gitVault.id}))}
             onAction={args=>invoke(api.personalSyncAction({vaultId:gitVault.id,...args})).then(acceptGitStatus)}
             onReview={name=>openReview(gitVault.id,name)}
-            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); }}
-            onClone={async (config) => {
-              await flush(); setBusy(true);
-              try { const snapshot = await invoke(api.cloneGit({ vaultId: gitVault.id, config })); if (snapshot) { install(snapshot, true); setModal(null); } }
-              finally { setBusy(false); }
-            }}
+            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (settingsTab === "personal-sync" && config.mode !== "personal-sync") setSettingsTab("git"); }}
+            onClone={config => importGit({ vaultId: gitVault.id, config })}
             onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: gitVault.id }))); }}
             onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: gitVault.id })))} />}
           {settingsTab === "history" && gitVault.id && <GitHistory key={gitVault.id} busy={busy}

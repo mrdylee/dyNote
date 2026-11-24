@@ -20,6 +20,9 @@ async function launch(name, seed) {
   await mkdir(root);
   await mkdir(profile);
   if (seed) await writeFile(path.join(root, "회의록.md"), "회의 1시\n");
+  else execFileSync("git", ["clone", remote, root], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: "1" }, stdio: "ignore"
+  });
   await writeFile(
     path.join(profile, "settings.json"),
     JSON.stringify({ vaultRoot: root, vaults: [root], vaultPurposes: { [root]: "personal" } })
@@ -55,7 +58,7 @@ async function launch(name, seed) {
       zipPaths: [],
     },
   });
-  assert.equal(status.phase, "synced");
+  assert.equal(status.phase, "synced", status.message);
   return { page, root, invoke, sync: () => invoke("syncGit") };
 }
 async function editor(pc) {

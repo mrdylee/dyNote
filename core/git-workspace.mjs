@@ -1,4 +1,4 @@
-import {GitBackup,runGit} from './git-backup.mjs';
+import {GitBackup,runGit,validateGitConfig} from './git-backup.mjs';
 import {validFilePath} from './vault.mjs';
 
 function displayRemoteUrl(value){
@@ -19,15 +19,21 @@ export class GitWorkspace {
   async repositoryInfo(){
     if(!await this.backup.repository())return {available:false,branch:'',remotes:[],remoteUrls:[]};
     const [branch,remotes]=await Promise.all([
-      this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]}),this.git(['remote']),
+      this.git(['symbolic-ref','--quiet','HEAD'],{allow:[0,1]}),this.git(['remote']),
     ]);
     const names=remotes.stdout.trim().split('\n').filter(Boolean);
+    const branchName=branch.stdout.trim().replace(/^refs\/heads\//,'');
+    let suggestedRemote='';
     const remoteUrls=await Promise.all(names.map(async name=>{
       const [fetch,push]=await Promise.all(['url','pushurl'].map(key=>this.git(['config','--null','--get-all',`remote.${name}.${key}`],{allow:[0,1]})));
       const read=value=>value.stdout.split('\0').filter(Boolean).map(displayRemoteUrl),fetchUrls=read(fetch),pushUrls=read(push);
+      if(name==='origin' && fetchUrls.length===1 && (!push.stdout || push.stdout===fetch.stdout)) {
+        try { suggestedRemote=validateGitConfig({remote:fetch.stdout.split('\0')[0],branch:branchName}).remote; }
+        catch { /* Only suggest a URL suitable for both reading and writing. */ }
+      }
       return {name,fetch:fetchUrls,push:pushUrls.length?pushUrls:fetchUrls};
     }));
-    return {available:true,branch:branch.stdout.trim()||'(분리된 HEAD)',remotes:names,remoteUrls};
+    return {available:true,branch:branchName||'(분리된 HEAD)',branchName,suggestedRemote,remotes:names,remoteUrls};
   }
   async status(){
     const info=await this.repositoryInfo();

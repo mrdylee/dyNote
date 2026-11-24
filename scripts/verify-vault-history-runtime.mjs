@@ -1,3 +1,4 @@
+import { openVaultSection } from "./vault-settings-navigation.mjs";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 import { mkdtemp, mkdir, writeFile, readFile, rename, realpath, access } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -38,6 +39,7 @@ try {
   await menu();
   await page.locator(".vault-settings-list").getByText(vaultRoot, { exact: true }).waitFor();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, other);
+  await openVaultSection(page, "개인 노트");
   await page.getByRole("button", { name: "개인 노트 폴더 연결", exact: true }).click();
   await page.locator(".vault-switch strong").filter({ hasText: "다른 보관함" }).waitFor();
   assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, other);
@@ -49,6 +51,7 @@ try {
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   await menu();
   await page.locator(".vault-switch strong").filter({ hasText: "내 노트" }).waitFor();
+  await openVaultSection(page, "개인 노트");
   const otherRow = page.locator(".vault-settings-list li").filter({ has: page.getByText(other, { exact: true }) });
   await otherRow.getByRole("button", { name: "목록에서 제거", exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll(".vault-settings-list li").length === 1);
@@ -92,6 +95,7 @@ try {
   }
   await page.getByRole("button", { name: "보관함", exact: true }).click();
   await app.evaluate(({ dialog }, root) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] }); }, `${vaultRoot}-offline`);
+  await openVaultSection(page, "개인 노트");
   await page.getByRole("button", { name: "개인 노트 폴더 연결", exact: true }).click();
   await page.locator(".vault-switch strong").filter({ hasText: "내 노트-offline" }).waitFor();
   assert.equal(JSON.parse(await readFile(`${profile}/settings.json`, "utf8")).vaultRoot, `${vaultRoot}-offline`);

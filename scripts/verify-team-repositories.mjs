@@ -1,3 +1,4 @@
+import { openVaultSection } from "./vault-settings-navigation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -71,7 +72,7 @@ try {
     return scope.id;
   }, personalRemote);
   await openSettings();
-  await settings.getByRole("button", { name: "팀 저장소 연결", exact: true }).click();
+  await openVaultSection(page, "팀 노트");
   const unauthorized = path.join(root, "Unpicked");
   await mkdir(unauthorized);
   const response = await page.evaluate(({ remote, branch, folder }) => window.notes.connectTeamRepositories({ repositories: [{ remote, branch, folder }] }), { ...repositories[0], folder: unauthorized });
