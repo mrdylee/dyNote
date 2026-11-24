@@ -24,6 +24,7 @@ import { demoNotes } from "../core/demo.mjs";
 import { VaultRegistry } from "./vault-registry.mjs";
 import { GitHistory } from "../core/git-history.mjs";
 import { GitWorkspace } from "../core/git-workspace.mjs";
+import { validateInternalFeedUrl } from "../core/update-information.mjs";
 import { UpdateManager } from "../core/update-manager.mjs";
 import { stageUpdate, launchUpdate } from "./update-installer.mjs";
 import { GitController } from "./git-controller.mjs";
@@ -558,7 +559,20 @@ app
       "claude-cancel": args => claude.cancel(args?.requestId),
       "check-updates": () => updates.check(true),
       "update-state": () => updates.state,
-      "update-settings": args => updates.configure(args),
+      "update-settings": async args => {
+        if (args.internalFeedUrl) {
+          const url = validateInternalFeedUrl(args.internalFeedUrl);
+          if (url !== updates.state.preferences.internalFeedUrl) {
+            const {response} = await dialog.showMessageBox(window, {
+              type: "question", message: "이 주소를 Dynote 업데이트 배포처로 저장할까요?",
+              detail: `이 위치에서 Windows 설치 파일을 받아 업데이트합니다.\n\n${url}`,
+              buttons: ["취소", "주소 저장"], defaultId: 0, cancelId: 0,
+            });
+            if (response !== 1) throw new Error("배포 주소 저장을 취소했습니다.");
+          }
+        }
+        return updates.configure(args);
+      },
       "update-directory": async () => {
         const selected = await dialog.showOpenDialog(window, { title: "업데이트 다운로드 폴더 선택", defaultPath: updates.state.preferences.downloadDirectory, properties: ["openDirectory", "createDirectory"] });
         return selected.canceled ? updates.state : updates.configure({ downloadDirectory: selected.filePaths[0] });

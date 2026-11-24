@@ -243,3 +243,61 @@ test('completed upgrade removes staged installer and Windows BOM errors are read
  assert.equal(upgraded.state.installation,null);assert.equal(upgraded.state.downloadedPath,null);
  await assert.rejects(readdir(job),{code:'ENOENT'});
 });
+
+const companyFeed = 'https://updates.example.test/dynote/latest.json';
+const windowsSetup = {platform:'win32', arch:'x64', installed:true};
+const companyManifest = {version:'2.0.0', name:'Dynote-2.0.0-windows-x64-Setup.exe', size:bytes.length, sha256:digest.slice(7)};
+
+test('company channel checks and downloads only from its configured folder and restores verified Setup', async t => {
+ const calls = [];
+ const fetcher = async (url, options) => {
+   calls.push(String(url));
+   if (String(url).startsWith('https://api.github.com/')) return Response.json([]);
+   assert.equal(options.redirect, 'error');
+   return String(url) === companyFeed ? Response.json(companyManifest) : new Response(bytes);
+ };
+ const {manager, directory} = await fixture(t, {...windowsSetup, check:undefined, fetcher});
+ await manager.configure({source:'internal'});
+ await manager.check(true);
+ assert.match(manager.state.message, /주소/);
+ assert.deepEqual(calls, []);
+ await manager.configure({internalFeedUrl:companyFeed});
+ await manager.check(true);
+ assert.deepEqual(calls, [companyFeed, new URL(companyManifest.name, companyFeed).href]);
+ assert.equal(manager.state.phase, 'ready');
+ assert.equal(manager.state.result.latest.tag, 'v2.0.0');
+ assert.equal(manager.state.result.latest.url, null);
+ const restored = new tools.UpdateManager({directory, current:'1.0.0', ...windowsSetup, fetcher});
+ await restored.init();
+ assert.equal(restored.state.preferences.source, 'internal');
+ assert.deepEqual(await readFile(await restored.readyPath()), bytes);
+ await restored.configure({internalFeedUrl:companyFeed.replace('dynote/', 'next/')});
+ assert.equal(restored.state.downloadedPath, null);
+ assert.equal(restored.state.lastCheckedAt, 0);
+ await assert.rejects(restored.readyPath());
+ await restored.configure({source:'github'});
+ await restored.check(true);
+ assert.equal(restored.state.phase, 'idle');
+ assert.match(calls.at(-1), /^https:\/\/api\.github\.com\//);
+});
+
+test('internal feed validates settings and metadata, checks daily, and never falls back after failure', async t => {
+ let now = 1000000000, calls = 0, manifest = {...companyManifest, version:'1.0.0', name:'Dynote-1.0.0-windows-x64-Setup.exe'};
+ const {manager} = await fixture(t, {...windowsSetup, check:undefined, now:()=>now, fetcher:async url=>{
+   assert.equal(String(url), companyFeed); calls++;
+   if (!manifest) throw new Error('company offline');
+   return Response.json(manifest);
+ }});
+ await manager.configure({source:'internal', internalFeedUrl:companyFeed});
+ await assert.rejects(manager.configure({internalFeedUrl:'http://insecure.test/latest.json'}), /HTTPS/);
+ assert.equal(manager.state.preferences.internalFeedUrl, companyFeed);
+ await manager.check(); assert.equal(manager.state.result.available, false);
+ now += 86400000-1; await manager.check(); assert.equal(calls, 1);
+ now++; await manager.check(); assert.equal(calls, 2);
+ for (const invalid of [{name:'../installer.exe'}, {sha256:''}, {size:0}, {version:'bad'}]) {
+   manifest = {...companyManifest, ...invalid};
+   await manager.check(true); assert.equal(manager.state.phase, 'error');
+ }
+ manifest = null; await manager.check(true);
+ assert.equal(manager.state.message, 'company offline'); assert.equal(calls, 7);
+});

@@ -122,6 +122,8 @@ try {
   const name = `Dynote-${updateVersion}-windows-x64-Setup.exe`;
   const digest = 'sha256:' + await hash(setup);
   const size = (await stat(setup)).size;
+  const internalManifest = JSON.parse(await readFile(path.join(distribution, 'latest.json'), 'utf8'));
+  assert.deepEqual(internalManifest, {version, name:path.basename(setup), size, sha256:digest.slice(7)});
   const asset = assetName => ({name: assetName, size, digest, browser_download_url: `https://github.com/mrdylee/dyNote/releases/download/${tag}/${assetName}`});
   const feed = [{tag_name: tag, assets: [asset(`Dynote-${updateVersion}-windows-x64.zip`), asset(name)]}];
   let downloaded;

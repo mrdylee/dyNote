@@ -28,7 +28,15 @@ execFileSync(tar, ['-a', '-cf', zip, '-C', output, packageName], {stdio: 'inheri
 const sums = [];
 for (const name of [base + '.zip', base + '-Setup.exe']) {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path.join(output, name))) hash.update(chunk);
-  sums.push(`${hash.digest('hex')}  ${name}`);
+  let size = 0;
+  for await (const chunk of createReadStream(path.join(output, name))) {
+    hash.update(chunk);
+    size += chunk.length;
+  }
+  const sha256 = hash.digest('hex');
+  sums.push(`${sha256}  ${name}`);
+  if (name === base + '-Setup.exe') {
+    await writeFile(path.join(output, 'latest.json'), JSON.stringify({version, name, size, sha256}, null, 2) + '\n');
+  }
 }
 await writeFile(path.join(output, 'SHA256SUMS-windows-x64.txt'), sums.join('\n') + '\n');

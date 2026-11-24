@@ -2,19 +2,24 @@ import {mkdir,readFile,writeFile,rename,rm,open,stat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import path from 'node:path';
-import {checkReleaseInformation,matchesUpdateAsset,releaseInformation} from './update-information.mjs';
+import {allowedUpdateAsset,validateInternalFeedUrl,checkReleaseInformation,matchesUpdateAsset,releaseInformation} from './update-information.mjs';
 const WEEK=7*86400000,HOUR=3600000,MAX_SIZE=2*1024*1024*1024;
 function preferences(value={},downloadDirectory) {
-  return {enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,autoInstall:value.autoInstall!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
+  return {source:value.source === 'internal' ? 'internal' : 'github',
+    internalFeedUrl:typeof value.internalFeedUrl === 'string' ? value.internalFeedUrl : '',
+    enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,autoInstall:value.autoInstall!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
 }
 export class UpdateManager {
   constructor({directory,downloadDirectory=directory,current,platform=process.platform,arch=process.arch,installed=false,now=Date.now,fetcher=(...args)=>fetch(...args),check,onChange=()=>{}}) {
     Object.assign(this,{directory,current,now,fetcher,onChange});
     this.target = {platform, arch, installed};
-    this.lookup=check??(()=>checkReleaseInformation(current,this.state.preferences.includePrerelease,this.target));
+    this.lookup=check??(()=>checkReleaseInformation(current,this.state.preferences.includePrerelease,this.target,this.internalFeedUrl,this.fetcher));
     this.defaultDownloadDirectory=downloadDirectory;
     this.state={preferences:preferences({},downloadDirectory),installSupported:platform==='win32'&&arch==='x64'&&installed,installation:null,lastCheckedAt:0,lastAttemptAt:0,retryAt:0,phase:'idle',result:null,message:'',progress:0,downloadedPath:null};
     this.pending=null;this.cached=null;
+  }
+  get internalFeedUrl() {
+    return this.state.preferences.source === 'internal' ? this.state.preferences.internalFeedUrl : null;
   }
   emit(change){Object.assign(this.state,change);this.onChange(structuredClone(this.state));}
   async persist(){
@@ -30,7 +35,7 @@ export class UpdateManager {
       for(const key of ['lastCheckedAt','lastAttemptAt','retryAt'])this.state[key]=Number.isFinite(saved[key])?saved[key]:0;
       if(saved.cached){
         const c=saved.cached;
-        const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,this.target);
+        const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,this.target,this.internalFeedUrl);
         if(result.available){
           this.cached={tag:result.latest.tag,asset:result.latest.assets[0],directory:typeof c.directory==='string'&&path.isAbsolute(c.directory)?c.directory:this.directory};
           try{const file=await this.verify(this.cached.asset,this.cached.directory);this.emit({phase:'ready',result,downloadedPath:file,message:'다운로드 검증 완료'});}catch{this.cached=null;this.state.lastCheckedAt=0;}
@@ -60,8 +65,20 @@ export class UpdateManager {
         const folder=change.downloadDirectory;
         if(typeof folder!=='string'||!path.isAbsolute(folder)||folder.includes('\0')||!(await stat(folder)).isDirectory())throw new Error('다운로드할 폴더를 선택해 주세요.');
       }
-      this.state.preferences=preferences({...before.preferences,...change},this.defaultDownloadDirectory);
-      if(before.preferences.includePrerelease!==this.state.preferences.includePrerelease){this.cached=null;Object.assign(this.state,{result:null,phase:'idle',lastCheckedAt:0,retryAt:0,message:'',downloadedPath:null});}
+      if (Object.hasOwn(change,'source') && !['github','internal'].includes(change.source)) throw new Error('업데이트 배포처를 선택해 주세요.');
+      const previousFeed = this.internalFeedUrl;
+      const next = preferences({...before.preferences,...change},this.defaultDownloadDirectory);
+      if (Object.hasOwn(change,'internalFeedUrl') && change.internalFeedUrl !== '') next.internalFeedUrl = validateInternalFeedUrl(change.internalFeedUrl);
+      this.state.preferences=next;
+      const sourceChanged = previousFeed !== this.internalFeedUrl;
+      if (sourceChanged) {
+        next.ignored = [];
+        this.state.installation = null;
+      }
+      if (sourceChanged || before.preferences.includePrerelease !== next.includePrerelease) {
+        this.cached = null;
+        Object.assign(this.state, {result:null, phase:'idle', progress:0, lastCheckedAt:0, retryAt:0, message:'', downloadedPath:null});
+      }
       try{await this.persist();this.emit({});return this.state;}catch(error){this.state=before;this.cached=cached;this.emit({});throw error;}
     })().finally(()=>{this.pending=null;});
     return this.pending;
@@ -70,7 +87,8 @@ export class UpdateManager {
     if(this.state.phase==='installing')return Promise.resolve(this.state);
     if(this.pending)return this.pending;
     const {preferences,lastCheckedAt,retryAt}=this.state,now=this.now();
-    if(!manual&&(!preferences.enabled||(retryAt>now&&retryAt-now<=HOUR)||(!retryAt&&lastCheckedAt&&now>=lastCheckedAt&&now-lastCheckedAt<WEEK)))return Promise.resolve(this.state);
+    const interval = this.internalFeedUrl === null ? WEEK : 24 * HOUR;
+    if(!manual&&(!preferences.enabled||this.internalFeedUrl === ''||(retryAt>now&&retryAt-now<=HOUR)||(!retryAt&&lastCheckedAt&&now>=lastCheckedAt&&now-lastCheckedAt<interval)))return Promise.resolve(this.state);
     this.pending=this.runCheck().finally(()=>{this.pending=null;});return this.pending;
   }
   async runCheck(){
@@ -110,8 +128,8 @@ export class UpdateManager {
     let handle;
     try{
       const url=new URL(asset.url);
-      if(url.origin!=='https://github.com'||!url.pathname.startsWith('/mrdylee/dyNote/releases/download/'))throw new Error('공식 배포 경로가 아닙니다.');
-      const response=await this.fetcher(url.href,{signal:AbortSignal.timeout(30*60*1000)});
+      if(!allowedUpdateAsset(url,asset.name,this.internalFeedUrl))throw new Error('공식 배포 경로가 아닙니다.');
+      const response=await this.fetcher(url.href,{redirect:this.internalFeedUrl === null ? 'follow' : 'error',signal:AbortSignal.timeout(30*60*1000)});
       if(!response.ok||!response.body)throw new Error(`다운로드 실패 (${response.status})`);
       handle=await open(partial,'wx');
       let size=0,progress=-1;const hash=createHash('sha256');

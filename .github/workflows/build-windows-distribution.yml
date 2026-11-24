@@ -75,6 +75,7 @@ jobs:
           path: |
             release/v${{ steps.version.outputs.number }}/Dynote-${{ steps.version.outputs.number }}-windows-x64.zip
             release/v${{ steps.version.outputs.number }}/Dynote-${{ steps.version.outputs.number }}-windows-x64-Setup.exe
+            release/v${{ steps.version.outputs.number }}/latest.json
             release/v${{ steps.version.outputs.number }}/SHA256SUMS-windows-x64.txt
           if-no-files-found: error
           compression-level: 0
