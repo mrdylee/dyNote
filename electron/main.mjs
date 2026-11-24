@@ -79,29 +79,12 @@ let gitBackup;
 const openedVaults = new Map();
 let copilot;
 let cloudBridge;
-const cloudAnswers = new Map();
 const remoteOnly = () => cloudBridge && cloudBridge.role !== "worker";
 function directCopilot() {
   if (remoteOnly()) throw new Error("이 PC에서는 Cloud Ask를 사용해 주세요.");
   return copilot;
 }
 
-async function askOnCloud(prompt, requestId, model, login) {
-  const status = await copilot.status();
-  if (quitRequested || !status.authenticated || status.login.toLowerCase() !== login.toLowerCase())
-    throw new Error("Cloud PC의 승인된 Copilot 계정을 확인해 주세요.");
-  return new Promise((resolve, reject) => {
-    cloudAnswers.set(requestId, event => {
-      cloudAnswers.delete(requestId);
-      if (event.type === "done") resolve(event.content);
-      else reject(new Error("Cloud Copilot 실행 실패"));
-    });
-    try {
-      copilot.send({ requestId, model, prompt, vaultId: "cloud-ask", mode: "chat",
-        context: { kind: "none" }, references: [], history: [], vaultAccess: false });
-    } catch (error) { cloudAnswers.delete(requestId); reject(error); }
-  });
-}
 let codex, claude;
 let aiExtensions, aiExtensionsChanging = false;
 let plugins;
@@ -355,24 +338,25 @@ app
       directory: path.join(app.getPath("userData"), "copilot"), getNotes, getExtensions,
       openExternal: (url) => shell.openExternal(url),
       onEvent: (event) => {
-        if (cloudAnswers.has(event.requestId)) {
-          if (["done", "error", "canceled"].includes(event.type)) cloudAnswers.get(event.requestId)(event);
-          return;
-        }
         if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:copilot-event", event);
       },
     });
-    cloudBridge = await openBridge(managedBridgePath(), app.getPath("userData"), askOnCloud);
+    cloudBridge = await openBridge(managedBridgePath(), app.getPath("userData"), (prompt, requestId, model, login) => {
+      if (quitRequested) throw new Error("Cloud PC가 종료 중입니다.");
+      return copilot.askOnCloud({ prompt, requestId, model, login });
+    });
     if (cloudBridge?.service) {
       if (!app.requestSingleInstanceLock()) { app.exit(0); return; }
-      let timer;
+      let timer, stopped = false;
       const poll = async () => {
-        try { await cloudBridge.service.tick(); cloudBridge.error = ""; cloudBridge.lastChecked = Date.now(); }
-        catch { cloudBridge.error = "Git 연결 또는 채널 서명을 확인해 주세요. 자동으로 다시 확인합니다."; }
-        if (!quitRequested) timer = setTimeout(poll, 5000);
+        if (!quitRequested) {
+          try { await cloudBridge.service.tick(); cloudBridge.error = ""; cloudBridge.lastChecked = Date.now(); }
+          catch { cloudBridge.error = "Git 연결 또는 채널 서명을 확인해 주세요. 자동으로 다시 확인합니다."; }
+        }
+        if (!stopped) timer = setTimeout(poll, 5000);
       };
       void poll();
-      app.once("will-quit", () => clearTimeout(timer));
+      app.once("will-quit", () => { stopped = true; clearTimeout(timer); });
     }
     const cliOptions = (provider) => ({
       directory: path.join(app.getPath("userData"), provider),
@@ -601,6 +585,11 @@ app
         checkVault(args, workspaceVault(args?.vaultId));
         if (cloudBridge?.role !== "client") throw new Error(cloudBridge?.error || "Cloud Ask가 설정되지 않았습니다.");
         return cloudBridge.service.submit(args.vaultId, args.prompt);
+      },
+      "copilot-bridge-recheck": args => {
+        checkVault(args, workspaceVault(args?.vaultId));
+        if (cloudBridge?.role !== "client") throw new Error(cloudBridge?.error || "Cloud Ask가 설정되지 않았습니다.");
+        return cloudBridge.service.recheck(args.vaultId, args.requestId);
       },
       "codex-status": () => codex.status(),
       "codex-login": () => codex.login(),

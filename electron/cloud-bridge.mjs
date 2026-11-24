@@ -36,7 +36,7 @@ export class BridgeClient {
   async view(vaultId) {
     const job = await load(this.file);
     if (!job || job.vaultId !== vaultId) return { state: job && active(job.state) ? "BUSY" : "IDLE" };
-    return { state: job.state, requestId: job.request.id, prompt: job.request.prompt, answer: job.answer, lastChecked: job.lastChecked };
+    return { state: job.state, requestId: job.request.id, prompt: job.request.prompt, answer: job.answer, reason: job.reason, lastChecked: job.lastChecked };
   }
 
   submit(vaultId, prompt) {
@@ -52,35 +52,49 @@ export class BridgeClient {
   tick() {
     return this.enqueue(async () => {
       const job = await load(this.file);
-      if (!job || !active(job.state)) return;
-      const request = job.request;
-      const result = await this.git.read("job/" + request.id);
-      if (result) {
-        const value = result.value;
-        if (value.id !== request.id || value.requestDigest !== digest(request) ||
-            !["RUNNING", "COMPLETED", "FAILED"].includes(value.state) ||
-            !Number.isSafeInteger(value.at) || value.at < request.created - 60000 ||
-            (value.state === "COMPLETED" && !textFits(value.answer, MAX_ANSWER)))
-          throw new Error("응답이 원래 질문과 일치하지 않습니다.");
-        if (value.at <= request.created + lifetime) {
-          job.state = value.state;
-          if (value.state === "COMPLETED") job.answer = value.answer;
-        }
-      }
-      if (active(job.state) && Date.now() >= request.created + lifetime) {
-        job.state = "TIMEOUT";
-      } else if (job.state === "SUBMITTED") {
-        const old = await this.git.read("request", true);
-        if (old?.value.id === request.id) {
-          if (digest(old.value) !== digest(request)) throw new Error("같은 요청 ID의 내용이 다릅니다.");
-        } else {
-          await this.git.write("request", request, old?.oid);
-        }
-        job.state = "QUEUED";
-      }
-      job.lastChecked = Date.now();
-      await save(this.file, job);
+      if (job && active(job.state)) await this.update(job);
     });
+  }
+
+  recheck(vaultId, requestId) {
+    return this.enqueue(async () => {
+      const job = await load(this.file);
+      if (!job || job.vaultId !== vaultId || job.request.id !== requestId || job.state !== "TIMEOUT")
+        throw new Error("다시 확인할 질문을 선택해 주세요.");
+      await this.update(job);
+      return this.view(vaultId);
+    });
+  }
+
+  async update(job) {
+    const request = job.request;
+    const deadline = request.created + lifetime;
+    const result = await this.git.read("job/" + request.id);
+    if (result) {
+      const value = result.value;
+      if (value.id !== request.id || value.requestDigest !== digest(request) ||
+          !["RUNNING", "COMPLETED", "FAILED"].includes(value.state) ||
+          !Number.isSafeInteger(value.at) || value.at < request.created - 60000 ||
+          (value.state === "COMPLETED" && !textFits(value.answer, MAX_ANSWER)))
+        throw new Error("응답이 원래 질문과 일치하지 않습니다.");
+      if (value.at <= deadline && (job.state !== "TIMEOUT" || value.state !== "RUNNING")) {
+        job.state = value.state;
+        if (value.state === "COMPLETED") job.answer = value.answer;
+        if (value.state === "FAILED" && value.reason === "OUTCOME_UNKNOWN") job.reason = value.reason;
+      }
+    }
+    if (job.state === "SUBMITTED" && Date.now() < deadline) {
+      const old = await this.git.read("request", true);
+      if (old?.value.id === request.id) {
+        if (digest(old.value) !== digest(request)) throw new Error("같은 요청 ID의 내용이 다릅니다.");
+      } else if (Date.now() < deadline) {
+        await this.git.write("request", request, old?.oid);
+      }
+      job.state = "QUEUED";
+    }
+    if (active(job.state) && Date.now() >= deadline) job.state = "TIMEOUT";
+    job.lastChecked = Date.now();
+    await save(this.file, job);
   }
 }
 
@@ -97,34 +111,49 @@ export class BridgeWorker {
     await save(this.file, null);
   }
 
+  async execute({ request, receipt }) {
+    const name = "job/" + request.id;
+    const tip = await this.git.read(name, true);
+    if ((tip && digest(tip.value) !== digest(receipt)) || Date.now() >= request.created + lifetime) {
+      await save(this.file, null);
+      return;
+    }
+    const claim = tip?.oid ?? await this.git.write(name, receipt);
+    // From here a restart publishes uncertainty instead of repeating a possibly billed call.
+    await save(this.file, { claim, result: { ...receipt, state: "FAILED", reason: "OUTCOME_UNKNOWN" } });
+    let answer;
+    try {
+      if (Date.now() < request.created + lifetime) answer = await this.ask(request.prompt, request.id);
+    } catch { /* Only the signed failure code crosses the transport. */ }
+    const at = Date.now();
+    const result = textFits(answer, MAX_ANSWER) && at <= request.created + lifetime
+      ? { ...receipt, at, state: "COMPLETED", answer } : { ...receipt, at, state: "FAILED" };
+    const completed = { claim, result };
+    await save(this.file, completed);
+    await this.publish(completed);
+  }
+
   async tick() {
     if (this.running) return;
     this.running = true;
     try {
       const pending = await load(this.file);
-      if (pending) return await this.publish(pending);
+      if (pending?.result) return await this.publish(pending);
       const latest = await this.git.read("request");
       if (!latest) return;
       const request = latest.value;
       if (!uuid(request?.id) || !textFits(request.prompt, 8192) || !Number.isSafeInteger(request.created) ||
           request.created > Date.now() + 60000 || Object.keys(request).sort().join(",") !== "created,id,prompt")
         throw new Error("유효하지 않은 Cloud 질문입니다.");
+      if (pending?.receipt?.requestDigest === digest(request))
+        return await this.execute({ request, receipt: pending.receipt });
+      if (pending) await save(this.file, null);
       if (Date.now() >= request.created + lifetime) return;
       const name = "job/" + request.id;
       if (await this.git.read(name, true)) return;
-      const receipt = { id: request.id, requestDigest: digest(request), state: "RUNNING", at: Date.now() };
-      const claim = await this.git.write(name, receipt);
-      // A restart after this point must never repeat a possibly billed request.
-      let answer;
-      try {
-        if (Date.now() < request.created + lifetime) answer = await this.ask(request.prompt, request.id);
-      } catch { /* Only the signed failure code crosses the transport. */ }
-      const at = Date.now();
-      const result = textFits(answer, MAX_ANSWER) && at <= request.created + lifetime
-        ? { ...receipt, at, state: "COMPLETED", answer } : { ...receipt, at, state: "FAILED" };
-      const completed = { claim, result };
-      await save(this.file, completed);
-      await this.publish(completed);
+      const receipt = { id: request.id, requestDigest: digest(request), claimId: randomUUID(), state: "RUNNING", at: Date.now() };
+      await save(this.file, { receipt });
+      await this.execute({ request, receipt });
     } finally { this.running = false; }
   }
 }

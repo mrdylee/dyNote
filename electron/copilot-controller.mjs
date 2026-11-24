@@ -74,24 +74,41 @@ export class CopilotController {
   }
 
   send(input) {
+    const job = this.#startJob(input);
+    return { requestId: job.id };
+  }
+
+  async askOnCloud({ prompt, requestId, model, login }) {
+    if (typeof login !== "string" || !login.trim()) throw new Error("Cloud 실행 계정을 확인해 주세요.");
+    const job = this.#startJob({ requestId, model, prompt, vaultId: "cloud-ask", mode: "chat",
+      context: { kind: "none" }, references: [], history: [], vaultAccess: false }, login);
+    const terminal = await job.promise;
+    if (terminal?.type !== "done") throw new Error("Cloud Copilot 실행 실패");
+    return terminal.content;
+  }
+
+  #startJob(input, login) {
     const args = prepareRequest(input);
     if (this.closed) throw new Error("Copilot이 종료되었습니다.");
-    if (this.loginJob || this.jobs.has(args.requestId)) throw new Error("Copilot 작업이 진행 중입니다.");
-    const job = { id: args.requestId, canceled: false, session: null };
+    const id = login ? "cloud:" + args.requestId : args.requestId;
+    if (this.loginJob || this.jobs.has(id)) throw new Error("Copilot 작업이 진행 중입니다.");
+    const job = { id, login, canceled: false, session: null };
     this.jobs.set(job.id, job);
     job.promise = this.run(job, args);
-    return { requestId: job.id };
+    return job;
   }
 
   async run(job, args) {
     let client, unsubscribe, content = "", failed = false, terminal;
-    const emit = (type, data = {}) => this.onEvent({ requestId: job.id, type, ...data });
+    const emit = (type, data = {}) => { if (!job.login) this.onEvent({ requestId: job.id, type, ...data }); };
     try {
       client = await this.client();
       if (job.canceled) return;
       const status = await this.status();
       if (job.canceled) return;
       if (!status.authenticated) throw new Error("먼저 GitHub Copilot에 연결해 주세요.");
+      if (job.login && status.login.toLowerCase() !== job.login.toLowerCase())
+        throw new Error("Cloud PC의 승인된 Copilot 계정을 확인해 주세요.");
       if (!status.models.some((model) => model.id === args.model))
         throw new Error(status.error || "선택한 모델을 사용할 수 없습니다. 연결 상태를 새로 확인해 주세요.");
       validateReasoningEffort(status.models.find(model => model.id === args.model), args.reasoningEffort);
@@ -171,11 +188,12 @@ export class CopilotController {
       if (job.canceled) emit("canceled");
       else if (terminal) emit(terminal.type, terminal);
     }
+    return terminal;
   }
 
   async cancel(requestId) {
     const jobs = requestId ? [this.jobs.get(requestId)].filter(Boolean) : [...this.jobs.values()];
-    await Promise.all(jobs.map(async job => {
+    await Promise.all(jobs.filter(job => this.closed || !job.login).map(async job => {
       job.canceled = true;
       await job.session?.abort().catch(() => {});
     }));

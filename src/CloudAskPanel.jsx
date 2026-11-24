@@ -5,13 +5,14 @@ const labels = {
   IDLE: "질문을 입력해 주세요.", BUSY: "다른 보관함의 질문이 진행 중입니다.",
   SUBMITTED: "Git에 질문을 제출하는 중", QUEUED: "Cloud PC 대기 중", RUNNING: "Cloud Copilot 답변 생성 중",
   COMPLETED: "답변 도착", FAILED: "Cloud에서 답변을 만들지 못했습니다. Cloud PC의 계정과 모델을 확인해 주세요.",
-  TIMEOUT: "질문의 대기 시간이 지났습니다. 다시 보내면 새 요청으로 처리됩니다.",
+  TIMEOUT: "대기 시간이 지났습니다. 도착한 답변을 다시 확인할 수 있습니다.",
 };
 const active = state => ["BUSY", "SUBMITTED", "QUEUED", "RUNNING"].includes(state);
 
 export default function CloudAskPanel({ api, session, vaultId, visible, busy, renderAnswer }) {
   const [job, setJob] = useState(null), [input, setInput] = useState("");
   const [error, setError] = useState(""), [sending, setSending] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const generation = useRef(0), submitting = useRef(false);
   useEffect(() => {
     if (!visible || !vaultId) return;
@@ -23,24 +24,26 @@ export default function CloudAskPanel({ api, session, vaultId, visible, busy, re
         if (!live || epoch !== generation.current || submitting.current) return;
         if (!result.ok) throw new Error(result.error);
         setJob(result.value);
-        setError(result.value.connectionError || "");
-      } catch (err) { if (live && epoch === generation.current) setError(err.message); }
+        setRefreshError(result.value.connectionError || "");
+      } catch (err) { if (live && epoch === generation.current) setRefreshError(err.message); }
       finally { if (live) timer = setTimeout(refresh, 1500); }
     };
     void refresh();
     return () => { live = false; clearTimeout(timer); };
   }, [api, vaultId, visible]);
 
-  const send = async event => {
-    event.preventDefault();
-    if (!input.trim() || !job || active(job.state) || submitting.current || busy) return;
+  const run = async recheck => {
+    if ((!recheck && !input.trim()) || !job || active(job.state) || submitting.current || busy) return;
     submitting.current = true;
     generation.current++;
     setSending(true);
     try {
-      const result = await api.cloudAskSubmit({ vaultId, prompt: input });
+      const result = recheck ? await api.cloudAskRecheck({ vaultId, requestId: job.requestId })
+        : await api.cloudAskSubmit({ vaultId, prompt: input });
       if (!result.ok) throw new Error(result.error);
-      setJob(result.value); setInput(""); setError("");
+      setJob(result.value);
+      if (!recheck) setInput("");
+      setError(recheck && result.value.state === "TIMEOUT" ? "아직 확정된 답변이 없습니다." : "");
     } catch (err) { setError(err.message); }
     finally { submitting.current = false; setSending(false); }
   };
@@ -56,9 +59,12 @@ export default function CloudAskPanel({ api, session, vaultId, visible, busy, re
       {job?.prompt && <article className="copilot-message user"><strong>나</strong><div className="copilot-message-content">{job.prompt}</div></article>}
       {job?.state === "COMPLETED" && <article className="copilot-message assistant"><strong>Cloud Copilot</strong>{renderAnswer(job.answer)}</article>}
     </div>
-    <p role="status" className="copilot-send-status">{vaultId ? (labels[job?.state] || "작업 확인 중…") : "질문을 보낼 보관함을 열어 주세요."}</p>
-    {error && <p role="alert" className="copilot-error">{error}</p>}
-    <form onSubmit={send} className="copilot-composer">
+    <p role="status" className="copilot-send-status">{job?.reason === "OUTCOME_UNKNOWN"
+      ? "Cloud 실행이 중단되어 답변 생성 여부를 확인할 수 없습니다. 다시 보내면 새 요청으로 처리됩니다."
+      : vaultId ? (labels[job?.state] || "작업 확인 중…") : "질문을 보낼 보관함을 열어 주세요."}</p>
+    {job?.state === "TIMEOUT" && <button type="button" className="text-action" disabled={sending || busy} onClick={() => run(true)}>기존 답변 다시 확인</button>}
+    {(error || refreshError) && <p role="alert" className="copilot-error">{error || refreshError}</p>}
+    <form onSubmit={event => { event.preventDefault(); void run(false); }} className="copilot-composer">
       <textarea aria-label="Cloud Copilot 질문" value={input} onChange={e => setInput(e.target.value)} disabled={sending}
         placeholder="Cloud PC에 질문하기" onKeyDown={e => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {

@@ -9,6 +9,7 @@ export class BridgeGit {
   constructor({ directory, remote, channel, privateKey, peerKey }) {
     Object.assign(this, { directory, remote, channel, privateKey, peerKey });
     this.ownKey = createPublicKey(privateKey);
+    this.destination = "dynote-managed-" + randomUUID();
   }
 
   async git(args, options) {
@@ -27,15 +28,23 @@ export class BridgeGit {
     return "refs/heads/dynote-bridge/" + this.channel + "/" + name;
   }
 
+  // Git expands a URL alias once. An exact, private alias binds both fetch and
+  // push to the policy URL while preserving enterprise proxies and credentials.
+  transfer(command, flags, refspec) {
+    const rule = "url." + this.remote + ".";
+    return this.git(["-c", rule + "insteadOf=" + this.destination, "-c", rule + "pushInsteadOf=" + this.destination,
+      command, ...flags, "--", this.destination, refspec]);
+  }
+
   async read(name, own = false) {
     const ref = this.ref(name);
-    const tip = await this.git(["ls-remote", "--heads", "--", this.remote, ref]);
+    const tip = await this.transfer("ls-remote", ["--heads"], ref);
     if (!tip) return null;
     const [oid, actualRef] = tip.split("\t");
     if (actualRef !== ref || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)) throw new Error("Git 작업 참조가 올바르지 않습니다.");
     // Use the immutable advertised object even if the branch moves during fetch.
     const present = await runGit(this.directory, ["cat-file", "-e", oid + "^{commit}"], { allow: [0, 1, 128] });
-    if (present.code) await this.git(["fetch", "--no-tags", "--no-recurse-submodules", "--", this.remote, ref]);
+    if (present.code) await this.transfer("fetch", ["--no-tags", "--no-recurse-submodules"], ref);
     const object = oid + ":packet.json";
     // One control byte can occupy six bytes in the JSON encoding of a 128 KiB answer.
     if (Number(await this.git(["cat-file", "-s", object])) > 800000) throw new Error("작업 데이터가 너무 큽니다.");
@@ -57,8 +66,7 @@ export class BridgeGit {
     const oid = await this.git(["-c", "user.name=Dynote", "-c", "user.email=bridge@dynote.invalid",
       "commit-tree", "--no-gpg-sign", tree, ...(parent ? ["-p", parent] : []), "-m", "Dynote job " + randomUUID()]);
     // Both a matching old tip and our declared parent are required, including first claim.
-    await this.git(["push", "--no-verify", "--porcelain", "--force-with-lease=" + ref + ":" + parent,
-      "--", this.remote, oid + ":" + ref]);
+    await this.transfer("push", ["--no-verify", "--porcelain", "--force-with-lease=" + ref + ":" + parent], oid + ":" + ref);
     return oid;
   }
 }

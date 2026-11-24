@@ -182,6 +182,26 @@ test("cancel during SDK startup prevents any model request", async () => {
   await f.controller.close();
 });
 
+test("Cloud Ask validates the managed login inside the session and survives desktop cancellation", async () => {
+  let started, finish;
+  const entered = new Promise(resolve => { started = resolve; });
+  const response = new Promise(resolve => { finish = resolve; });
+  const f = fixture({ respond: async () => { started(); return response; } });
+  try {
+    const input = { prompt: "합성", requestId: "cloud-id", model: "test-model", login: "test-user" };
+    await assert.rejects(f.controller.askOnCloud({ ...input, login: "other-user" }));
+    assert.equal(f.configurations.length, 0);
+    const result = f.controller.askOnCloud(input);
+    await entered;
+    await f.controller.cancel();
+    await f.controller.cancel("cloud-id");
+    assert.equal(f.aborted, 0);
+    finish({ data: { content: "Cloud only" } });
+    assert.equal(await result, "Cloud only");
+    assert.deepEqual(f.events, []);
+  } finally { await f.controller.close(); }
+});
+
 test("errors retain a failed state, abort work and clean the session", async () => {
   const f = fixture({ respond: async () => { throw new Error("quota exhausted"); } });
   f.controller.send(request());

@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld(
     copilotStatus: () => call("copilot-status"),
     cloudAskView: args => call("copilot-bridge-view", args),
     cloudAskSubmit: args => call("copilot-bridge-submit", args),
+    cloudAskRecheck: args => call("copilot-bridge-recheck", args),
     codexStatus: () => call("codex-status"),
     codexLogin: () => call("codex-login"),
     codexCancelLogin: () => call("codex-cancel-login"),
