@@ -1,3 +1,4 @@
+import {isGitUpdateSource, readGitUpdateInstaller} from './git-update-source.mjs';
 import {mkdir,readFile,writeFile,rename,rm,open,stat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
@@ -129,11 +130,17 @@ export class UpdateManager {
     try{
       const url=new URL(asset.url);
       if(!allowedUpdateAsset(url,asset.name,this.internalFeedUrl))throw new Error('공식 배포 경로가 아닙니다.');
-      const response=await this.fetcher(url.href,{redirect:this.internalFeedUrl === null ? 'follow' : 'error',signal:AbortSignal.timeout(30*60*1000)});
-      if(!response.ok||!response.body)throw new Error(`다운로드 실패 (${response.status})`);
+      let body;
+      if (isGitUpdateSource(this.internalFeedUrl)) {
+        body = readGitUpdateInstaller(this.internalFeedUrl, asset);
+      } else {
+        const response=await this.fetcher(url.href,{redirect:this.internalFeedUrl === null ? 'follow' : 'error',signal:AbortSignal.timeout(30*60*1000)});
+        if(!response.ok||!response.body)throw new Error(`다운로드 실패 (${response.status})`);
+        body = response.body;
+      }
       handle=await open(partial,'wx');
       let size=0,progress=-1;const hash=createHash('sha256');
-      for await(const chunk of response.body){
+      for await(const chunk of body){
         size+=chunk.length;if(size>asset.size||size>MAX_SIZE)throw new Error('배포 파일 크기가 예상과 다릅니다.');
         hash.update(chunk);await handle.writeFile(chunk);
         const next=Math.floor(size/asset.size*100);if(next!==progress){progress=next;this.emit({progress});}

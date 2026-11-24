@@ -18,11 +18,11 @@ export default function UpdateSettings({currentVersion,state,onCheck,onSettings,
       await onSettings({source:e.target.value}); setFeedDraft(null);
     })}><option value="github">GitHub</option><option value="internal">회사 내부</option></select></label>
     {internal && <>
-      <label>사내 latest.json 주소<input type="url" value={feed} disabled={busy} onChange={e=>setFeedDraft(e.target.value)}/></label>
+      <label>사내 Git 또는 latest.json 주소<input type="url" value={feed} disabled={busy} onChange={e=>setFeedDraft(e.target.value)}/></label>
       <button disabled={busy || !feedChanged} onClick={()=>run(async()=>{
         await onSettings({internalFeedUrl:feed.trim()}); setFeedDraft(null);
       })}>주소 저장</button>
-      {!savedFeed && <p className="muted">사내 배포 주소를 저장하면 업데이트를 확인할 수 있습니다.</p>}
+      {!savedFeed && <p className="muted">HTTPS 저장소 주소(.git)를 저장하면 기본 브랜치의 dynote/latest.json을 확인합니다. Windows 설치 파일 다운로드에는 Git LFS가 필요합니다.</p>}
     </>}
     <label><input type="checkbox" aria-label={frequency+' 업데이트 자동 확인'} checked={preferences.enabled} disabled={busy} onChange={e=>run(()=>onSettings({enabled:e.target.checked}))}/>{frequency} 업데이트 자동 확인</label>
     <label><input type="checkbox" aria-label="백그라운드 다운로드" checked={preferences.backgroundDownload} disabled={busy} onChange={e=>run(()=>onSettings({backgroundDownload:e.target.checked}))}/>새 버전을 백그라운드에서 다운로드</label>
