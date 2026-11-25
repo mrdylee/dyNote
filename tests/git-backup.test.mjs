@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { GitBackup, runGit, validateGitConfig } from "../core/git-backup.mjs";
+import { copyStabilityMs } from "../core/personal-sync.mjs";
 
 const remote = "https://backup.test/notes.git";
 const config = { remote, branch: "main", interval: 420, authorName: "Dynote Test", authorEmail: "test@example.invalid" };
@@ -93,12 +94,12 @@ test("Git failures distinguish a missing remote, fetch, porcelain policy rejecti
   await assert.rejects(push("HEAD~1"), error => error.syncStage === "push" && error.syncReason === "non-fast-forward");
 });
 
-async function personalController(t, realClock = false) {
+async function personalController(t) {
   const { GitController } = await import("../electron/git-controller.mjs");
   const f = await fixture(), clock = { time: Date.UTC(2026, 10, 24, 9) };
   const id = "personal", vault = { id, root: await realpath(f.root) }, settingsFile = path.join(f.dir, "backup.json");
   const counters = { queries: 0, pushes: 0 };
-  const options = { settingsFile, isPersonal: () => true, now: () => realClock ? new Date() : new Date(clock.time), setTimer: () => null,
+  const options = { settingsFile, isPersonal: () => true, now: () => new Date(clock.time), setTimer: () => null,
     run: (root, args, opts) => {
       if (args[0] === "ls-remote") counters.queries++;
       if (args[0] === "push") counters.pushes++;
@@ -267,7 +268,7 @@ test("legacy personal poll times do not appear as verified uploads after opening
 });
 
 test("one manual check preserves incoming changes and uploads a completed copy while leaving an incomplete PDF pending", async t => {
-  const f = await personalController(t, true);
+  const f = await personalController(t);
   await f.controller.connect(f.id, f.cfg);
   const other = path.join(f.dir, "other");
   f.git(f.dir, "clone", f.bare, other);
@@ -281,14 +282,22 @@ test("one manual check preserves incoming changes and uploads a completed copy w
   await writeFile(path.join(storage, "partial.pdf"), "%PDF-1.4\ncopy in progress");
   await writeFile(path.join(storage, "changing.pdf"), "%PDF-1.4\nfirst\n%%EOF\n");
   const personal = f.controller.personal, sync = personal.sync.bind(personal);
-  let passes = 0;
+  let changedAt, waited;
   personal.sync = async (...args) => {
+    if (changedAt !== undefined) {
+      waited = performance.now() - changedAt;
+      f.clock.time += copyStabilityMs;
+    }
     const result = await sync(...args);
-    if (++passes === 1) await writeFile(path.join(storage, "changing.pdf"), "%PDF-1.4\nsecond version\n%%EOF\n");
+    if (changedAt === undefined) {
+      await writeFile(path.join(storage, "changing.pdf"), "%PDF-1.4\nsecond version\n%%EOF\n");
+      changedAt = performance.now();
+    }
     return result;
   };
   const before = f.counters.queries;
   const result = await f.controller.sync(f.id, { personalOnly: true });
+  assert.ok(waited >= copyStabilityMs - 5, "manual sync waited before checking the copies again");
   assert.deepEqual(result.pendingFiles.map(file => file.name).sort(), ["File Storage/changing.pdf", "File Storage/partial.pdf"]);
   assert.ok(result.changed.includes("Incoming.md"));
   assert.equal(f.counters.queries, before + 2, "the follow-up checks once even when a file is still incomplete");
