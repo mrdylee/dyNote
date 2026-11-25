@@ -93,7 +93,7 @@ async function launch(name, seed) {
       },
       { method, args }
     );
-  const status = await invoke("connectGit", {
+  let status = await invoke("connectGit", {
     config: {
       remote,
       branch: "main",
@@ -104,6 +104,7 @@ async function launch(name, seed) {
       zipPaths: [],
     },
   });
+  if (status.phase === "pending") status = await invoke("syncGit");
   assert.equal(status.phase, "synced", status.message);
   return { page, root, tree, invoke, sync: () => invoke("syncGit") };
 }

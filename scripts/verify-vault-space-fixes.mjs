@@ -26,6 +26,8 @@ try{
  const personalGit=page.getByRole('button',{name:'동기화 설정',exact:true});
  await page.locator('.vault-entry-list').screenshot({path:'output/playwright/personal-git-settings.png'});
  await openVaultSection(page,'개인 노트'); await personalGit.click();
+ await page.getByRole('button',{name:'GitHub 로그인',exact:true}).waitFor();
+ await page.getByLabel('Git 사용 방식').selectOption('personal-sync');
  await page.locator('.git-space-context').getByText(personal,{exact:true}).waitFor();
  await page.getByText('이 폴더에 Git 저장소가 없습니다.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
@@ -44,7 +46,8 @@ try{
  await row(personal).getByText('Git 저장소 없음',{exact:true}).waitFor();
  assert.equal(await row(personal).getByText(fetch,{exact:true}).count(),0);
  await personalGit.click();
- await page.locator('.git-space-context').getByText(personal,{exact:true}).waitFor();
+ await page.getByRole('button',{name:'GitHub 로그인',exact:true}).waitFor();
+ await page.getByRole('dialog').getByText(personal,{exact:true}).waitFor();
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
  await openVaultSection(page,'팀 노트'); await selected(team).waitFor();
  for(const space of [personal,team])assert.deepEqual(await readdir(path.join(space,'File Storage')),[]);
