@@ -16,6 +16,7 @@ function fixture(answers = []) {
     requests.push(call);
     const response = answers.shift();
     assert(response, "unexpected request " + url);
+    if (response instanceof Response) return response;
     return Response.json(typeof response === "function" ? await response(call) : response);
   };
   const login = new GitHubLogin({ fetcher, now: () => now, openExternal: async url => opened.push(url) });
@@ -57,6 +58,15 @@ test("cancel, expiry and a denied grant end login without connecting", async () 
   await assert.rejects(login.poll(third.id), /취소/);
   await assert.rejects(login.repositories(third.id), /다시/);
   assert.equal(requests.length, 4);
+});
+
+test("a pending device grant sent as an OAuth HTTP 400 continues polling", async () => {
+  const {login, advance} = fixture([challenge, Response.json({error:"authorization_pending"},{status:400}), grant]);
+  const {id} = await login.start();
+  advance(5000);
+  assert.equal((await login.poll(id)).waitMs,5000);
+  advance(5000);
+  assert.deepEqual(await login.poll(id),{authorized:true});
 });
 
 test("repository selection only offers writable installed repositories and resolves its current default branch", async () => {

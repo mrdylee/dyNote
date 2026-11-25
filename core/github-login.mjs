@@ -24,16 +24,20 @@ export class GitHubLogin {
   constructor({fetcher = fetch, openExternal, now = Date.now}) {
     Object.assign(this, {fetcher, openExternal, now});
   }
-  async json(url, options) {
+  async json(url, options, oauth = false) {
     const response = await this.fetcher(url, {...options, redirect:"error", signal:AbortSignal.timeout(30000)});
+    if (response.ok) return response.json();
+    if (oauth && response.status === 400) {
+      const details = await response.json().catch(() => null);
+      if (typeof details?.error === "string") return {error:details.error, interval:details.interval};
+    }
     if (response.status === 401) throw loginAgain();
-    if (!response.ok) throw new Error("GitHub 연결을 확인해 주세요 (HTTP " + response.status + ").");
-    return response.json();
+    throw new Error("GitHub 연결을 확인해 주세요 (HTTP " + response.status + ").");
   }
   async oauth(endpoint, fields) {
     return this.json("https://github.com/login/" + endpoint, {
       method:"POST", headers:{Accept:"application/json"}, body:new URLSearchParams(fields),
-    });
+    }, true);
   }
   async start() {
     const session = this.session = {id:randomUUID(), repos:new Map()};
