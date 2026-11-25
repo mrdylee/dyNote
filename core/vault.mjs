@@ -307,7 +307,7 @@ export class Vault {
     return target;
   }
 
-  applySnapshot(files, expectedRevision, selection = null, { includeSnapshot = true } = {}) {
+  applySnapshot(files, expectedRevision, selection = null, { includeSnapshot = true, onApplied } = {}) {
     const capture = () => selection ? this.#captureSelection(selection) : this.#captureFiles();
     const validPath = selection ? validPersonalFilePath : validFilePath;
     if (selection && files.some(file => !selection.includes(file.path))) throw new Error("복원 대상이 변경되었습니다.");
@@ -372,7 +372,9 @@ export class Vault {
             throw new Error(`복원 중 외부 변경이 감지되었습니다: ${name}`);
           await replace(name, target.get(name)); applied.push(name);
         }
-        return { recoveryPath, snapshot: includeSnapshot ? await this.#snapshot() : undefined };
+        const snapshot = includeSnapshot ? await this.#snapshot() : undefined;
+        await onApplied?.();
+        return { recoveryPath, snapshot };
       } catch (error) {
         for (const name of applied.reverse()) {
           try {

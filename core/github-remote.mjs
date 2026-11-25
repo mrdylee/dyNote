@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { validateGitConfig } from "./git-backup.mjs";
 import { validPersonalFilePath } from "./vault.mjs";
 import { blobLimit } from "./personal-sync-store.mjs";
@@ -28,7 +28,7 @@ export class GitHubRemote {
     this.token = token;
     this.fetcher = fetcher;
   }
-  async request(route, method = "GET", body) {
+  async request(route, method = "GET", body, onResponse) {
     const response = await this.fetcher(this.url + route, {
       method,
       redirect: "error",
@@ -48,6 +48,7 @@ export class GitHubRemote {
         status: response.status,
       });
     }
+    onResponse?.(response);
     return response.json();
   }
   async head() {
@@ -59,6 +60,46 @@ export class GitHubRemote {
       if (repo.default_branch !== this.branch || (await this.request("/branches?per_page=1")).length) throw error;
       return null;
     }
+  }
+  async contains(commit, head) {
+    if (commit === head) return true;
+    if (!head) return false;
+    try {
+      return (await this.request("/compare/" + oid(commit) + "..." + oid(head))).status === "ahead";
+    } catch (error) {
+      if (error.status === 404) return false;
+      throw error;
+    }
+  }
+  async findSeed(seed, head) {
+    if (!head) return null;
+    const route = "/commits?sha=" + oid(head) + "&path=" + encodeURIComponent(seed.name) + "&per_page=100";
+    const readPage = async (page) => {
+      let next, last;
+      const rows = await this.request(route + "&page=" + page, "GET", undefined, response => {
+        for (const [, url, relation] of (response.headers.get("link") ?? "").matchAll(/<([^>]+)>;\s*rel="(next|last)"/gi)) {
+          const number = Number(new URL(url).searchParams.get("page"));
+          if (relation.toLowerCase() === "next") {
+            if (!Number.isSafeInteger(number) || number <= page) throw new Error("GitHub 커밋 이력 페이지를 확인하지 못했습니다.");
+            next = number;
+          } else if (Number.isSafeInteger(number) && number > page) last = number;
+        }
+      });
+      return { candidate: rows.find(row => row.commit.message === seed.message), next, last };
+    };
+    const first = await readPage(1);
+    let candidate = first.candidate, next = first.next;
+    // The initial upload normally introduced this path. Check its oldest page before the intervening edits.
+    const checkLast = first.last && first.last !== first.next;
+    if (!candidate && checkLast) candidate = (await readPage(first.last)).candidate;
+    while (!candidate && next && (!checkLast || next !== first.last)) {
+      const page = await readPage(next);
+      candidate = page.candidate;
+      next = page.next;
+    }
+    if (!candidate) return null;
+    const sha = oid(candidate.sha);
+    return (await this.snapshot(sha)).files.get(seed.name) === seed.sha ? sha : null;
   }
   async snapshot(head, previous) {
     if (previous && head !== previous) {
@@ -86,14 +127,16 @@ export class GitHubRemote {
       throw new Error("GitHub에서 받은 파일의 내용이 버전과 일치하지 않습니다.");
     return bytes;
   }
-  async publish(head, snapshot, updates, read) {
+  async publish(head, snapshot, updates, read, beforeRefUpdate) {
     const message = "Dynote 개인 노트 동기화";
     if (!head) {
       // GitHub cannot create a Git reference in an empty repository. Seed with a real note.
       const [name, sha] = updates.entries().next().value;
       const content = (await read(name, sha)).toString("base64");
+      const seed = { name, sha, message: message + "\n\nDynote-Seed: " + randomUUID() };
+      await beforeRefUpdate?.({ seed });
       const created = await this.request("/contents/" + name.split("/").map(encodeURIComponent).join("/"), "PUT", {
-        message,
+        message: seed.message,
         content,
         branch: this.branch,
       });
@@ -135,7 +178,9 @@ export class GitHubRemote {
       tree: oid(created.sha),
       parents: [head],
     });
-    await this.request("/git/refs/" + this.ref, "PATCH", { sha: oid(commit.sha), force: false });
-    return commit.sha;
+    const sha = oid(commit.sha);
+    await beforeRefUpdate?.({ head: sha });
+    await this.request("/git/refs/" + this.ref, "PATCH", { sha, force: false });
+    return sha;
   }
 }

@@ -308,9 +308,10 @@ export class GitController {
             : {encryptedToken:this.secretStorage.encryptString(token).toString("base64")};
           const remote = new GitHubRemote(config,token,this.fetcher);
           await remote.head(); // Verify the new connection before replacing the saved one.
+          if (selected) this.githubLogin.current(input.sessionId);
           const lastSuccess = same ? old.lastSuccess ?? null : null;
           const apiConflicts = same ? old.apiConflicts ?? [] : [];
-          this.records[id] = {...config,enabled:true,...secret,apiBase:same ? old.apiBase : null,lastSuccess,apiConflicts};
+          this.records[id] = {...config,enabled:true,...secret,apiConnectionId:same ? old.apiConnectionId : randomUUID(),apiBase:same ? old.apiBase : null,lastSuccess,apiConflicts};
           try { await this.persist(); } catch (error) { this.records[id]=old; throw error; }
           this.pendingRefresh = null;
           if (selected) this.githubLogin.cancel(input.sessionId);
@@ -442,15 +443,22 @@ export class GitController {
         const record = this.records[this.vault.id];
         const token = await this.apiToken(record);
         const remote = new GitHubRemote(this.current.config,token,this.fetcher);
-        const result = await syncApiVault(this.vault,remote,record.apiBase,this.apiCache,announce);
+        const result = await syncApiVault(this.vault,remote,record.apiBase,this.apiCache,announce,record.apiConnectionId);
         const time = this.now().toISOString();
         const lastSuccess = result.uploaded ? time : record.lastSuccess ?? null;
         this.retryAfter=0;
         const apiConflicts = result.conflicts.length ? result.conflicts : record.apiConflicts ?? [];
         if (record.apiBase !== result.state)
           await this.updatePersonalRecord({apiBase:result.state,lastSuccess,lastRemoteCheck:time,apiConflicts});
-        const message = result.conflicts.length ? "충돌 처리 · "+result.conflicts.join(", ") : "동기화됨";
-        return this.publish({phase:"synced",message,changed:result.changed,apiConflicts,lastSuccess,lastRemoteCheck:time});
+        let pending = false;
+        const checkedRevision = this.revision;
+        if (revision !== checkedRevision) {
+          const files = await scanApiFiles(this.vault, this.apiCache);
+          pending = checkedRevision !== this.revision || files.size !== result.state.files.length ||
+            result.state.files.some(([name, sha]) => files.get(name) !== sha);
+        }
+        const message = pending ? "새 변경사항 전송 대기" : result.conflicts.length ? "충돌 처리 · "+result.conflicts.join(", ") : "동기화됨";
+        return this.publish({phase:pending ? "pending" : "synced",message,changed:result.changed,apiConflicts,lastSuccess,lastRemoteCheck:time});
       }
       if (progress) {
         const service=await this.startPersonal();
@@ -493,9 +501,18 @@ export class GitController {
   }
   disconnect(id) {
     return this.enqueue(async () => {
-      this.check(id); this.close();
+      this.check(id);
+      if (this.records[id]) {
+        const record = {...this.records[id], enabled:false};
+        delete record.encryptedToken;
+        delete record.encryptedLogin;
+        delete record.personalFailure;
+        try { await this.persist(record); }
+        catch (cause) { throw new Error("연결 해제를 저장하지 못했습니다. 현재 연결 상태를 유지합니다. 저장 공간과 쓰기 권한을 확인해 주세요.", {cause}); }
+        this.records[id] = record;
+      }
+      this.close();
       this.githubLogin.cancel(this.githubLogin.session?.id); this.pendingRefresh = null;
-      if (this.records[id]) { this.records[id].enabled = false; delete this.records[id].encryptedToken; delete this.records[id].encryptedLogin; delete this.records[id].personalFailure; await this.persist(); }
       this.personal=null;
       return this.publish({ enabled: false, phase: "off", message: "Git 자동 저장 꺼짐",...clearPersonalDetails() });
     });

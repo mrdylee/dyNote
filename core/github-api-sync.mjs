@@ -1,7 +1,8 @@
-import { readdir, lstat } from "node:fs/promises";
+import { readdir, lstat, readFile, rm, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { validPersonalFilePath } from "./vault.mjs";
 import { completeArchive } from "./personal-sync.mjs";
+import { atomicJson } from "./personal-sync-disk.mjs";
 import { blobSha } from "./github-remote.mjs";
 
 function checkNames(names) {
@@ -108,8 +109,28 @@ function changed(from, to) {
   return [...new Set([...from.keys(), ...to.keys()])].filter((name) => from.get(name) !== to.get(name));
 }
 
-export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
+export async function syncApiVault(vault, remote, previous, cache, onTransfer, connectionId) {
   const base = new Map(previous?.files || []);
+  const baseHead = previous?.head ?? null;
+  const target = { remote: remote.url, branch: remote.branch, connection: connectionId ?? null, baseHead };
+  const receiptFile = remote.url && remote.branch && vault.recoveryRoot && path.join(vault.recoveryRoot, "github-api-receipt.json");
+  let receipt;
+  if (receiptFile) {
+    try { receipt = JSON.parse(await readFile(receiptFile, "utf8")); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  if (!receipt || receipt.remote !== target.remote || receipt.branch !== target.branch || receipt.connection !== target.connection)
+    receipt = null;
+  if (receipt && !receipt.pending && previous && receipt.head === baseHead) {
+    await rm(receiptFile);
+    receipt = null;
+  }
+  if (receipt?.baseHead !== baseHead) receipt = null;
+  const applied = new Map(receipt?.files);
+  for (const [name, sha] of applied) {
+    if (sha) base.set(name, sha);
+    else base.delete(name);
+  }
   const local = await scanApiFiles(vault, cache);
   const read = async (name, expected) => {
     const file = (await vault.captureSelection([name])).files[0];
@@ -118,13 +139,44 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
     if (!completeArchive(name, file.bytes)) throw new Error("파일 복사 완료 후 다시 동기화해 주세요: " + name);
     return file.bytes;
   };
-  let uploaded = false, seedCommit = null;
+  let uploaded = receipt?.uploaded ?? false, seedCommit = null;
+  let anchor = receipt?.head ?? previous?.head;
+  let pending = receipt?.pending;
+  const writeReceipt = async (head, files, pendingCommit) => {
+    if (!receiptFile) return;
+    await mkdir(vault.recoveryRoot, { recursive: true, mode: 0o700 });
+    const directory = await realpath(vault.recoveryRoot);
+    if (directory === vault.root || directory.startsWith(vault.root + path.sep))
+      throw new Error("동기화 복구 기록은 보관함 밖에 보관해야 합니다.");
+    await atomicJson(receiptFile, { ...target, head, files: [...files], uploaded, pending: pendingCommit });
+  };
+  const remember = async (head, names, desired) => {
+    const files = new Map(applied);
+    for (const name of names) files.set(name, desired.get(name) ?? null);
+    await writeReceipt(head, files);
+    for (const name of names) applied.set(name, files.get(name));
+  };
   for (let attempt = 0; attempt < 4; attempt++) {
     let head = seedCommit ?? await remote.head();
     seedCommit = null;
-    if (previous && head === previous.head && !changed(base, local).length)
+    if (pending) {
+      const confirmed = pending.seed ? await remote.findSeed(pending.seed, head) :
+        (await remote.contains(pending.head, head) ? pending.head : null);
+      if (confirmed) {
+        for (const [name, sha] of pending.files) {
+          applied.set(name, sha);
+          if (sha) base.set(name, sha);
+          else base.delete(name);
+        }
+        anchor = confirmed;
+        uploaded = true;
+      }
+      await writeReceipt(anchor ?? null, applied);
+      pending = null;
+    }
+    if (!receipt && previous && head === previous.head && !changed(base, local).length)
       return { state: previous, changed: [], conflicts: [], uploaded: false };
-    const snapshot = await remote.snapshot(head, previous?.head);
+    const snapshot = await remote.snapshot(head, anchor);
     const { desired, copies, conflicts } = plan(base, local, snapshot.files);
     const outgoing = changed(snapshot.files, desired);
     const source = (name) => copies.get(name) ?? name;
@@ -132,9 +184,19 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
     if (outgoing.length || incoming.length) onTransfer();
     if (outgoing.length) {
       const updates = new Map(outgoing.map((name) => [name, desired.get(name) ?? null]));
+      const publishedPaths = head ? outgoing : outgoing.slice(0, 1);
+      // A generated conflict copy becomes part of this PC's baseline only once its bytes reach disk.
+      const localUpdates = publishedPaths.filter(name => local.get(name) === desired.get(name));
+      let proposed = false;
       try {
-        const published = await remote.publish(head, snapshot, updates, (name, sha) => read(source(name), sha));
+        const published = await remote.publish(head, snapshot, updates, (name, sha) => read(source(name), sha), async (candidate) => {
+          proposed = true;
+          // The ref may advance even when the connection drops before its response arrives.
+          await writeReceipt(anchor ?? null, applied, { ...candidate, files: localUpdates.map(name => [name, desired.get(name) ?? null]) });
+        });
         uploaded = true;
+        await remember(published, localUpdates, desired);
+        anchor = published;
         if (!head && outgoing.length > 1) {
           // The Contents API confirmed this commit even if the ref endpoint still reports an empty repo.
           seedCommit = published;
@@ -142,6 +204,7 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
         }
         head = published;
       } catch (error) {
+        if (proposed && error.status >= 400 && error.status < 500) await writeReceipt(anchor ?? null, applied);
         if ([409, 422].includes(error.status) && (await remote.head()) !== head) continue;
         throw error;
       }
@@ -167,7 +230,10 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
         const sha = desired.get(name);
         if (sha) files.push({ path: name, bytes: await remote.download(sha) });
       }
-      await vault.applySnapshot(files, before.revision, batch, { includeSnapshot: false });
+      await vault.applySnapshot(files, before.revision, batch, {
+        includeSnapshot: false,
+        onApplied: () => remember(head, batch, desired),
+      });
       start = end;
     }
     return { state: { head, files: [...desired] }, changed: incoming, conflicts, uploaded };
