@@ -9,6 +9,7 @@ import {
   shell,
   Menu,
   clipboard,
+  safeStorage,
   powerMonitor,
 } from "electron";
 import { existsSync } from "node:fs";
@@ -127,6 +128,7 @@ function openVaultController(target, refresh = false) {
     return existing;
   }
   const git = new GitController({
+    secretStorage:safeStorage,
     settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
     isPersonal: target => registry.purposes[target.root] === "personal",
     onStatus: status => {
@@ -686,7 +688,7 @@ app
       "set-vault-purpose": async (args) => {
         await registry.setPurpose(args?.root, args?.purpose);
         const entry = [...openedVaults.values()].find(entry => entry.vault.root === args.root);
-        if (entry && args.purpose!=="personal" && entry.git.status().config?.mode==="personal-sync") await entry.git.disconnect(entry.vault.id);
+        if (entry && args.purpose!=="personal" && ["personal-sync","github-api"].includes(entry.git.status().config?.mode)) await entry.git.disconnect(entry.vault.id);
         if (entry) await entry.vault.prepareFileStorage();
         else await Vault.open(args.root, recovery, args.purpose);
         pruneVaultControllers();

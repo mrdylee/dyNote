@@ -77,7 +77,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, teamSe
   const sync = gitStates[personalId];
   const personalStatus = !personalSpaces.length ? "폴더 선택" : personalSpaces.length > 1 ? `폴더 ${personalSpaces.length}개`
     : !sync ? personalSpaces[0].name : !sync.enabled ? "이 PC에만 저장 중"
-    : sync.config?.mode === "personal-sync" ? sync.message : "일일 백업 사용 중";
+    : ["personal-sync","github-api"].includes(sync.config?.mode) ? sync.message : "일일 백업 사용 중";
   function enter(next) {
     if (section === next) { setSection(null); return; }
     setSection(next); setError(""); setMessage(""); setImporting(false);

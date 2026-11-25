@@ -39,7 +39,7 @@ export function personalConfig(input) {
   return { ...config, mode: "personal-sync", push: true, deviceName: name };
 }
 
-function completeArchive(name, bytes) {
+export function completeArchive(name, bytes) {
   if (/\.pdf$/i.test(name)) return /%%EOF\s*$/.test(bytes.subarray(-1024).toString("latin1"));
   if (!/\.(zip|xlsx|pptx)$/i.test(name)) return true;
   const start = Math.max(0, bytes.length - 65557);

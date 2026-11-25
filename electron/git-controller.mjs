@@ -6,6 +6,8 @@ import { readdir } from "node:fs/promises";
 import { PersonalSync, copyStabilityMs, installDevice, personalConfig } from "../core/personal-sync.mjs";
 import { validPersonalFilePath } from "../core/vault.mjs";
 import { GitBackup, gitFailureMessages, validateGitConfig, runGit } from "../core/git-backup.mjs";
+import { apiConfig, GitHubRemote } from "../core/github-remote.mjs";
+import { preserveApiDraft, scanApiFiles, syncApiVault } from "../core/github-api-sync.mjs";
 import appPackage from "../package.json" with { type: "json" };
 
 const dayKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -60,8 +62,8 @@ function personalErrorStatus(failure, detail, setup = false) {
 }
 
 export class GitController {
-  constructor({ settingsFile, run = runGit, onStatus = () => {}, isPersonal = () => false, setTimer = setInterval, clearTimer = clearInterval, now = () => new Date() }) {
-    Object.assign(this, { settingsFile, run, onStatus, isPersonal, setTimer, clearTimer, now });
+  constructor({ settingsFile, secretStorage, fetcher = fetch, run = runGit, onStatus = () => {}, isPersonal = () => false, setTimer = setInterval, clearTimer = clearInterval, now = () => new Date() }) {
+    Object.assign(this, { settingsFile, secretStorage, fetcher, run, onStatus, isPersonal, setTimer, clearTimer, now });
     this.records = {}; this.tail = Promise.resolve(); this.timer = null; this.generation = 0;
     this.revision = 0; this.pendingSync = null; this.retryAfter = 0;
     this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
@@ -115,6 +117,14 @@ export class GitController {
     await visit("");return names.sort();
   }
   async saveNote(name,content,revision,save) {
+    if (this.current.enabled && this.current.config?.mode==="github-api") {
+      try { return await save(); } catch (error) {
+        if (error.code!=="ENOENT" && !/외부.*변경/.test(error.message)) throw error;
+        const draft = await preserveApiDraft(this.vault,name,content);
+        this.publish({phase:"pending",message:"편집 중인 초안을 보존했습니다 · "+draft.conflictPath,changed:[draft.conflictPath]});
+        return draft;
+      }
+    }
     if(!this.current.enabled || this.current.config?.mode!=="personal-sync")return save();
     try { return await save(); } catch(error) {
       if (!this.isPersonal(this.vault) || (error.code!=="ENOENT" && !/외부.*변경/.test(error.message))) throw error;
@@ -171,7 +181,8 @@ export class GitController {
         this.watcher.on("error",()=>this.watcher?.close());
       } catch { /* Periodic discovery also covers hosts without recursive watch. */ }
     }
-    this.timer = this.setTimer(() => generation === this.generation ? this.sync(id, { automatic: true, personalOnly:personal }).catch(() => {}) : undefined, personal ? 55000+Math.floor(Math.random()*5000) : 60000);
+    const twoWay = personal || this.current.config?.mode === "github-api";
+    this.timer = this.setTimer(() => generation === this.generation ? this.sync(id, { automatic: true, personalOnly:twoWay }).catch(() => {}) : undefined, twoWay ? 55000+Math.floor(Math.random()*5000) : 60000);
     this.timer?.unref?.();
   }
   async persist() {
@@ -197,7 +208,7 @@ export class GitController {
   open(vault) {
     this.close();
     return this.enqueue(async () => {
-      this.vault = vault; this.personal=null;
+      this.vault = vault; this.personal=null; this.apiCache=new Map();
       this.canonicalRoot = await realpath(vault.root);
       this.service = new GitBackup(vault.root, this.run);
       this.retryAfter = 0;
@@ -213,13 +224,14 @@ export class GitController {
             // Keep the connection usable if settings are temporarily read-only. The next result also persists these fields.
             await this.persist().catch(() => {});
           }
-          const enabled = record.enabled === true && (!personal || this.isPersonal(vault));
+          const api = record.mode === "github-api";
+          const enabled = record.enabled === true && (!(personal || api) || this.isPersonal(vault));
           this.current = {
-            config: personal ? personalConfig(record) : validateGitConfig(record), enabled, lastSuccess: record.lastSuccess,
-            lastRemoteCheck: personal ? record.lastRemoteCheck : null,
-            lastBackupDay: personal ? null : record.lastBackupDay ?? (record.lastSuccess && Number.isFinite(Date.parse(record.lastSuccess)) ? dayKey(new Date(record.lastSuccess)) : null),
+            config: api ? apiConfig(record) : personal ? personalConfig(record) : validateGitConfig(record), enabled, lastSuccess: record.lastSuccess,
+            lastRemoteCheck: personal || api ? record.lastRemoteCheck : null,
+            lastBackupDay: personal || api ? null : record.lastBackupDay ?? (record.lastSuccess && Number.isFinite(Date.parse(record.lastSuccess)) ? dayKey(new Date(record.lastSuccess)) : null),
             pendingCommit: record.pendingCommit ?? null,
-            phase: enabled ? "ready" : "off", message: enabled ? personal ? "개인 노트 동기화 대기 중" : "Git 일일 백업 대기 중" : "Git 자동 저장 꺼짐",
+            phase: enabled ? "ready" : "off", message: enabled ? personal || api ? "개인 노트 동기화 대기 중" : "Git 일일 백업 대기 중" : "Git 자동 저장 꺼짐",
             ...(personal && enabled && record.personalFailure ? personalErrorStatus(record.personalFailure) : {}),
           };
         }
@@ -230,7 +242,7 @@ export class GitController {
       if (this.current.enabled && this.current.config?.mode==="personal-sync") await this.startPersonal();
       this.schedule();
       // Enqueue after local startup; the window must not wait for network I/O.
-      if (this.current.enabled) this.sync(vault.id, { automatic: true, personalOnly:this.current.config?.mode === "personal-sync" }).catch(() => {});
+      if (this.current.enabled) this.sync(vault.id, { automatic: true, personalOnly:["personal-sync","github-api"].includes(this.current.config?.mode) }).catch(() => {});
       return this.publish({});
     });
   }
@@ -239,6 +251,27 @@ export class GitController {
       this.check(id); this.close();
       const progress = input.mode === "personal-sync" ? personalProgress(this.now) : null;
       try {
+        if (input.mode === "github-api") {
+          if (!this.isPersonal(this.vault)) throw new Error("개인 노트 공간을 선택해 주세요.");
+          const config = apiConfig(input);
+          if (!this.secretStorage?.isEncryptionAvailable() || (process.platform === "linux" && this.secretStorage.getSelectedStorageBackend?.() === "basic_text"))
+            throw new Error("이 PC의 보안 자격 증명 저장소를 먼저 설정해 주세요.");
+          if (!input.token?.trim()) throw new Error("저장소에 접근할 GitHub 토큰을 입력해 주세요.");
+          await scanApiFiles(this.vault,this.apiCache);
+          const old = this.records[id];
+          const same = old?.mode === config.mode && old.remote === config.remote && old.branch === config.branch;
+          const encryptedToken = this.secretStorage.encryptString(input.token.trim()).toString("base64");
+          const remote = new GitHubRemote(config,input.token.trim(),this.fetcher);
+          await remote.head(); // Verify the new connection before replacing the saved one.
+          const lastSuccess = same ? old.lastSuccess ?? null : null;
+          const apiConflicts = same ? old.apiConflicts ?? [] : [];
+          this.records[id] = {...config,enabled:true,encryptedToken,apiBase:same ? old.apiBase : null,lastSuccess,apiConflicts};
+          try { await this.persist(); } catch (error) { this.records[id]=old; throw error; }
+          this.personal=null;
+          this.publish({config,enabled:true,lastSuccess,apiConflicts,lastRemoteCheck:null,lastBackupDay:null,pendingCommit:null,...clearPersonalDetails()});
+          this.retryAfter=0;
+          this.schedule(); return this.perform();
+        }
         if(progress) {
           const config=personalConfig(input), service=await this.startPersonal();
           const zips=await this.zipList();
@@ -285,6 +318,7 @@ export class GitController {
     });
   }
   due() {
+    if (this.current.config?.mode === "github-api") return this.now().getTime() >= this.retryAfter;
     if (this.current.config?.mode==="personal-sync") {
       const failure = this.records[this.vault.id]?.personalFailure;
       return !failure || Number.isFinite(failure.retryAt) && this.now().getTime() >= failure.retryAt;
@@ -301,7 +335,7 @@ export class GitController {
         (automatic || !this.pendingSync.automatic) && (!force || this.pendingSync.force)) return this.pendingSync.promise;
     const promise = this.enqueue(async () => {
       this.check(id);
-      if (!this.current.enabled || (personalOnly && this.current.config?.mode !== "personal-sync") || (automatic && !this.due())) return this.status();
+      if (!this.current.enabled || (personalOnly && !["personal-sync","github-api"].includes(this.current.config?.mode)) || (automatic && !this.due())) return this.status();
       return this.perform({ force, manual:!automatic });
     });
     const pending = { id, promise, automatic, force, personalOnly }; this.pendingSync = pending;
@@ -349,10 +383,28 @@ export class GitController {
     const revision = this.revision;
     const generation = this.generation;
     const day = dayKey(this.now());
-    this.publish({ phase: "saving", message: "Git에 변경사항 저장 중…",changed:[],diagnostics:null,recoveryFile:null });
+    const announce = () => this.publish({ phase: "saving", message: "동기화 중…",changed:[],diagnostics:null,recoveryFile:null });
+    if (this.current.config?.mode !== "github-api")
+      this.publish({ phase: "saving", message: "Git에 변경사항 저장 중…",changed:[],diagnostics:null,recoveryFile:null });
+    else if (manual) announce();
     try {
       if (await realpath(this.vault.root) !== this.canonicalRoot)
         throw new Error("보관함 위치가 변경되었습니다. Git 설정을 다시 확인해 주세요.");
+      if (this.current.config?.mode === "github-api") {
+        if (!this.isPersonal(this.vault)) throw new Error("개인 노트 공간을 선택해 주세요.");
+        const record = this.records[this.vault.id];
+        const token = this.secretStorage.decryptString(Buffer.from(record.encryptedToken,"base64"));
+        const remote = new GitHubRemote(this.current.config,token,this.fetcher);
+        const result = await syncApiVault(this.vault,remote,record.apiBase,this.apiCache,announce);
+        const time = this.now().toISOString();
+        const lastSuccess = result.uploaded ? time : record.lastSuccess ?? null;
+        this.retryAfter=0;
+        const apiConflicts = result.conflicts.length ? result.conflicts : record.apiConflicts ?? [];
+        if (record.apiBase !== result.state)
+          await this.updatePersonalRecord({apiBase:result.state,lastSuccess,lastRemoteCheck:time,apiConflicts});
+        const message = result.conflicts.length ? "충돌 처리 · "+result.conflicts.join(", ") : "동기화됨";
+        return this.publish({phase:"synced",message,changed:result.changed,apiConflicts,lastSuccess,lastRemoteCheck:time});
+      }
       if (progress) {
         const service=await this.startPersonal();
         const record=this.records[this.vault.id],register=record.registerPending===true;
@@ -395,7 +447,7 @@ export class GitController {
   disconnect(id) {
     return this.enqueue(async () => {
       this.check(id); this.close();
-      if (this.records[id]) { this.records[id].enabled = false; delete this.records[id].personalFailure; await this.persist(); }
+      if (this.records[id]) { this.records[id].enabled = false; delete this.records[id].encryptedToken; delete this.records[id].personalFailure; await this.persist(); }
       this.personal=null;
       return this.publish({ enabled: false, phase: "off", message: "Git 자동 저장 꺼짐",...clearPersonalDetails() });
     });

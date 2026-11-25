@@ -582,7 +582,7 @@ export default function App() {
   const panelState = panelSyncs[treeMenu?.vaultId];
   const panelWorking = !!panelState?.working;
   const menuGit = personalMenu && gitStates[treeMenu.vaultId];
-  const menuSyncEnabled = menuGit?.enabled && menuGit.config?.mode === "personal-sync";
+  const menuSyncEnabled = menuGit?.enabled && ["personal-sync","github-api"].includes(menuGit.config?.mode);
   const menuFiles = personalMenu ? menuGit : panelState?.teamResult;
   const menuFileState = menuFiles?.pendingFiles?.find(file => file.name === treeMenu.path)
     ?? menuFiles?.localOnlyFiles?.find(file => file.name === treeMenu.path || file.name.endsWith("/") && (treeMenu.path + "/").startsWith(file.name));
@@ -835,7 +835,7 @@ export default function App() {
         else await refreshSyncedVault(vaultId);
       } else {
         const result = await syncNow(vaultId, true);
-        if (!result.enabled || result.config?.mode !== "personal-sync") openPanelSettings(vaultId);
+        if (!result.enabled || !["personal-sync","github-api"].includes(result.config?.mode)) openPanelSettings(vaultId);
       }
     } catch (cause) { message = cause.message; }
     setPanelSyncs(old => ({ ...old, [vaultId]: { message, teamResult } }));
@@ -856,7 +856,7 @@ export default function App() {
     if (changed?.length) await refreshSyncedVault(vaultId);
   });
   const pollPersonal=useEffectEvent(async (poll)=>{
-    const ids=Object.values(gitStates).filter(v=>v.enabled && v.config?.mode==="personal-sync").map(v=>v.vaultId);
+    const ids=Object.values(gitStates).filter(v=>v.enabled && ["personal-sync","github-api"].includes(v.config?.mode)).map(v=>v.vaultId);
     if(!ids.length)return;
     if(!poll)await flush(true);
     await Promise.all(ids.map(vaultId=>invoke(api.syncGit({vaultId,poll,automatic:true,personalOnly:true}))));
@@ -3321,7 +3321,7 @@ export default function App() {
             onReview={name=>openReview(gitVault.id,name)}
             onCopyDiagnostics={text=>invoke(api.copyText({vaultId:gitVault.id,text}))}
             onShowRecovery={id=>invoke(api.showPersonalSyncRecovery({vaultId:gitVault.id,id}))}
-            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (settingsTab === "personal-sync" && config.mode !== "personal-sync") setSettingsTab("git"); }}
+            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (settingsTab === "personal-sync" && !["personal-sync","github-api"].includes(config.mode)) setSettingsTab("git"); }}
             onClone={config => importGit({ vaultId: gitVault.id, config })}
             onSync={personalOnly => syncNow(gitVault.id, personalOnly)}
             onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: gitVault.id })))} />}

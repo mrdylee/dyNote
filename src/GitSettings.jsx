@@ -3,13 +3,15 @@ import LocalOnlyFiles from "./LocalOnlyFiles.jsx";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
 export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview, onCopyDiagnostics, onShowRecovery }) {
-  const [form, setForm] = useState(() => ({ ...initial, ...status.config, ...(startPersonal ? {mode:"personal-sync"} : {}) }));
+  const [form, setForm] = useState(() => ({ ...initial, ...status.config, ...(startPersonal && status.config?.mode !== "github-api" ? {mode:"personal-sync"} : {}) }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const [copiedDiagnostics, setCopiedDiagnostics] = useState(null);
   const edited = useRef(new Set());
   const [repository, setRepository] = useState(null), [refresh, setRefresh] = useState(0);
   const [zipPaths,setZipPaths]=useState(null);
   const personal=form.mode==="personal-sync" && space?.purpose==="personal";
+  const apiMode = form.mode === "github-api" && space?.purpose === "personal";
+  const [token,setToken] = useState("");
   const connectedPersonal = status.config?.mode === "personal-sync";
   useEffect(()=>{
     let current=true; setZipPaths(null);
@@ -19,6 +21,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
   useEffect(() => {
     let mounted = true;
     setRepository(null);
+    if (apiMode) return;
     onRepositoryStatus().then(value => { if (!mounted) return;
       setRepository(value);
       if (startPersonal && !status.config?.remote && value.available) {
@@ -28,13 +31,36 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
         }));
       } }).catch(error => { if (mounted) setRepository({ error: error.message }); });
     return () => { mounted = false; };
-  }, [refresh]);
+  }, [refresh,apiMode]);
   const update = (key, value) => { edited.current.add(key); setForm(previous => ({ ...previous, [key]: value })); };
   const run = async (action) => {
     setPending(true); setError("");
     try { await action(); } catch (error) { setError(error.message); } finally { setPending(false); }
   };
   const busy = pending || status.phase === "saving";
+  const modeSelect = space?.purpose==="personal" && <label>Git 사용 방식<select value={form.mode || "daily"} disabled={busy}
+    onChange={e=>{setToken("");setError("");update("mode",e.target.value);}}>
+    <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option>
+    <option value="github-api">GitHub API로 이어 쓰기</option></select></label>;
+  if (apiMode) return <section className="settings-section">
+    <h3>개인 노트 동기화</h3>{modeSelect}
+    <p>이 폴더의 지원 문서와 첨부파일(ZIP 포함)을 지정한 브랜치와 양방향으로 동기화합니다. 다른 PC에서는 새 노트 폴더를 선택하고 같은 저장소와 브랜치를 연결하세요. 기존 Git 폴더와 .gitignore가 있는 폴더는 별도로 유지하세요.</p>
+    <label>노트 폴더<code>{space.root}</code></label>
+    <label>GitHub 저장소 주소<input value={form.remote} placeholder="https://github.com/사용자/저장소" disabled={busy} onChange={e=>update("remote",e.target.value)}/></label>
+    <label>브랜치<input value={form.branch} disabled={busy} onChange={e=>update("branch",e.target.value)}/></label>
+    <label>GitHub 토큰<input type="password" autoComplete="off" value={token} disabled={busy} onChange={e=>setToken(e.target.value)}/></label>
+    <p>이 저장소의 Contents 읽기·쓰기 권한이 필요합니다. 토큰은 이 PC의 보안 저장소로 암호화합니다.</p>
+    <div className="settings-actions">
+      <button className="primary-button" disabled={busy || !form.remote || !form.branch || !token.trim()} onClick={()=>run(async()=>{
+        await onConnect({mode:"github-api",remote:form.remote,branch:form.branch,token});setToken("");
+      })}>연결하고 동기화</button>
+      <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(()=>onSync(true))}>지금 동기화</button>
+      <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(onDisconnect)}>이 기기 동기화 끄기</button>
+    </div>
+    <p className={`settings-message ${status.phase}`} role="status">{status.message}</p>
+    {status.apiConflicts?.length>0 && <ul aria-label="최근 처리한 충돌">{status.apiConflicts.map(item=><li key={item}>{item}</li>)}</ul>}
+    {error && <p className="error-banner" role="alert">{error}</p>}
+  </section>;
   return <section className="settings-section">
     <h3>{personal ? "개인 노트 동기화" : "자동 백업"}</h3>
     <div className="git-space-context" aria-label="현재 공간의 Git 연결">
@@ -50,8 +76,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
       <p className="muted">개인·팀 표시는 Git 접근 권한을 바꾸지 않습니다. 업로드한 문서는 연결된 저장소의 접근 권한을 따릅니다.</p>
       <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
     </div>
-    {space?.purpose==="personal" && <label>Git 사용 방식<select value={personal?"personal-sync":"daily"} disabled={busy} onChange={e=>update("mode",e.target.value)}>
-      <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option></select></label>}
+    {modeSelect}
     {personal ? <><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
       <p>{repository?.available === false ? "이 폴더의 노트를 처음 올리려면 Git 서비스에서 빈 저장소를 만든 뒤 아래에 주소를 입력하세요." : "다른 PC에서도 같은 저장소와 브랜치를 선택하면 이 폴더의 노트를 이어 쓸 수 있습니다."}</p>
       <details open={zipPaths?.length>0 && status.config?.mode!=="personal-sync"}><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
