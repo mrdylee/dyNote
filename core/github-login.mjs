@@ -7,6 +7,7 @@ const ownerId = 131228699; // Publisher of mrdylee/dyNote.
 const devicePage = "https://github.com/login/device";
 export const githubInstallPage = "https://github.com/apps/" + slug + "/installations/new";
 const loginAgain = () => new Error("GitHub 로그인을 다시 시작해 주세요.");
+const selectAgain = () => new Error("목록에서 노트 저장소를 다시 선택해 주세요.");
 
 function credentials(result, clientId, now) {
   if (typeof result.access_token !== "string" || !result.access_token || result.token_type?.toLowerCase() !== "bearer") throw loginAgain();
@@ -115,6 +116,7 @@ export class GitHubLogin {
   }
   async repositories(id) {
     const s = this.current(id), repos = new Map();
+    const request = s.repositoryRequest = Symbol();
     const installations = await this.pages(s, "/user/installations", "installations");
     for (const installation of installations) {
       if (!Number.isSafeInteger(installation.id) || installation.suspended_at || installation.permissions?.contents !== "write") continue;
@@ -123,14 +125,19 @@ export class GitHubLogin {
         if (writable(row)) repos.set(row.id, {id:row.id, name:row.full_name, branch:row.default_branch, private:row.private === true});
       }
     }
-    this.current(id).repos = repos;
+    if (this.current(id).repositoryRequest !== request) throw selectAgain();
+    s.repos = repos;
     return [...repos.values()].sort((a,b) => a.name.localeCompare(b.name));
   }
   async select(id, repositoryId) {
     const s = this.current(id), repo = s.repos.get(repositoryId);
-    if (!repo) throw new Error("목록에서 노트 저장소를 다시 선택해 주세요.");
+    if (!repo) throw selectAgain();
     const row = await this.get(s, "/repos/" + repo.name);
     if (row.id !== repositoryId || !writable(row)) throw new Error("저장소 쓰기 권한을 확인하고 목록을 새로고침해 주세요.");
+    const latest = this.current(id).repos.get(repositoryId);
+    // If discovery changed a field during lookup, the repository must confirm its new value.
+    if (!latest || (latest.name !== repo.name && latest.name !== row.full_name) ||
+        (latest.branch !== repo.branch && latest.branch !== row.default_branch)) throw selectAgain();
     const config = apiConfig({remote:"https://github.com/" + row.full_name, branch:row.default_branch});
     return {config, credentials:s.credentials};
   }

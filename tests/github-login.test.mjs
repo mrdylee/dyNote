@@ -26,6 +26,30 @@ function fixture(answers = []) {
 const challenge = { device_code: "private-device", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 };
 const grant = { access_token: "private-access", refresh_token: "private-refresh", expires_in: 28800, token_type: "bearer" };
 
+function installationPage(...ids) {
+  return {total_count:ids.length, installations:ids.map(id => ({id, permissions:{contents:"write"}}))};
+}
+
+function repositoryPage(...repositories) {
+  return {total_count:repositories.length, repositories};
+}
+
+async function authorized(...answers) {
+  const setup = fixture([challenge, grant, ...answers]);
+  const {id, waitMs} = await setup.login.start();
+  setup.advance(waitMs);
+  assert.deepEqual(await setup.login.poll(id), {authorized:true});
+  return {...setup, id};
+}
+
+function delayedResponse() {
+  const started = Promise.withResolvers(), result = Promise.withResolvers();
+  return {
+    read() { started.resolve(); return result.promise; },
+    started:started.promise, finish:result.resolve,
+  };
+}
+
 test("browser login respects the polling interval and slow-down and keeps credentials out of the UI", async () => {
   const { login, opened, requests, advance } = fixture([challenge, { error:"slow_down" }, { error:"authorization_pending" }, grant]);
   const start = await login.start();
@@ -123,4 +147,206 @@ test("a late authorization cannot revive a cancelled device login", async () => 
   login.cancel(id); finish(grant);
   await assert.rejects(pending,/다시/);
   await assert.rejects(login.repositories(id),/다시/);
+});
+
+test("an older repository refresh cannot restore a repository removed by a newer refresh", async () => {
+  const earlierPage = delayedResponse();
+  const added = row(91, "writer/other-notes", "main");
+  const {login, id} = await authorized(
+    installationPage(7), earlierPage.read,
+    installationPage(7), repositoryPage(added),
+    ({url}) => url.endsWith("/" + noteRepo.full_name) ? noteRepo : added,
+  );
+  const earlier = login.repositories(id);
+  await earlierPage.started;
+  assert.deepEqual((await login.repositories(id)).map(repo => repo.id), [added.id]);
+  earlierPage.finish(repositoryPage(noteRepo));
+  const [oldResult] = await Promise.allSettled([earlier]);
+  await assert.rejects(login.select(id, noteRepo.id), /목록에서/);
+  assert.equal((await login.select(id, added.id)).config.remote, "https://github.com/writer/other-notes.git");
+  assert.equal(oldResult.status, "rejected");
+  assert.match(oldResult.reason.message, /목록/);
+});
+
+test("an older refresh cannot publish its choices after the newer refresh fails", async () => {
+  const earlierPage = delayedResponse();
+  const {login, id} = await authorized(
+    installationPage(7), earlierPage.read,
+    Response.json({message:"Service Unavailable"}, {status:503}),
+  );
+  const earlier = login.repositories(id);
+  await earlierPage.started;
+  await assert.rejects(login.repositories(id), /HTTP 503/);
+  earlierPage.finish(repositoryPage(noteRepo));
+  await assert.rejects(earlier, /목록/);
+  await assert.rejects(login.select(id, noteRepo.id), /목록에서/);
+});
+
+test("an in-flight selection loses eligibility when the app installation is removed", async () => {
+  const details = delayedResponse();
+  const {login, id} = await authorized(installationPage(7), repositoryPage(noteRepo), details.read, installationPage());
+  await login.repositories(id);
+  const selection = login.select(id, noteRepo.id);
+  await details.started;
+  assert.deepEqual(await login.repositories(id), []);
+  details.finish(noteRepo);
+  await assert.rejects(selection, /목록/);
+});
+
+for (const [change, installation, updated] of [
+  ["a repository transfer", 8, row(noteRepo.id, "new-owner/moved-notes", noteRepo.default_branch)],
+  ["a default branch change", 7, {...noteRepo, default_branch:"new-default"}],
+]) {
+  test("an in-flight selection cannot save the old destination after " + change, async () => {
+    const details = delayedResponse();
+    const {login, id} = await authorized(
+      installationPage(7), repositoryPage(noteRepo), details.read,
+      installationPage(installation), repositoryPage(updated), updated,
+    );
+    await login.repositories(id);
+    const selection = login.select(id, noteRepo.id);
+    await details.started;
+    const [fresh] = await login.repositories(id);
+    assert.deepEqual([fresh.name, fresh.branch], [updated.full_name, updated.default_branch]);
+    details.finish(noteRepo);
+    await assert.rejects(selection, /목록/);
+    assert.deepEqual((await login.select(id, fresh.id)).config, {
+      mode:"github-api", remote:"https://github.com/" + updated.full_name + ".git", branch:updated.default_branch,
+    });
+  });
+}
+
+test("a refresh that retains the selected destination allows the user's connection to finish", async () => {
+  const details = delayedResponse();
+  const {login, id} = await authorized(
+    installationPage(7), repositoryPage(noteRepo), details.read,
+    installationPage(7), repositoryPage(noteRepo, row(90, "writer/other", "main")),
+  );
+  await login.repositories(id);
+  const selection = login.select(id, noteRepo.id);
+  await details.started;
+  await login.repositories(id);
+  details.finish({...noteRepo, default_branch:"latest"});
+  assert.equal((await selection).config.branch, "latest");
+});
+
+for (const [change, updated] of [
+  ["repository name", {...noteRepo, full_name:"writer/renamed"}],
+  ["default branch", {...noteRepo, default_branch:"release/notes"}],
+]) {
+  test("a selection succeeds when both GitHub responses confirm the same new " + change, async () => {
+    const details = delayedResponse();
+    const {login, id} = await authorized(
+      installationPage(7), repositoryPage(noteRepo), details.read,
+      installationPage(7), repositoryPage(updated),
+    );
+    await login.repositories(id);
+    const selection = login.select(id, noteRepo.id);
+    await details.started;
+    await login.repositories(id);
+    details.finish(updated);
+    assert.deepEqual((await selection).config, {
+      mode:"github-api", remote:"https://github.com/" + updated.full_name + ".git", branch:updated.default_branch,
+    });
+  });
+}
+
+test("a renamed repository can be selected after refresh if its previous name has been reused", async () => {
+  const renamed = row(noteRepo.id, "writer/new-notes", "docs/main");
+  const reused = row(91, noteRepo.full_name, "main");
+  const {login, id, requests} = await authorized(
+    installationPage(7), repositoryPage(noteRepo), reused,
+    installationPage(7), repositoryPage(renamed), renamed,
+  );
+  await login.repositories(id);
+  await assert.rejects(login.select(id, noteRepo.id), /권한.*새로고침/);
+  assert.equal(new URL(requests.at(-1).url).pathname, "/repos/writer/notes");
+  const [choice] = await login.repositories(id);
+  const {config} = await login.select(id, choice.id);
+  assert.equal(new URL(requests.at(-1).url).pathname, "/repos/writer/new-notes");
+  assert.deepEqual(config, {mode:"github-api", remote:"https://github.com/writer/new-notes.git", branch:"docs/main"});
+});
+
+for (const [reason, details, expected] of [
+  ["the user loses write permission", {...noteRepo, permissions:{push:false}}, /쓰기 권한/],
+  ["the repository is archived", {...noteRepo, archived:true}, /쓰기 권한/],
+  ["the repository is disabled", {...noteRepo, disabled:true}, /쓰기 권한/],
+  ["the token is revoked", Response.json({message:"Bad credentials"}, {status:401}), /로그인을 다시/],
+]) {
+  test("a previously listed repository cannot be connected after " + reason, async () => {
+    const {login, id} = await authorized(installationPage(7), repositoryPage(noteRepo), details);
+    const [choice] = await login.repositories(id);
+    await assert.rejects(login.select(id, choice.id), expected);
+  });
+}
+
+test("granting installation contents write access makes its repositories available on refresh", async () => {
+  const readOnly = {id:7, permissions:{contents:"read"}};
+  const {login, id, requests} = await authorized(
+    {total_count:1, installations:[readOnly]},
+    installationPage(7), repositoryPage(noteRepo), noteRepo,
+  );
+  assert.deepEqual(await login.repositories(id), []);
+  await assert.rejects(login.select(id, noteRepo.id), /목록에서/);
+  assert.equal(requests.length, 3);
+  const [choice] = await login.repositories(id);
+  assert.equal((await login.select(id, choice.id)).config.remote, "https://github.com/writer/notes.git");
+});
+
+test("after a 503 partway through discovery only complete repository lists are offered on retry", async () => {
+  const first = row(58, "writer/first", "main"), second = row(59, "writer/second", "main");
+  const unavailable = Response.json({message:"Service Unavailable"}, {status:503});
+  const {login, id, requests} = await authorized(
+    installationPage(7), repositoryPage(noteRepo),
+    installationPage(7, 8), repositoryPage(first), unavailable,
+    noteRepo,
+    installationPage(7, 8), repositoryPage(first), repositoryPage(second), second,
+  );
+  await login.repositories(id);
+  await assert.rejects(login.repositories(id), /HTTP 503/);
+  await assert.rejects(login.select(id, first.id), /목록에서/);
+  assert.equal((await login.select(id, noteRepo.id)).config.branch, noteRepo.default_branch);
+  const retryStart = requests.length;
+  assert.deepEqual((await login.repositories(id)).map(repo => repo.id), [first.id, second.id]);
+  assert.deepEqual(requests.slice(retryStart).map(call => new URL(call.url).pathname), [
+    "/user/installations", "/user/installations/7/repositories", "/user/installations/8/repositories",
+  ]);
+  await assert.rejects(login.select(id, noteRepo.id), /목록에서/);
+  assert.equal((await login.select(id, second.id)).config.remote, "https://github.com/writer/second.git");
+});
+
+test("cancelling a pending list stops discovery before the next installation", async () => {
+  const page = delayedResponse();
+  const {login, id, requests} = await authorized(installationPage(7, 8), page.read);
+  const listing = login.repositories(id);
+  await page.started;
+  const sent = requests.length;
+  login.cancel(id);
+  page.finish(repositoryPage(noteRepo));
+  await assert.rejects(listing, /로그인을 다시/);
+  assert.equal(requests.length, sent);
+});
+
+test("switching accounts during repository selection discards the old choice and its credentials", async () => {
+  const details = delayedResponse();
+  const other = row(95, "other-account/notes", "main");
+  const nextGrant = {...grant, access_token:"other-account-access", refresh_token:"other-account-refresh"};
+  const {login, id, advance, requests} = await authorized(
+    installationPage(7), repositoryPage(noteRepo), details.read,
+    challenge, nextGrant, installationPage(21), repositoryPage(other), other,
+  );
+  await login.repositories(id);
+  const oldSelection = login.select(id, noteRepo.id);
+  await details.started;
+  const next = await login.start();
+  advance(next.waitMs);
+  await login.poll(next.id);
+  const [choice] = await login.repositories(next.id);
+  details.finish(noteRepo);
+  await assert.rejects(oldSelection, /로그인을 다시/);
+  await assert.rejects(login.select(next.id, noteRepo.id), /목록에서/);
+  const selection = await login.select(next.id, choice.id);
+  assert.equal(selection.config.remote, "https://github.com/other-account/notes.git");
+  assert.equal(selection.credentials.accessToken, nextGrant.access_token);
+  assert.equal(requests.at(-1).headers.Authorization, "Bearer " + nextGrant.access_token);
 });

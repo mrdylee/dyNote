@@ -5,6 +5,7 @@ export default function GitHubRepositoryPicker({ onLogin, onCopy, onConnect, dis
   const [repos, setRepos] = useState([]), [choice, setChoice] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const session = useRef(null), generation = useRef(0), timer = useRef(null), onReturn = useRef(null);
+  const latestList = useRef(0);
   function clear() {
     generation.current++;
     clearTimeout(timer.current);
@@ -18,15 +19,17 @@ export default function GitHubRepositoryPicker({ onLogin, onCopy, onConnect, dis
     clear(); setStage("idle"); setBusy(false); setChoice(""); setRepos([]); setError("");
   }
   async function list(id) {
+    const request = ++latestList.current;
+    const current = () => session.current === id && request === latestList.current;
     setBusy(true); setError("");
     try {
       const rows = await onLogin({action:"repositories", sessionId:id});
-      if (session.current !== id) return;
+      if (!current()) return;
       setRepos(rows);
       setChoice(prior => rows.some(row => String(row.id) === prior) ? prior : rows.length === 1 ? String(rows[0].id) : "");
     } catch (e) {
-      if (session.current === id) setError(e.message);
-    } finally { if (session.current === id) setBusy(false); }
+      if (current()) setError(e.message);
+    } finally { if (current()) setBusy(false); }
   }
   async function start() {
     reset();
