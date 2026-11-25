@@ -385,7 +385,7 @@ export class GitController {
     const day = dayKey(this.now());
     const announce = () => this.publish({ phase: "saving", message: "동기화 중…",changed:[],diagnostics:null,recoveryFile:null });
     if (this.current.config?.mode !== "github-api")
-      this.publish({ phase: "saving", message: "Git에 변경사항 저장 중…",changed:[],diagnostics:null,recoveryFile:null });
+      this.publish({ phase: "saving", message: "변경사항 저장 중…",changed:[],diagnostics:null,recoveryFile:null });
     else if (manual) announce();
     try {
       if (await realpath(this.vault.root) !== this.canonicalRoot)

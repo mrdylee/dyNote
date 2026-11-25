@@ -108,6 +108,18 @@ async function editor(pc) {
   await pc.page.getByRole("button", { name: "편집 보기", exact: true }).click();
   return pc.page.getByRole("textbox", { name: "Markdown 편집기" });
 }
+async function verifySavingLocation(pc) {
+  const [sample] = await Promise.all([
+    pc.page.waitForFunction(() => {
+      const message = "변경사항 저장 중…";
+      const footer = [...document.querySelectorAll(".statusbar button")].filter(button => button.textContent.split(" · ").at(-1) === message);
+      if (footer.length) return { count: footer.length, inTree: document.querySelector(".space-trees").textContent.includes(message) };
+    }),
+    pc.sync(),
+  ]);
+  assert.deepEqual(await sample.jsonValue(), { count: 1, inTree: false });
+  await pc.page.locator(".statusbar button").filter({ hasText: "변경사항 저장 중…" }).waitFor({ state: "hidden" });
+}
 try {
   const a = await launch("Cloud", true),
     b = await launch("Local", false);
@@ -119,6 +131,8 @@ try {
   assert.equal(await readFile(path.join(a.root, "받기.md"), "utf8"), "Local에서 보냄\n");
   assert.equal(execFileSync("git", ["--git-dir", bare, "show", "main:보내기.md"], { encoding: "utf8" }), "Cloud에서 보냄\n");
   await syncFromPanel(b, b.tree.getByTitle("회의록.md", { exact: true }));
+  await verifySavingLocation(a);
+  await verifySavingLocation(b);
   assert.equal(await readFile(path.join(b.root, "보내기.md"), "utf8"), "Cloud에서 보냄\n");
   const view = await editor(b);
   await a.invoke("saveNote", {
