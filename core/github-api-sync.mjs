@@ -118,9 +118,10 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
     if (!completeArchive(name, file.bytes)) throw new Error("파일 복사 완료 후 다시 동기화해 주세요: " + name);
     return file.bytes;
   };
-  let uploaded = false;
+  let uploaded = false, seedCommit = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    let head = await remote.head();
+    let head = seedCommit ?? await remote.head();
+    seedCommit = null;
     if (previous && head === previous.head && !changed(base, local).length)
       return { state: previous, changed: [], conflicts: [], uploaded: false };
     const snapshot = await remote.snapshot(head, previous?.head);
@@ -134,7 +135,11 @@ export async function syncApiVault(vault, remote, previous, cache, onTransfer) {
       try {
         const published = await remote.publish(head, snapshot, updates, (name, sha) => read(source(name), sha));
         uploaded = true;
-        if (published === null) continue;
+        if (!head && outgoing.length > 1) {
+          // The Contents API confirmed this commit even if the ref endpoint still reports an empty repo.
+          seedCommit = published;
+          continue;
+        }
         head = published;
       } catch (error) {
         if ([409, 422].includes(error.status) && (await remote.head()) !== head) continue;

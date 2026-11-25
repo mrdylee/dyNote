@@ -92,12 +92,12 @@ export class GitHubRemote {
       // GitHub cannot create a Git reference in an empty repository. Seed with a real note.
       const [name, sha] = updates.entries().next().value;
       const content = (await read(name, sha)).toString("base64");
-      await this.request("/contents/" + name.split("/").map(encodeURIComponent).join("/"), "PUT", {
+      const created = await this.request("/contents/" + name.split("/").map(encodeURIComponent).join("/"), "PUT", {
         message,
         content,
         branch: this.branch,
       });
-      return null; // Re-read the branch and batch any remaining files.
+      return oid(created.commit.sha);
     }
     const entries = new Map(snapshot.entries.map((row) => [row.path, row]));
     const tree = [];

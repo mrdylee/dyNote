@@ -20,14 +20,14 @@ const secretStorage = {
   encryptString: (s) => Buffer.from(s),
   decryptString: (b) => b.toString(),
 };
-async function fixture(t, { empty = false } = {}) {
+async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "dynote-api-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const blobs = new Map(),
     trees = new Map(),
     commits = new Map(),
     requests = [];
-  let head, race;
+  let head, race, seedPending = false;
   function commit(files, parent) {
     const tree = hash(JSON.stringify(files)),
       sha = hash(tree + (parent || ""));
@@ -44,8 +44,10 @@ async function fixture(t, { empty = false } = {}) {
       body = JSON.parse(options.body || "null");
     requests.push(method + " " + route);
     const result = (value, status = 200) => Response.json(value, { status });
-    if (method === "GET" && route === "/git/ref/heads/main")
+    if (method === "GET" && route === "/git/ref/heads/main") {
+      if (seedPending) { seedPending = false; return result({}, 409); }
       return head ? result({ object: { sha: head } }) : result({}, 409);
+    }
     if (route === "") return result({ default_branch: "main" });
     if (route === "/branches?per_page=1") return result(head ? [{ name: "main" }] : []);
     if (route.startsWith("/contents/") && method === "PUT") {
@@ -54,6 +56,7 @@ async function fixture(t, { empty = false } = {}) {
         sha = blobId(bytes);
       blobs.set(sha, bytes);
       head = commit({ [decodeURIComponent(route.slice(10))]: sha }, null);
+      seedPending = staleRefAfterSeed;
       return result({ commit: { sha: head } }, 201);
     }
     if (route.startsWith("/compare/")) return result({ status: "ahead" });
@@ -223,6 +226,15 @@ test("empty repository is seeded from a real note and handles nested binary path
   assert.equal(await b.read("가.md"), "노트");
   assert.deepEqual(await readFile(path.join(b.folder, "File Storage/image.png")), bytes);
 });
+test("the initial sync uses the confirmed seed commit while the branch lookup still reports an empty repository", async t => {
+  const { a, contents } = await fixture(t, { empty: true, staleRefAfterSeed: true });
+  await a.save("first.md", "first");
+  await a.save("second.md", "second");
+  const status = await a.connect();
+  assert.equal(status.phase, "synced", status.message);
+  assert.deepEqual(Object.keys(contents()).sort(), ["first.md", "second.md"]);
+});
+
 test("a removed local note colliding with a remote edit restores that edit and reports the deletion conflict", async (t) => {
   const { a, b } = await fixture(t);
   await a.save("n.md", "base");
