@@ -349,7 +349,7 @@ export class GitController {
     const revision = this.revision;
     const generation = this.generation;
     const day = dayKey(this.now());
-    this.publish({ phase: "saving", message: "동기화 중…",changed:[],diagnostics:null,recoveryFile:null });
+    this.publish({ phase: "saving", message: "변경사항 저장 중…",changed:[],diagnostics:null,recoveryFile:null });
     try {
       if (await realpath(this.vault.root) !== this.canonicalRoot)
         throw new Error("보관함 위치가 변경되었습니다. Git 설정을 다시 확인해 주세요.");

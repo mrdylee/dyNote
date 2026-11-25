@@ -111,14 +111,14 @@ async function editor(pc) {
 async function verifySavingLocation(pc) {
   const [sample] = await Promise.all([
     pc.page.waitForFunction(() => {
-      const message = "동기화 중…";
-      const footer = [...document.querySelectorAll(".statusbar button")].filter(button => button.textContent.includes(message));
+      const message = "변경사항 저장 중…";
+      const footer = [...document.querySelectorAll(".statusbar button")].filter(button => button.textContent.split(" · ").at(-1) === message);
       if (footer.length) return { count: footer.length, inTree: document.querySelector(".space-trees").textContent.includes(message) };
     }),
     pc.sync(),
   ]);
   assert.deepEqual(await sample.jsonValue(), { count: 1, inTree: false });
-  await pc.page.locator(".statusbar button").filter({ hasText: "동기화 중…" }).waitFor({ state: "hidden" });
+  await pc.page.locator(".statusbar button").filter({ hasText: "변경사항 저장 중…" }).waitFor({ state: "hidden" });
 }
 try {
   const a = await launch("Cloud", true),
