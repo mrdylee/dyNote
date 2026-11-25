@@ -185,10 +185,10 @@ export class GitController {
     this.timer = this.setTimer(() => generation === this.generation ? this.sync(id, { automatic: true, personalOnly:twoWay }).catch(() => {}) : undefined, twoWay ? 55000+Math.floor(Math.random()*5000) : 60000);
     this.timer?.unref?.();
   }
-  async persist() {
+  async persist(nextRecord) {
     const file = this.settingsFile;
     const id = this.vault.id;
-    const record = { ...this.records[id] };
+    const record = { ...(nextRecord ?? this.records[id]) };
     const previous = settingsWrites.get(file) ?? Promise.resolve();
     const result = previous.catch(() => {}).then(async () => {
       let records;
@@ -345,8 +345,8 @@ export class GitController {
   async updatePersonalRecord(update) {
     const record = this.records[this.vault.id];
     if (!Object.keys(update).some(key => record[key] !== update[key])) return;
+    await this.persist({ ...record, ...update });
     Object.assign(record, update);
-    await this.persist();
   }
   async personalResult(result, progress, revision) {
     const record = this.records[this.vault.id];

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { Vault } from "../core/vault.mjs";
 import { GitController } from "../electron/git-controller.mjs";
@@ -183,6 +183,25 @@ test("API-only PCs exchange notes, restart with private credentials, and idle po
   assert.deepEqual(requests, ["GET /git/ref/heads/main"]);
   assert(!(await readdir(a.folder)).includes(".git"));
 });
+test("retry persists a received note's baseline after a settings write failure so deletion survives restart", async (t) => {
+  const { a, b, contents } = await fixture(t);
+  await a.connect();
+  await b.connect();
+  await a.save("new.md", "from the other PC");
+  await a.sync();
+  const backup = b.settingsFile + ".bak";
+  await rename(b.settingsFile, backup);
+  await mkdir(b.settingsFile);
+  assert.equal((await b.attempt()).phase, "error");
+  assert.equal(await b.read("new.md"), "from the other PC");
+  await rm(b.settingsFile, { recursive: true });
+  await rename(backup, b.settingsFile);
+  await b.sync();
+  await unlink(path.join(b.folder, "new.md"));
+  await b.restart();
+  assert.equal(b.status().phase, "synced", b.status().message);
+  assert(!Object.hasOwn(contents(), "new.md"));
+});
 test("concurrent writes retry without force and divergent copies survive edit/edit and edit/delete", async (t) => {
   const { a, b, onPublish } = await fixture(t);
   await a.save("note.md", "base");
@@ -256,7 +275,7 @@ test("replacing a synced folder with a symbolic link never publishes deletion of
   await a.connect();
   await b.connect();
   await rm(path.join(a.folder, "notes"), { recursive: true });
-  await symlink(b.folder, path.join(a.folder, "notes"), "dir");
+  await symlink(b.folder, path.join(a.folder, "notes"), process.platform === "win32" ? "junction" : "dir");
   assert.equal((await a.attempt()).phase, "error");
   assert(contents()["notes/n.md"]);
 });
