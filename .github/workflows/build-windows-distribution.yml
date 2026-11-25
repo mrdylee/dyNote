@@ -32,6 +32,9 @@ jobs:
         run: echo "number=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm test
+      - name: Measure local GitHub API note scan time
+        if: github.event_name == 'workflow_dispatch'
+        run: node scripts/benchmark-github-note-scan.mjs
       - run: npm run package:win
       - run: node scripts/verify-release-package.mjs win32-x64
       - name: Verify Copilot, Word previews and update controls on Windows
