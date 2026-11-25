@@ -38,7 +38,7 @@ const note = path.join(vault, 'Keep.md');
 const original = '# Note from the ZIP installation\n\nPreserve this note.\n';
 await writeFile(note, original);
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({vaultRoot: vault, vaultPurposes: {[vault]: 'personal'}}));
-await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({preferences: {enabled: false, autoInstall: false, downloadDirectory: downloads}}));
+await writeFile(path.join(profile, 'updates', 'settings.json'), JSON.stringify({preferences: {enabled: false, autoInstall: false, includePrerelease: version.includes('-'), downloadDirectory: downloads}}));
 const launch = async (executable, verify) => {
   console.log('Opening installer test app:', executable);
   const app = await electron.launch({executablePath: executable, env: {...process.env, OPEN_NOTES_DATA: profile}});

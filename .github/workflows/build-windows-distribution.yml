@@ -1,6 +1,11 @@
 name: Build Windows distribution
 on:
   workflow_dispatch:
+    inputs:
+      previous_version:
+        description: Published Dynote version to install before testing the update
+        type: string
+        default: ''
   workflow_call:
     inputs:
       previous_version:

@@ -62,7 +62,17 @@ async function launch(name, seed) {
     await page.getByRole("dialog").waitFor({ state:"hidden" });
     await tree.getByRole("heading").click({ button: "right" });
     await menu.getByRole("menuitem", { name: /동기화 설정/ }).click({ timeout: 3000 });
-    await page.getByRole("dialog").getByRole("heading", { name: "개인 노트 동기화" }).waitFor();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("heading", { name: "개인 노트 동기화" }).waitFor();
+    await dialog.getByLabel("Git 사용 방식").selectOption("github-api");
+    const connect = dialog.getByRole("button", { name: "연결하고 동기화" });
+    assert(await connect.isDisabled());
+    await dialog.getByLabel("GitHub 저장소 주소").fill(remote);
+    const token = dialog.getByLabel("GitHub 토큰");
+    assert.equal(await token.getAttribute("type"), "password");
+    await token.fill("synthetic-test-token");
+    await connect.click();
+    await dialog.getByRole("alert").filter({ hasText: "GitHub.com 저장소" }).waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("dialog").waitFor({ state: "hidden" });
   }
