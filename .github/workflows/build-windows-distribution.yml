@@ -64,7 +64,7 @@ jobs:
         run: |
           export DYNOTE_PLAYWRIGHT_MODULE="$(node --input-type=module -e 'import {pathToFileURL} from "node:url";console.log(pathToFileURL(process.env.RUNNER_TEMP+"/dynote-ui-tools/node_modules/playwright/index.mjs").href)')"
           if [[ -n "$DYNOTE_PREVIOUS_WINDOWS_VERSION" ]]; then
-            [[ "$DYNOTE_PREVIOUS_WINDOWS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$DYNOTE_PREVIOUS_WINDOWS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
             previous="$RUNNER_TEMP/dynote-previous"
             mkdir -p "$previous"
             setup="Dynote-$DYNOTE_PREVIOUS_WINDOWS_VERSION-windows-x64-Setup.exe"
