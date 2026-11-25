@@ -3321,6 +3321,7 @@ export default function App() {
           {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {["git", "personal-sync"].includes(settingsTab) && gitVault.id && <GitSettings startPersonal={settingsTab === "personal-sync"} key={`${settingsTab}:${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}
             onRepositoryStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id, summaryOnly: true }))}
+            onGitHubLogin={args => invoke(api.githubLogin({vaultId:gitVault.id, ...args}))}
             onZips={()=>invoke(api.personalSyncZips({vaultId:gitVault.id}))}
             onAction={args=>invoke(api.personalSyncAction({vaultId:gitVault.id,...args})).then(acceptGitStatus)}
             onReview={name=>openReview(gitVault.id,name)}

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
+import { verifyGitHubLogin } from "./verify-github-login-ui.mjs";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const executablePath = process.env.DYNOTE_EXECUTABLE || createRequire(import.meta.url)("electron");
 const temp = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-ui-sync-")));
@@ -35,7 +36,7 @@ async function launch(name, seed) {
   );
   const app = await electron.launch({
     executablePath,
-    args: process.env.DYNOTE_PACKAGED === "1" ? [] : ["."],
+    args: [...(process.platform === "darwin" ? ["--use-mock-keychain"] : []), ...(process.env.DYNOTE_PACKAGED === "1" ? [] : ["."])],
     env: { ...process.env, OPEN_NOTES_DATA: profile, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: "1" },
     timeout: 30000,
   });
@@ -65,6 +66,10 @@ async function launch(name, seed) {
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("heading", { name: "개인 노트 동기화" }).waitFor();
     await dialog.getByLabel("Git 사용 방식").selectOption("github-api");
+    await dialog.getByRole("button", {name:"GitHub 로그인", exact:true}).waitFor({timeout:3500});
+    assert(!await dialog.getByLabel("GitHub 토큰").isVisible());
+    assert(!await dialog.getByLabel("브랜치", {exact:true}).isVisible());
+    await dialog.getByText("주소와 토큰으로 직접 연결", {exact:true}).click();
     const connect = dialog.getByRole("button", { name: "연결하고 동기화" });
     assert(await connect.isDisabled());
     await dialog.getByLabel("GitHub 저장소 주소").fill(remote);
@@ -73,6 +78,8 @@ async function launch(name, seed) {
     await token.fill("synthetic-test-token");
     await connect.click();
     await dialog.getByRole("alert").filter({ hasText: "GitHub.com 저장소" }).waitFor();
+    await dialog.getByText("주소와 토큰으로 직접 연결", {exact:true}).click();
+    await verifyGitHubLogin(app, dialog, root, profile);
     await page.keyboard.press("Escape");
     await page.getByRole("dialog").waitFor({ state: "hidden" });
   }

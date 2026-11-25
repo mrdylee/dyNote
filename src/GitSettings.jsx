@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import LocalOnlyFiles from "./LocalOnlyFiles.jsx";
+import GitHubRepositoryPicker from "./GitHubRepositoryPicker.jsx";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview, onCopyDiagnostics, onShowRecovery }) {
-  const [form, setForm] = useState(() => ({ ...initial, ...status.config, ...(startPersonal && status.config?.mode !== "github-api" ? {mode:"personal-sync"} : {}) }));
+export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onGitHubLogin, onClone, onSync, onDisconnect, onZips, onAction, onReview, onCopyDiagnostics, onShowRecovery }) {
+  const [form, setForm] = useState(() => ({ ...initial, ...status.config,
+    ...(startPersonal && status.config?.mode !== "github-api" ? {mode:status.config ? "personal-sync" : status.suggestedMode ?? "personal-sync"} : {}) }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const [copiedDiagnostics, setCopiedDiagnostics] = useState(null);
   const edited = useRef(new Set());
@@ -44,8 +46,15 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
     <option value="github-api">GitHub API로 이어 쓰기</option></select></label>;
   if (apiMode) return <section className="settings-section">
     <h3>개인 노트 동기화</h3>{modeSelect}
-    <p>이 폴더의 지원 문서와 첨부파일(ZIP 포함)을 지정한 브랜치와 양방향으로 동기화합니다. 다른 PC에서는 새 노트 폴더를 선택하고 같은 저장소와 브랜치를 연결하세요. 기존 Git 폴더와 .gitignore가 있는 폴더는 별도로 유지하세요.</p>
+    <p>GitHub에 로그인하고 노트 저장소를 선택하세요. 다른 PC에서도 일반 노트 폴더를 같은 저장소에 연결하면 이어 쓸 수 있습니다.</p>
     <label>노트 폴더<code>{space.root}</code></label>
+    {status.enabled && status.config?.mode === "github-api" && <p>연결된 저장소 <strong>{status.config.remote.replace("https://github.com/","").replace(/\.git$/,"")}</strong> · {status.config.branch}</p>}
+    <GitHubRepositoryPicker onLogin={args => { if (args.action === "start") setError(""); return onGitHubLogin(args); }}
+      onCopy={onCopyDiagnostics} disabled={busy} onConnect={async config => {
+        setError(""); setPending(true);
+        try { return await onConnect(config); } finally { setPending(false); }
+      }}/>
+    <details><summary>주소와 토큰으로 직접 연결</summary>
     <label>GitHub 저장소 주소<input value={form.remote} placeholder="https://github.com/사용자/저장소" disabled={busy} onChange={e=>update("remote",e.target.value)}/></label>
     <label>브랜치<input value={form.branch} disabled={busy} onChange={e=>update("branch",e.target.value)}/></label>
     <label>GitHub 토큰<input type="password" autoComplete="off" value={token} disabled={busy} onChange={e=>setToken(e.target.value)}/></label>
@@ -54,6 +63,8 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
       <button className="primary-button" disabled={busy || !form.remote || !form.branch || !token.trim()} onClick={()=>run(async()=>{
         await onConnect({mode:"github-api",remote:form.remote,branch:form.branch,token});setToken("");
       })}>연결하고 동기화</button>
+    </div></details>
+    <div className="settings-actions">
       <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(()=>onSync(true))}>지금 동기화</button>
       <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(onDisconnect)}>이 기기 동기화 끄기</button>
     </div>

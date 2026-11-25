@@ -53,7 +53,8 @@ async function openFolder(folder) {
 async function setup(folder, device) {
   const row=await openFolder(folder);
   await row.getByRole("button",{name:"동기화 설정",exact:true}).click();
-  assert.equal(await page.getByLabel("Git 사용 방식").inputValue(),"personal-sync");
+  await page.getByRole("button",{name:"GitHub 로그인",exact:true}).waitFor();
+  await page.getByLabel("Git 사용 방식").selectOption("personal-sync");
   await page.getByLabel("이 기기 이름").fill(device);
   await page.getByLabel("Git 저장소 주소",{exact:true}).fill(remote);
 }

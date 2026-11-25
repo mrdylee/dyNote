@@ -20,7 +20,7 @@ const secretStorage = {
   encryptString: (s) => Buffer.from(s),
   decryptString: (b) => b.toString(),
 };
-async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
+async function fixture(t, { empty = false, staleRefAfterSeed = false, branch = "main", loginApi, controllerOptions = {} } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "dynote-api-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const blobs = new Map(),
@@ -38,17 +38,19 @@ async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
   head = empty ? null : commit({}, null);
   const contents = () => trees.get(commits.get(head).tree);
   async function fetcher(url, options) {
+    const loginResponse = loginApi?.(url, options);
+    if (loginResponse) return Response.json(loginResponse);
     assert.equal(options.headers.Authorization, "Bearer test-secret");
     const route = url.replace("https://api.github.com/repos/example/notes", "");
     const method = options.method || "GET",
       body = JSON.parse(options.body || "null");
     requests.push(method + " " + route);
     const result = (value, status = 200) => Response.json(value, { status });
-    if (method === "GET" && route === "/git/ref/heads/main") {
+    if (method === "GET" && route === "/git/ref/heads/" + branch) {
       if (seedPending) { seedPending = false; return result({}, 409); }
       return head ? result({ object: { sha: head } }) : result({}, 409);
     }
-    if (route === "") return result({ default_branch: "main" });
+    if (route === "") return result({ default_branch: branch });
     if (route === "/branches?per_page=1") return result(head ? [{ name: "main" }] : []);
     if (route.startsWith("/contents/") && method === "PUT") {
       if (head) return result({}, 422);
@@ -103,7 +105,7 @@ async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
       const sha = commit(trees.get(body.tree), body.parents[0]);
       return result({ sha }, 201);
     }
-    if (route === "/git/refs/heads/main") {
+    if (route === "/git/refs/heads/" + branch) {
       assert.equal(body.force, false);
       if (race) {
         const task = race;
@@ -124,6 +126,7 @@ async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
     const phases = [];
     const create = () =>
       new GitController({
+        ...controllerOptions,
         settingsFile,
         fetcher,
         secretStorage,
@@ -143,6 +146,8 @@ async function fixture(t, { empty = false, staleRefAfterSeed = false } = {}) {
       phases,
       poll: () => controller.sync(vault.id, { automatic: true, personalOnly: true }),
       connect: (input = config) => controller.connect(vault.id, input),
+      login: (action, sessionId) => controller.githubAuth(vault.id, {action, sessionId}),
+      disconnect: () => controller.disconnect(vault.id),
       attempt: () => controller.sync(vault.id, { personalOnly: true }),
       saveDraft: (name, content, rev) =>
         controller.saveNote(name, content, rev, () => vault.save(name, content, rev)),
@@ -182,6 +187,53 @@ test("API-only PCs exchange notes, restart with private credentials, and idle po
   await a.sync();
   assert.deepEqual(requests, ["GET /git/ref/heads/main"]);
   assert(!(await readdir(a.folder)).includes(".git"));
+});
+test("new ordinary personal folders offer GitHub login first and existing Git folders keep their Git setup", async t => {
+  const {a} = await fixture(t);
+  assert.equal(a.status().suggestedMode,"github-api");
+  await mkdir(path.join(a.folder,".git"));
+  await a.restart();
+  assert.equal(a.status().suggestedMode,"personal-sync");
+});
+test("browser selection connects a vault using the repository default, persists refreshed credentials, and disconnects", async (t) => {
+  let time = Date.now(), refreshes = 0;
+  const destinations = [];
+  const repo = {id:7, full_name:"example/notes", default_branch:"trunk", permissions:{push:true}, private:true};
+  const { a, requests } = await fixture(t, {branch:"trunk",
+    controllerOptions:{now:()=>new Date(time), openExternal:async()=>{}, checkRemote:remote=>destinations.push(remote)},
+    loginApi:(url, options) => {
+      const route = new URL(url).pathname;
+      if (route === "/apps/dynote-note-sync") return {client_id:"example-client",slug:"dynote-note-sync",owner:{id:131228699}};
+      if (route === "/login/device/code") return {device_code:"device",user_code:"ABCD-EFGH",interval:1,expires_in:900,verification_uri:"https://github.com/login/device"};
+      if (route === "/login/oauth/access_token") {
+        if (options.body.get("grant_type")==="refresh_token") refreshes++;
+        return {access_token:"test-secret",refresh_token:"private-rotation-"+refreshes,expires_in:3600,token_type:"bearer"};
+      }
+      if (route === "/user/installations") return {total_count:1,installations:[{id:8,permissions:{contents:"write"}}]};
+      if (route === "/user/installations/8/repositories") return {total_count:1,repositories:[repo]};
+      if (route === "/repos/example/notes") return repo;
+    },
+  });
+  await a.save("hello.md","first via login");
+  const device = await a.login("start");
+  time += 1000;
+  await a.login("poll",device.id);
+  await a.login("repositories",device.id);
+  const status = await a.connect({mode:"github-api",sessionId:device.id,repositoryId:7,branch:"ignored",remote:"https://github.com/unselected/other"});
+  assert.equal(status.phase,"synced",status.message);
+  assert.equal(status.config.branch,"trunk");
+  assert.deepEqual(destinations,[config.remote]);
+  assert(requests.includes("PATCH /git/refs/heads/trunk"));
+  assert(!JSON.stringify(status).match(/test-secret|private-rotation/));
+  time += 3600000;
+  await a.restart();
+  assert.equal(a.status().phase,"synced",a.status().message);
+  assert.equal(refreshes,1);
+  const stored = Object.values(JSON.parse(await readFile(a.settingsFile,"utf8")))[0];
+  assert(!JSON.stringify(stored).match(/test-secret|private-rotation/));
+  assert(stored.encryptedLogin);
+  await a.disconnect();
+  assert(!Object.values(JSON.parse(await readFile(a.settingsFile,"utf8")))[0].encryptedLogin);
 });
 test("retry persists a received note's baseline after a settings write failure so deletion survives restart", async (t) => {
   const { a, b, contents } = await fixture(t);

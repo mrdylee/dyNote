@@ -7,6 +7,7 @@ import { PersonalSync, copyStabilityMs, installDevice, personalConfig } from "..
 import { validPersonalFilePath } from "../core/vault.mjs";
 import { GitBackup, gitFailureMessages, validateGitConfig, runGit } from "../core/git-backup.mjs";
 import { apiConfig, GitHubRemote } from "../core/github-remote.mjs";
+import { GitHubLogin, githubInstallPage } from "../core/github-login.mjs";
 import { preserveApiDraft, scanApiFiles, syncApiVault } from "../core/github-api-sync.mjs";
 import appPackage from "../package.json" with { type: "json" };
 
@@ -62,8 +63,9 @@ function personalErrorStatus(failure, detail, setup = false) {
 }
 
 export class GitController {
-  constructor({ settingsFile, secretStorage, fetcher = fetch, run = runGit, onStatus = () => {}, isPersonal = () => false, setTimer = setInterval, clearTimer = clearInterval, now = () => new Date() }) {
-    Object.assign(this, { settingsFile, secretStorage, fetcher, run, onStatus, isPersonal, setTimer, clearTimer, now });
+  constructor({ settingsFile, secretStorage, fetcher = (...args) => fetch(...args), openExternal, checkRemote = () => {}, run = runGit, onStatus = () => {}, isPersonal = () => false, setTimer = setInterval, clearTimer = clearInterval, now = () => new Date() }) {
+    Object.assign(this, { settingsFile, secretStorage, fetcher, checkRemote, run, onStatus, isPersonal, setTimer, clearTimer, now });
+    this.githubLogin = new GitHubLogin({fetcher, openExternal, now:() => now().getTime()});
     this.records = {}; this.tail = Promise.resolve(); this.timer = null; this.generation = 0;
     this.revision = 0; this.pendingSync = null; this.retryAfter = 0;
     this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
@@ -206,6 +208,8 @@ export class GitController {
     finally { if (settingsWrites.get(file) === result) settingsWrites.delete(file); }
   }
   open(vault) {
+    this.githubLogin.cancel(this.githubLogin.session?.id);
+    this.pendingRefresh = null;
     this.close();
     return this.enqueue(async () => {
       this.vault = vault; this.personal=null; this.apiCache=new Map();
@@ -239,6 +243,10 @@ export class GitController {
         if (error.code !== "ENOENT") this.current.message = "Git 설정을 읽지 못했습니다. 저장소를 다시 연결해 주세요.";
         this.records = {};
       }
+      if (this.isPersonal(vault) && !this.current.config) {
+        const entries = await readdir(vault.root);
+        this.current.suggestedMode = entries.some(name => [".git",".gitignore"].includes(name.toLowerCase())) ? "personal-sync" : "github-api";
+      }
       if (this.current.enabled && this.current.config?.mode==="personal-sync") await this.startPersonal();
       this.schedule();
       // Enqueue after local startup; the window must not wait for network I/O.
@@ -246,27 +254,66 @@ export class GitController {
       return this.publish({});
     });
   }
+  checkSecretStorage() {
+    if (!this.secretStorage?.isEncryptionAvailable() || (process.platform === "linux" && this.secretStorage.getSelectedStorageBackend?.() === "basic_text"))
+      throw new Error("이 PC의 보안 자격 증명 저장소를 먼저 설정해 주세요.");
+  }
+  async githubAuth(id, { action, sessionId }) {
+    this.check(id);
+    if (!this.isPersonal(this.vault)) throw new Error("개인 노트 공간을 선택해 주세요.");
+    switch (action) {
+      case "start": this.checkSecretStorage(); return this.githubLogin.start();
+      case "poll": return this.githubLogin.poll(sessionId);
+      case "repositories": return this.githubLogin.repositories(sessionId);
+      case "install": this.githubLogin.current(sessionId); return this.githubLogin.openExternal(githubInstallPage);
+      case "cancel": this.githubLogin.cancel(sessionId); return;
+      default: throw new Error("지원하지 않는 GitHub 로그인 작업입니다.");
+    }
+  }
+  async apiToken(record) {
+    const decrypt = value => this.secretStorage.decryptString(Buffer.from(value,"base64"));
+    if (!record.encryptedLogin) return decrypt(record.encryptedToken);
+    if (this.pendingRefresh?.previous !== record.encryptedLogin) {
+      const saved = JSON.parse(decrypt(record.encryptedLogin));
+      const fresh = await this.githubLogin.refresh(saved);
+      if (fresh === saved) return saved.accessToken;
+      this.pendingRefresh = {previous:record.encryptedLogin, fresh};
+    }
+    const {fresh} = this.pendingRefresh;
+    const encryptedLogin = this.secretStorage.encryptString(JSON.stringify(fresh)).toString("base64");
+    await this.updatePersonalRecord({encryptedLogin});
+    this.pendingRefresh = null;
+    return fresh.accessToken;
+  }
   connect(id, input) {
     return this.enqueue(async () => {
       this.check(id); this.close();
       const progress = input.mode === "personal-sync" ? personalProgress(this.now) : null;
       try {
+        if (input.mode !== "github-api") this.checkRemote(input.remote);
         if (input.mode === "github-api") {
           if (!this.isPersonal(this.vault)) throw new Error("개인 노트 공간을 선택해 주세요.");
-          const config = apiConfig(input);
-          if (!this.secretStorage?.isEncryptionAvailable() || (process.platform === "linux" && this.secretStorage.getSelectedStorageBackend?.() === "basic_text"))
-            throw new Error("이 PC의 보안 자격 증명 저장소를 먼저 설정해 주세요.");
-          if (!input.token?.trim()) throw new Error("저장소에 접근할 GitHub 토큰을 입력해 주세요.");
-          await scanApiFiles(this.vault,this.apiCache);
+          this.checkSecretStorage();
+          const selected = input.repositoryId != null ? await this.githubLogin.select(input.sessionId,input.repositoryId) : null;
+          const config = selected?.config ?? apiConfig(input);
+          this.checkRemote(config.remote);
           const old = this.records[id];
+          if (selected && old?.enabled && old.mode === config.mode && old.remote === config.remote) config.branch = old.branch;
+          const token = selected?.credentials.accessToken ?? input.token?.trim();
+          if (!token) throw new Error("저장소에 접근할 GitHub 토큰을 입력해 주세요.");
+          await scanApiFiles(this.vault,this.apiCache);
           const same = old?.mode === config.mode && old.remote === config.remote && old.branch === config.branch;
-          const encryptedToken = this.secretStorage.encryptString(input.token.trim()).toString("base64");
-          const remote = new GitHubRemote(config,input.token.trim(),this.fetcher);
+          const secret = selected
+            ? {encryptedLogin:this.secretStorage.encryptString(JSON.stringify(selected.credentials)).toString("base64")}
+            : {encryptedToken:this.secretStorage.encryptString(token).toString("base64")};
+          const remote = new GitHubRemote(config,token,this.fetcher);
           await remote.head(); // Verify the new connection before replacing the saved one.
           const lastSuccess = same ? old.lastSuccess ?? null : null;
           const apiConflicts = same ? old.apiConflicts ?? [] : [];
-          this.records[id] = {...config,enabled:true,encryptedToken,apiBase:same ? old.apiBase : null,lastSuccess,apiConflicts};
+          this.records[id] = {...config,enabled:true,...secret,apiBase:same ? old.apiBase : null,lastSuccess,apiConflicts};
           try { await this.persist(); } catch (error) { this.records[id]=old; throw error; }
+          this.pendingRefresh = null;
+          if (selected) this.githubLogin.cancel(input.sessionId);
           this.personal=null;
           this.publish({config,enabled:true,lastSuccess,apiConflicts,lastRemoteCheck:null,lastBackupDay:null,pendingCommit:null,...clearPersonalDetails()});
           this.retryAfter=0;
@@ -393,7 +440,7 @@ export class GitController {
       if (this.current.config?.mode === "github-api") {
         if (!this.isPersonal(this.vault)) throw new Error("개인 노트 공간을 선택해 주세요.");
         const record = this.records[this.vault.id];
-        const token = this.secretStorage.decryptString(Buffer.from(record.encryptedToken,"base64"));
+        const token = await this.apiToken(record);
         const remote = new GitHubRemote(this.current.config,token,this.fetcher);
         const result = await syncApiVault(this.vault,remote,record.apiBase,this.apiCache,announce);
         const time = this.now().toISOString();
@@ -447,7 +494,8 @@ export class GitController {
   disconnect(id) {
     return this.enqueue(async () => {
       this.check(id); this.close();
-      if (this.records[id]) { this.records[id].enabled = false; delete this.records[id].encryptedToken; delete this.records[id].personalFailure; await this.persist(); }
+      this.githubLogin.cancel(this.githubLogin.session?.id); this.pendingRefresh = null;
+      if (this.records[id]) { this.records[id].enabled = false; delete this.records[id].encryptedToken; delete this.records[id].encryptedLogin; delete this.records[id].personalFailure; await this.persist(); }
       this.personal=null;
       return this.publish({ enabled: false, phase: "off", message: "Git 자동 저장 꺼짐",...clearPersonalDetails() });
     });

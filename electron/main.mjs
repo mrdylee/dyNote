@@ -129,6 +129,8 @@ function openVaultController(target, refresh = false) {
   }
   const git = new GitController({
     secretStorage:safeStorage,
+    openExternal:url => shell.openExternal(url),
+    checkRemote:remote => cloudBridge?.checkNoteRemote?.(remote),
     settingsFile: path.join(app.getPath("userData"), "git-backup.json"),
     isPersonal: target => registry.purposes[target.root] === "personal",
     onStatus: status => {
@@ -536,7 +538,7 @@ app
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
-      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
+      "git-status", "git-connect", "github-login", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
@@ -815,9 +817,9 @@ app
         return results;
       },
       "git-status": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.status(); },
+      "github-login": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.githubAuth(vault.id,args); },
       "git-connect": (args, vault, gitBackup) => {
         checkVault(args, vault);
-        cloudBridge?.checkNoteRemote?.(args.config?.remote);
         return gitBackup.connect(vault.id, args.config);
       },
       "git-sync": (args, vault, gitBackup) => {
