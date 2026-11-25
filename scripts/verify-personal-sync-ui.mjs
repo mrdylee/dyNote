@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, realpath, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, writeFile, realpath, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -205,6 +205,7 @@ try {
   assert.equal(await readFile(path.join(a.root, "회의록.md"), "utf8"), "회의 3시\n");
   const stored = path.join(a.root, "File Storage");
   await mkdir(stored, { recursive: true });
+  await appendFile(path.join(a.root, ".git", "info", "exclude"), "\n/File Storage/local-only.txt\n");
   await writeFile(path.join(stored, "local-only.txt"), "private sample");
   const before = (await a.invoke("gitStatus")).lastSuccess;
   const excluded = await a.sync();

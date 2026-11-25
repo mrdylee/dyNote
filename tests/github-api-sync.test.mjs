@@ -290,12 +290,21 @@ test("empty repository is seeded from a real note and handles nested binary path
   await mkdir(path.join(a.folder, "File Storage"));
   await a.save("가.md", "노트");
   const bytes = Buffer.from([0, 255, 12]);
-  await a.save("File Storage/image.png", bytes);
+  await a.save("File Storage/setup.exe", bytes);
+  await a.save("File Storage/README", bytes);
   const result = await a.connect();
   assert.equal(result.phase, "synced", result.message);
   await b.connect();
   assert.equal(await b.read("가.md"), "노트");
-  assert.deepEqual(await readFile(path.join(b.folder, "File Storage/image.png")), bytes);
+  assert.deepEqual(await readFile(path.join(b.folder, "File Storage/setup.exe")), bytes);
+  assert.deepEqual(await readFile(path.join(b.folder, "File Storage/README")), bytes);
+  await a.save("File Storage/README", "local edit");
+  await b.save("File Storage/README", "remote edit");
+  await b.sync();
+  await a.sync();
+  const copy = (await readdir(path.join(a.folder, "File Storage"))).find(name => name.startsWith("README (충돌 "));
+  assert.ok(copy);
+  assert.equal(await a.read("File Storage/" + copy), "local edit");
 });
 test("the initial sync uses the confirmed seed commit while the branch lookup still reports an empty repository", async t => {
   const { a, contents } = await fixture(t, { empty: true, staleRefAfterSeed: true });

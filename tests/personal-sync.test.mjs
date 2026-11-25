@@ -66,7 +66,7 @@ test("File Storage uses the selected Git mode's eligibility rules for ZIP", asyn
   assert.deepEqual(await localOnlyFiles(git, validPersonalFilePath), []);
 });
 
-test("File Storage reports unsupported files and Git exclusions separately from transfer waits", async t => {
+test("File Storage transfers arbitrary formats and reports Git exclusions separately from transfer waits", async t => {
   const { a, b, bare } = await workingCopies(t);
   await a.sync({ register: true });
   await b.sync({ register: true });
@@ -75,15 +75,18 @@ test("File Storage reports unsupported files and Git exclusions separately from 
   await writeFile(path.join(a.dir, ".git", "info", "exclude"), "private.md\n/File Storage/excluded/\n");
   for (const name of ["paper.docx", "private.md", "excluded/nested.md", "~$lock.docx", ".DS_Store", "desktop.ini", "copy.tmp"])
     await writeFile(path.join(folder, name), name);
+  const bytes = Buffer.from([0x4d, 0x5a, 0, 0xff, 13, 10]);
+  await mkdir(path.join(folder, "tools"));
+  for (const name of ["tools/setup.exe", "tools/README"]) await writeFile(path.join(folder, name), bytes);
+  await writeFile(path.join(a.dir, "outside.exe"), bytes);
   const large = path.join(folder, "large.pdf");
   await writeFile(large, "");
   await truncate(large, blobLimit + 1);
   await writeFile(path.join(folder, "hand-off.md"), "received");
   const mixed = await a.sync(), local = mixed.localOnlyFiles;
   assert.deepEqual(local?.map(f => f.name).sort(), [
-    "File Storage/excluded/", "File Storage/paper.docx", "File Storage/private.md",
+    "File Storage/excluded/", "File Storage/private.md",
   ]);
-  assert.match(local.find(f => f.name.endsWith(".docx")).message, /형식/);
   assert.match(local.find(f => f.name.endsWith("private.md")).message, /Git.*제외/);
   assert.match(local.find(f => f.name.endsWith("excluded/")).message, /Git.*제외/);
   assert.deepEqual(mixed.pendingFiles.map(f => f.name), ["File Storage/large.pdf"]);
@@ -93,7 +96,10 @@ test("File Storage reports unsupported files and Git exclusions separately from 
   const received = await readFile(path.join(b.dir, "File Storage", "hand-off.md"), "utf8");
   assert.equal(received, "received");
   assert.deepEqual((await runGit(bare, ["ls-tree", "-r", "--name-only", "main", "--", "File Storage"])).stdout.trim().split("\n"),
-    ["File Storage/hand-off.md"]);
+    ["File Storage/copy.tmp", "File Storage/desktop.ini", "File Storage/hand-off.md", "File Storage/paper.docx", "File Storage/tools/README", "File Storage/tools/setup.exe"]);
+  for (const name of ["tools/setup.exe", "tools/README"])
+    assert.deepEqual(await readFile(path.join(b.dir, "File Storage", name)), bytes);
+  await assert.rejects(readFile(path.join(b.dir, "outside.exe")), { code: "ENOENT" });
   await rm(large);
   const exclusions = await a.sync();
   assert.equal(exclusions.phase, "local-only");
@@ -124,7 +130,7 @@ test("an incoming path collision leaves an ignored local document private and le
   await assert.rejects(a.sync(), /Git 제외 규칙/);
   assert.equal(await readFile(file, "utf8"), "local-only bytes");
   assert.equal((await runGit(a.dir, ["for-each-ref", "refs/dynote-sync/inputs/"])).stdout, "");
-  const moved = path.join(a.dir, "File Storage/private.copy");
+  const moved = path.join(a.dir, "private.copy");
   await rename(file, moved);
   await a.sync();
   await a.sync();
@@ -422,22 +428,26 @@ test("Journal union keeps original blocks and manual text in place and sorts onl
   assert.equal(mergeCaptureBlocks(base, right, left), merged);
 });
 
-test("keeping both binary versions protects the original link and rejects occupied copy names", async (t) => {
-  const { store, config, cloud, local, checkpoint } = await fixture(t),
-    name = "자료.xlsx";
-  const parent = await checkpoint(null, cloud, { [name]: Buffer.from([0, 9]), "taken.xlsx": "occupied" });
-  const a = await checkpoint(parent, cloud, { [name]: Buffer.from([0, 2]) });
-  const b = await checkpoint(parent, local, { [name]: Buffer.from([0, 3]) });
-  const head = await integrate(store, a, b, local, config),
-    basis = [a, b].sort();
-  await assert.rejects(
-    chooseVersion(store, head, name, basis, b, local, config, { copies: { [a]: "TAKEN.xlsx" } }),
-    /겹치지 않는/
-  );
-  const result = await chooseVersion(store, head, name, basis, b, local, config, {
-    copies: { [a]: "자료 사본.xlsx" },
+for (const [name, copy, taken] of [
+  ["자료.xlsx", "자료 사본.xlsx", "taken.xlsx"],
+  ["File Storage/v1.0/README", "File Storage/v1.0/README copy", "File Storage/v1.0/taken"],
+]) {
+  test("keeping both binary versions preserves both files for " + name, async (t) => {
+    const { store, config, cloud, local, checkpoint } = await fixture(t);
+    const parent = await checkpoint(null, cloud, { [name]: Buffer.from([0, 9]), [taken]: "occupied" });
+    const a = await checkpoint(parent, cloud, { [name]: Buffer.from([0, 2]) });
+    const b = await checkpoint(parent, local, { [name]: Buffer.from([0, 3]) });
+    const head = await integrate(store, a, b, local, config),
+      basis = [a, b].sort();
+    await assert.rejects(
+      chooseVersion(store, head, name, basis, b, local, config, { copies: { [a]: taken.replace("taken", "TAKEN") } }),
+      /겹치지 않는/
+    );
+    const result = await chooseVersion(store, head, name, basis, b, local, config, {
+      copies: { [a]: copy },
+    });
+    const files = await store.tree(result);
+    assert.deepEqual(await store.blob(files.get(name).oid), Buffer.from([0, 3]));
+    assert.deepEqual(await store.blob(files.get(copy).oid), Buffer.from([0, 2]));
   });
-  const files = await store.tree(result);
-  assert.deepEqual(await store.blob(files.get(name).oid), Buffer.from([0, 3]));
-  assert.deepEqual(await store.blob(files.get("자료 사본.xlsx").oid), Buffer.from([0, 2]));
-});
+}

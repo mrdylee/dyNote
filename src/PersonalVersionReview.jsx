@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 function copyPath(name, id) {
-  const dot = name.lastIndexOf(".");
+  const lastDot = name.lastIndexOf(".");
+  const dot = lastDot > name.lastIndexOf("/") ? lastDot : name.length;
   return name.slice(0, dot) + " (" + id.slice(0, 8) + ")" + name.slice(dot);
 }
 

@@ -46,7 +46,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
     <option value="github-api">GitHub API로 이어 쓰기</option></select></label>;
   if (apiMode) return <section className="settings-section">
     <h3>개인 노트 동기화</h3>{modeSelect}
-    <p>GitHub에 로그인하고 노트 저장소를 선택하세요. 다른 PC에서도 일반 노트 폴더를 같은 저장소에 연결하면 이어 쓸 수 있습니다.</p>
+    <p>GitHub에 로그인하고 노트 저장소를 선택하세요. 다른 PC에서도 일반 노트 폴더를 같은 저장소에 연결하면 이어 쓸 수 있습니다. File Storage 안의 일반 파일은 확장자와 관계없이 파일당 25 MiB까지 전송합니다.</p>
     <label>노트 폴더<code>{space.root}</code></label>
     {status.enabled && status.config?.mode === "github-api" && <p>연결된 저장소 <strong>{status.config.remote.replace("https://github.com/","").replace(/\.git$/,"")}</strong> · {status.config.branch}</p>}
     <GitHubRepositoryPicker onLogin={args => { if (args.action === "start") setError(""); return onGitHubLogin(args); }}
@@ -88,7 +88,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
       <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
     </div>
     {modeSelect}
-    {personal ? <><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
+    {personal ? <><p>File Storage 안의 일반 파일은 확장자와 관계없이 파일당 25 MiB까지 동기화합니다.</p><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
       <p>{repository?.available === false ? "이 폴더의 노트를 처음 올리려면 Git 서비스에서 빈 저장소를 만든 뒤 아래에 주소를 입력하세요." : "다른 PC에서도 같은 저장소와 브랜치를 선택하면 이 폴더의 노트를 이어 쓸 수 있습니다."}</p>
       <details open={zipPaths?.length>0 && status.config?.mode!=="personal-sync"}><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
         <ul>{zipPaths?.map(name=><li key={name}>{name}</li>)}</ul></details></> : <p>보관함의 파일을 Git으로 백업합니다. 파일 편집은 계속 자동 저장됩니다.</p>}

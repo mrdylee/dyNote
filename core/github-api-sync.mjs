@@ -53,7 +53,7 @@ export async function scanApiFiles(vault, cache) {
 
 function conflictName(name, sha, index) {
   const ext = path.posix.extname(name);
-  return name.slice(0, -ext.length) + " (충돌 " + sha.slice(0, 10) + (index === 1 ? "" : "-" + index) + ")" + ext;
+  return name.slice(0, name.length - ext.length) + " (충돌 " + sha.slice(0, 10) + (index === 1 ? "" : "-" + index) + ")" + ext;
 }
 
 export async function preserveApiDraft(vault, name, content) {

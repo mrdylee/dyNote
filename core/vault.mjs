@@ -73,7 +73,7 @@ export const validFilePath = (value) =>
   validRelativePath(value) && !(officeKind(value) && path.posix.basename(value).startsWith("~$")) && /\.(?:html?|xlsx|pptx|md|canvas|base|png|jpe?g|gif|webp|pdf|webm|wav|mp3|ogg|m4a)$/i.test(value);
 export const validPersonalFilePath = value =>
   validRelativePath(value) && !/[\x00-\x1f\x7f]/u.test(value) && !path.posix.basename(value).startsWith("~$") &&
-  (validFilePath(value) || /\.zip$/i.test(value));
+  (value.startsWith(FILE_STORAGE_FOLDER + "/") || validFilePath(value) || /\.zip$/i.test(value));
 const validWordPath = (value) =>
   validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
 const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>

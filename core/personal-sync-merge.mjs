@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { assertSyncEntry, conflictFolder, syncPrefix } from "./personal-sync-store.mjs";
 import { mergeCaptureBlocks, resolveText, textChoices } from "./personal-sync-text.mjs";
 import { validPersonalFilePath } from "./vault.mjs";
@@ -202,7 +203,7 @@ export async function chooseVersion(store, head, path, basis, chosenCommit, devi
       if (
         !validPersonalFilePath(copy) ||
         copy.split("/").slice(0, -1).join("/") !== path.split("/").slice(0, -1).join("/") ||
-        copy.split(".").pop().toLowerCase() !== path.split(".").pop().toLowerCase() ||
+        posix.extname(copy).toLowerCase() !== posix.extname(path).toLowerCase() ||
         occupied.has(copy.normalize("NFC").toLowerCase())
       )
         throw new Error("기존 파일과 겹치지 않는 사본 이름을 선택해 주세요.");
