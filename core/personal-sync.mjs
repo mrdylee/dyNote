@@ -3,11 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { validateGitConfig } from "./git-backup.mjs";
 import { validPersonalFilePath } from "./vault.mjs";
+import { localOnlyFiles as getLocalOnlyFiles } from "./git-file-status.mjs";
 import { PersonalSyncStore, deviceRecord, devicePath, isSyncDocumentText, isSyncRecordText, textConflictFolders, syncPrefix, conflictFolder } from "./personal-sync-store.mjs";
 import { checkTreeChanges, chooseVersion, integrate, normalizePublished } from "./personal-sync-merge.mjs";
 import { textChoices } from "./personal-sync-text.mjs";
 import { scanLinks, resolvePath, createLinkIndex } from "./links.mjs";
-import { PersonalSyncDisk, atomicJson, readStable } from "./personal-sync-disk.mjs";
+import { PersonalSyncDisk, atomicJson, readStable, windowsCheckoutBytes } from "./personal-sync-disk.mjs";
+
+export const copyStabilityMs = 1500;
 
 export async function installDevice(settingsDir) {
   await mkdir(settingsDir, { recursive: true });
@@ -51,6 +54,33 @@ function completeArchive(name, bytes) {
   return false;
 }
 
+const deviceDirectory = syncPrefix + "devices/";
+const managedChange = (name, detail) => Object.assign(new Error("동기화 관리 파일 · " + detail + " · " + name), {
+  syncReason: "managed-record",
+});
+const historyError = message => Object.assign(new Error(message), { syncReason: "history" });
+
+function verifyDeviceFormatting(name, stored, bytes) {
+  const invalid = () => managedChange(name, "기기 기록의 UTF-8 JSON 형식과 필드를 확인해 주세요");
+  let original, current, text;
+  try {
+    const saved = JSON.parse(stored);
+    original = deviceRecord(saved.id, saved.name, saved.active);
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    current = JSON.parse(text);
+  } catch {
+    throw invalid();
+  }
+  if (name !== devicePath(original.id) || !stored.equals(Buffer.from(JSON.stringify(original) + "\n")) ||
+      !current || typeof current !== "object" || Array.isArray(current) ||
+      Object.keys(current).some(key => !Object.hasOwn(original, key))) throw invalid();
+  const changed = Object.keys(original).filter(key => current[key] !== original[key]);
+  if (changed.length) throw managedChange(name, "변경된 기기 필드를 확인해 주세요 (" + changed.join(", ") + ")");
+  // Remove only JSON whitespace outside strings. Duplicate keys cannot round-trip through JSON.parse.
+  const compact = text.replace(/"(?:[^"\\]|\\.)*"|[ \t\r\n]+/g, token => token.startsWith('"') ? token : "");
+  if (compact !== JSON.stringify(current)) throw invalid();
+}
+
 export class PersonalSync {
   constructor(vault, run, deviceId, { now = Date.now, batchLimit } = {}) {
     this.store = new PersonalSyncStore(vault.root, run);
@@ -71,21 +101,41 @@ export class PersonalSync {
       if (error.code !== "EEXIST") throw error;
     });
     if (!(await lstat(directory)).isDirectory()) throw new Error("로컬 동기화 관리 경로를 확인해 주세요.");
-    if (this.disk) return;
-    const format = (await this.store.git(["rev-parse", "--show-object-format"])).stdout.trim();
-    this.disk = new PersonalSyncDisk(this.store, format, this.limit);
+    if (!this.disk) {
+      const format = (await this.store.git(["rev-parse", "--show-object-format"])).stdout.trim();
+      this.disk = new PersonalSyncDisk(this.store, format, this.limit);
+    }
+    await this.disk.checkStorage();
   }
-  async dirty(head) {
+  async dirty(head, checkoutRepairs) {
     const list = (await this.store.git(["ls-files", "-m", "-d", "-o", "--exclude-standard", "-z"])).stdout;
-    const paths = [...new Set(list.split("\0").filter(Boolean))];
-    if (!paths.some(name => name.startsWith(syncPrefix) || isSyncDocumentText(name))) return paths;
-    const files = await this.store.tree(head);
-    const folders = paths.some(name => name.startsWith(syncPrefix) && name.endsWith(".blob"))
+    const paths = new Set(list.split("\0").filter(Boolean));
+    const checkAll = [...paths].some(name => name.startsWith(syncPrefix) || validPersonalFilePath(name));
+    const files = await this.store.tree(head, checkAll ? undefined : deviceDirectory);
+    // A checkout with core.filemode=false or clean filters can hide a changed device record from Git.
+    for (const name of files.keys()) if (name.startsWith(deviceDirectory)) paths.add(name);
+    const folders = [...paths].some(name => name.startsWith(syncPrefix) && name.endsWith(".blob"))
       ? textConflictFolders((await this.store.metadata(files)).groups) : new Set();
     const changes = [];
     for (const name of paths) {
       const managed = name.startsWith(syncPrefix), entry = files.get(name);
-      if (entry && (isSyncDocumentText(name) || isSyncRecordText(name, folders))) {
+      if (entry && name.startsWith(deviceDirectory)) {
+        const current = await this.disk.read(name).catch(error => {
+          throw Object.assign(error, { syncReason: "managed-record" });
+        });
+        if (!current) throw managedChange(name, "삭제된 기기 기록을 확인해 주세요");
+        if (entry.mode !== "100644" || entry.type !== "blob" || (process.platform !== "win32" && (current.mode & 0o111)))
+          throw managedChange(name, "기기 기록의 파일 종류와 실행 권한을 확인해 주세요");
+        if (current.oid === entry.oid) continue;
+        if (current.bytes.length > 65536) throw managedChange(name, "기기 기록의 크기 한도는 64 KiB입니다");
+        const stored = await this.store.blob(entry.oid);
+        verifyDeviceFormatting(name, stored, current.bytes);
+        // A plain CRLF checkout is already accepted by the receive job, including on restart.
+        if (!windowsCheckoutBytes(stored)?.equals(current.bytes))
+          checkoutRepairs.push({ name, before: current.oid, after: entry.oid, mode: entry.mode, size: entry.size, saved: randomUUID() });
+        continue;
+      }
+      if (entry && (validPersonalFilePath(name) || isSyncRecordText(name, folders))) {
         const current = await this.disk.read(name).catch(error => {
           if (managed) throw error;
           return null; // Let capture report pending reads of ordinary documents.
@@ -98,8 +148,15 @@ export class PersonalSync {
           );
           if (!diff.code) continue; // A mode or type change still needs attention.
         }
+        if (!managed && !isSyncDocumentText(name) && current && current.bytes.length > entry.size &&
+            !current.bytes.includes(0) && current.bytes.includes("\r\n") &&
+            windowsCheckoutBytes(await this.store.blob(entry.oid))?.equals(current.bytes)) {
+          // Restore Git-converted attachment bytes through the same recoverable apply job as a download.
+          checkoutRepairs.push({ name, before: current.oid, after: entry.oid, mode: entry.mode, size: entry.size, saved: randomUUID() });
+          continue;
+        }
       }
-      if (managed) throw new Error("동기화 관리 파일의 변경을 확인해 주세요: " + name);
+      if (managed) throw managedChange(name, "외부 변경을 확인해 주세요");
       changes.push(name);
     }
     return changes;
@@ -119,7 +176,7 @@ export class PersonalSync {
     if (!current || !/\.(xlsx|pptx|pdf|zip)$/i.test(name) || this.confirmed.get(name) === current.oid) return true;
     const previous = this.observed.get(name);
     if (previous?.sig !== current.signature) this.observed.set(name, { sig: current.signature, at: this.now() });
-    if (this.now() - this.observed.get(name).at >= 1500 && completeArchive(name, current.bytes)) return true;
+    if (this.now() - this.observed.get(name).at >= copyStabilityMs && completeArchive(name, current.bytes)) return true;
     this.waiting.set(name, { name, oid: current.oid, message: "복사 완료 대기" });
     return false;
   }
@@ -213,13 +270,17 @@ export class PersonalSync {
         return !result.waiting;
       }
       const { job: work, name, entry } = result.diverged;
+      const row = work.records[work.offset];
+      if (!row.before && entry && !result.diverged.parent &&
+          !(await this.store.git(["--no-literal-pathspecs", "check-ignore", "--quiet", "--no-index", "--", name], { allow: [0, 1] })).code)
+        throw Object.assign(new Error("Git 제외 규칙이 적용된 로컬 파일과 수신 파일의 경로가 겹칩니다. 로컬 파일을 보관함 밖으로 옮긴 뒤 다시 동기화해 주세요 · " + name),
+          { syncStage: "apply", syncReason: "ignored-collision" });
       const current = await this.disk.read(name);
       if (current && current.oid === entry?.oid && !this.copyReady(name, current)) return false;
       const parent = result.diverged.parent ?? work.previous;
       if (!parent)
         throw new Error("가져오는 동안 로컬 파일이 생겼습니다. 파일을 보존한 뒤 빈 폴더로 다시 연결해 주세요.");
       await this.rememberInput(parent, name, entry, device, config);
-      const row = work.records[work.offset];
       row.before = (await this.disk.read(name))?.oid ?? null;
       if (row.before && row.before !== entry?.oid) continue;
       row.saved = randomUUID();
@@ -251,7 +312,10 @@ export class PersonalSync {
       const file = (await this.store.tree(ref)).get(name);
       if (!file || file.type !== "blob" || file.size > 25 * 1024 * 1024) continue;
       const bytes = await this.store.blob(file.oid);
-      if (createHash("sha256").update(bytes).digest("hex") !== expectedRevision) continue;
+      if (createHash("sha256").update(bytes).digest("hex") !== expectedRevision) {
+        const checkout = windowsCheckoutBytes(bytes);
+        if (!checkout || createHash("sha256").update(checkout).digest("hex") !== expectedRevision) continue;
+      }
       const entry = await this.store.storeBytes(Buffer.from(content));
       await this.rememberInput(ref, name, entry, deviceRecord(this.deviceId, config.deviceName), config);
       return { path: name, content, revision: createHash("sha256").update(content).digest("hex"), preserved: true };
@@ -280,7 +344,11 @@ export class PersonalSync {
       const stamp = [info.size, info.ctimeNs, info.mtimeNs].join(":");
       if (source.stamp === stamp) continue;
       const current = await readStable(backup, this.disk.format);
-      if (current.oid !== source.oid)
+      // Older markers recorded the LF commit as their initial baseline for a displaced CRLF note.
+      const oldCheckout = !source.stamp && current.oid !== source.oid && isSyncDocumentText(source.name) &&
+        (await this.store.tree(source.parent)).get(source.name)?.oid === source.oid &&
+        await this.disk.matchesBlob(source.name, current, source.oid);
+      if (current.oid !== source.oid && !oldCheckout)
         await this.rememberInput(
           source.parent,
           source.name,
@@ -321,9 +389,32 @@ export class PersonalSync {
       }
     }
   }
-  async sync(input, { force = true, register = false } = {}) {
+  async sync(input, { force = true, register = false, onStage = () => {} } = {}) {
     const config = personalConfig(input),
       device = deviceRecord(this.deviceId, config.deviceName);
+    const times = {};
+    const stage = (name, done = false) => {
+      let time;
+      if (done && (name === "remote-query" || name === "push")) {
+        time = new Date(this.now()).toISOString();
+        times[name === "push" ? "lastSuccess" : "lastRemoteCheck"] = time;
+      }
+      onStage(name, done, time);
+    };
+    const queryRemote = async () => {
+      stage("remote-query");
+      const remote = await this.store.remoteHead(config);
+      stage("remote-query", true);
+      return remote;
+    };
+    const applyJob = async () => {
+      if (!(await this.disk.job())) return true;
+      stage("apply");
+      const done = await this.resume(device, config);
+      if (done) stage("apply", true);
+      return done;
+    };
+    stage("local-save");
     await this.init();
     const status = async (waiting = false) => {
       const files = await this.store.tree(await this.disk.head()),
@@ -331,28 +422,29 @@ export class PersonalSync {
       const conflicts = [...groups]
         .filter(([, g]) => g.pending.length)
         .map(([name, g]) => ({ name, count: g.pending.length }));
-      const changed = this.changed.splice(0);
+      const localOnlyFiles = await getLocalOnlyFiles(args => this.store.git(args), validPersonalFilePath);
+      const pending = waiting || this.firstDirty !== null || this.waiting.size > 0;
+      const summary = waiting
+        ? "다음 묶음 동기화 대기"
+        : this.waiting.size ? "파일 " + this.waiting.size + "개 전송 대기"
+        : this.firstDirty !== null ? "기기에 저장됨"
+        : conflicts.length ? "버전 확인 " + conflicts.length + "개" : "";
+      const local = localOnlyFiles.length ? "이 PC에만 있는 항목 " + localOnlyFiles.length + "개" : "";
       return {
-        phase: waiting || this.firstDirty !== null || this.waiting.size ? "pending" : "synced",
-        message: waiting
-          ? "다음 묶음 동기화 대기"
-          : this.waiting.size
-            ? "파일 " + this.waiting.size + "개 전송 대기"
-            : this.firstDirty !== null
-              ? "기기에 저장됨"
-              : conflicts.length
-                ? "버전 확인 " + conflicts.length + "개"
-                : "동기화됨",
+        phase: pending ? "pending" : local ? "local-only" : "synced",
+        message: [summary, local].filter(Boolean).join(" · ") || "동기화됨",
         conflicts,
         devices: devices.filter((d) => d.active),
         deviceId: device.id,
         pendingFiles: [...this.waiting.values()],
-        changed,
+        localOnlyFiles,
+        changed: this.changed.splice(0),
         recoveryBytes: this.recoveryBytes ?? 0,
-        ...(!waiting ? { lastSuccess: new Date(this.now()).toISOString() } : {}),
+        ...times,
       };
     };
-    if (!(await this.resume(device, config))) return status(true);
+    if (!(await applyJob())) return status(true);
+    stage("local-save");
     await this.store.assertReady(config);
     await this.externalWrites(device, config);
     let head = await this.disk.head();
@@ -361,27 +453,44 @@ export class PersonalSync {
       .digest("hex");
     const ref = "refs/dynote-sync/remotes/" + remoteKey;
     let seen = await this.disk.head(ref);
-    const dirty = await this.dirty(head);
-    if (dirty.some(validPersonalFilePath)) this.firstDirty ??= this.now();
-    else {
-      this.firstDirty = null;
-      this.waiting.clear();
+    const scan = async () => {
+      const repairs = [], changes = await this.dirty(head, repairs);
+      if (repairs.length) {
+        stage("apply");
+        await this.disk.startJob(config.branch, head, head, repairs);
+        if (!(await applyJob())) return null;
+      }
+      return changes;
+    };
+    const dirty = await scan();
+    if (!dirty) return status(true);
+    if (this.waiting.size) {
+      const modified = new Set(dirty);
+      for (const name of this.waiting.keys()) if (!modified.has(name)) this.waiting.delete(name);
     }
-    const checkpoint = async (registerNow = false) => {
-      await this.capture(head, device, config, await this.dirty(head), registerNow);
-      const done = await this.resume(device, config);
+    if (dirty.some(validPersonalFilePath)) this.firstDirty ??= this.now();
+    else this.firstDirty = null;
+    const checkpoint = async (registerNow = false, changes) => {
+      changes ??= await scan();
+      if (!changes) return false;
+      stage("local-save");
+      const captured = await this.capture(head, device, config, changes, registerNow);
+      const done = await applyJob();
+      if (done && captured !== head) stage("local-save", true);
       head = await this.disk.head();
       this.firstDirty = this.waiting.size ? this.firstDirty : null;
       return done;
     };
     // On an established connection an outage still leaves a local Git checkpoint.
     if ((head || !register) && (force || (this.firstDirty !== null && this.now() - this.firstDirty >= 300000)))
-      if (!(await checkpoint(register))) return status(true);
+      if (!(await checkpoint(register, dirty))) return status(true);
+    let unacknowledgedHead = null;
     for (let attempt = 0; attempt < 4; attempt++) {
-      let remote = await this.store.remoteHead(config);
-      if (seen && !remote) throw new Error("원격 브랜치가 삭제되었습니다. 로컬 기록을 보존했습니다.");
+      let remote = await queryRemote();
+      if (seen && !remote) throw historyError("원격 브랜치가 삭제되었습니다. 로컬 기록을 보존했습니다.");
       if (remote) {
         if (remote !== seen) {
+          stage("fetch");
           await this.store.git([
             "fetch",
             "--no-tags",
@@ -391,11 +500,17 @@ export class PersonalSync {
             "refs/heads/" + config.branch,
           ]);
           remote = await this.disk.head("FETCH_HEAD");
+          stage("fetch", true);
         }
         if (seen && (await this.store.git(["merge-base", "--is-ancestor", seen, remote], { allow: [0, 1] })).code)
-          throw new Error("원격 Git 이력이 재작성되었습니다. 로컬 기록을 보존했습니다.");
+          throw historyError("원격 Git 이력이 재작성되었습니다. 로컬 기록을 보존했습니다.");
         if (!seen && head && (await this.store.git(["merge-base", head, remote], { allow: [0, 1] })).code)
-          throw new Error("공통 Git 이력이 없는 저장소입니다.");
+          throw historyError("공통 Git 이력이 없는 저장소입니다.");
+        if (unacknowledgedHead) {
+          if (!(await this.store.git(["merge-base", "--is-ancestor", unacknowledgedHead, remote], { allow: [0, 1] })).code)
+            stage("push", true);
+          unacknowledgedHead = null;
+        }
         await this.validateRange(
           seen ?? (head && (await this.store.git(["merge-base", head, remote])).stdout.trim()),
           remote
@@ -408,9 +523,10 @@ export class PersonalSync {
         await this.store.git(["update-ref", ref, remote]);
         seen = remote;
       }
-      if (remote && !head && (await this.dirty(head)).some(validPersonalFilePath))
-        throw new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. 기존 Git 저장소에서 가져오기로 빈 폴더를 선택해 주세요.");
+      if (remote && !head && (await this.dirty(head, [])).some(validPersonalFilePath))
+        throw historyError("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. 기존 Git 저장소에서 가져오기로 빈 폴더를 선택해 주세요.");
       if (remote !== head && head && this.firstDirty !== null && !(await checkpoint())) return status(true);
+      stage("apply");
       const normalized = await normalizePublished(this.store, remote, device, config);
       let merged = await integrate(this.store, normalized, head, device, config);
       const inputs = (
@@ -422,7 +538,7 @@ export class PersonalSync {
       for (const saved of inputs) merged = await integrate(this.store, merged, saved, device, config);
       if (merged !== head) {
         await this.disk.begin(config.branch, head, merged);
-        if (!(await this.resume(device, config))) return status(true);
+        if (!(await applyJob())) return status(true);
         head = merged;
       }
       for (const saved of inputs)
@@ -432,12 +548,13 @@ export class PersonalSync {
         register = false;
       }
       if (!head || remote === head) return status();
+      stage("push");
       if (remote && (await this.store.git(["merge-base", "--is-ancestor", remote, head], { allow: [0, 1] })).code)
-        throw new Error("원격 이력 보호를 위해 업로드를 중지했습니다.");
+        throw historyError("원격 이력 보호를 위해 업로드를 중지했습니다.");
       await this.validateRange(remote, head);
       const dst = "refs/heads/" + config.branch;
       try {
-        await this.store.git([
+        const result = await this.store.git([
           "push",
           "--porcelain",
           "--no-verify",
@@ -447,10 +564,21 @@ export class PersonalSync {
           config.remote,
           head + ":" + dst,
         ]);
+        if (!/^=\t/m.test(result.stdout)) stage("push", true);
       } catch (error) {
-        if (attempt === 3 || (await this.store.remoteHead(config)) === remote) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 30 + Math.random() * 150));
-        continue;
+        error.syncStage ??= "push";
+        if (["push-denied", "branch-policy", "authentication", "ownership", "storage-full", "git-missing"].includes(error.syncReason))
+          throw error;
+        const latest = await queryRemote().catch(() => { throw error; });
+        if (latest === head) {
+          if (error.syncReason !== "non-fast-forward") stage("push", true);
+        }
+        else {
+          if (latest === remote || attempt === 3) throw error;
+          if (error.syncReason !== "non-fast-forward") unacknowledgedHead = head;
+          await new Promise((resolve) => setTimeout(resolve, 30 + Math.random() * 150));
+          continue;
+        }
       }
       await this.store.git(["update-ref", ref, head]);
       return status();
@@ -520,9 +648,9 @@ export class PersonalSync {
       ));
     return parts?.filter((part) => typeof part !== "string") ?? [];
   }
-  async removeDevice(config, id) {
+  async removeDevice(config, id, onStage) {
     if (id === this.deviceId) throw new Error("현재 기기에서는 동기화를 끈 뒤 다른 기기에서 등록을 해제하세요.");
-    const state = await this.sync(config),
+    const state = await this.sync(config, { onStage }),
       head = await this.disk.head(),
       files = await this.store.tree(head);
     const other = (await this.store.metadata(files)).devices.find((d) => d.id === id && d.active);
@@ -538,7 +666,7 @@ export class PersonalSync {
     );
     await this.disk.begin(config.branch, head, commit);
     this.changed.push(...state.changed);
-    return this.sync(config);
+    return this.sync(config, { onStage });
   }
   async preview(name, id) {
     const files = await this.store.tree(await this.disk.head());
@@ -546,9 +674,9 @@ export class PersonalSync {
     if (!version) throw new Error("검토할 버전이 없습니다.");
     return version.blob ? await this.store.blob(version.blob) : null;
   }
-  async resolve(config, name, basis, id, options) {
+  async resolve(config, name, basis, id, options, onStage) {
     const device = deviceRecord(this.deviceId, config.deviceName);
-    const state = await this.sync(config);
+    const state = await this.sync(config, { onStage });
     if ((await this.disk.job()) || this.waiting.has(name))
       throw new Error("파일 수신이 완료되면 다시 적용해 주세요.");
     for (const copy of Object.values(options?.copies ?? {}))
@@ -557,6 +685,6 @@ export class PersonalSync {
       next = await chooseVersion(this.store, head, name, basis, id, device, config, options);
     await this.disk.begin(config.branch, head, next);
     this.changed.push(...state.changed);
-    return this.sync(config);
+    return this.sync(config, { onStage });
   }
 }

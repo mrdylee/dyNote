@@ -144,6 +144,26 @@ try {
   }
   await assert.rejects(access(path.join(personal, "검증 노트.md")), { code: "ENOENT" });
   assert.equal(await readFile(path.join(personal, "개인.md"), "utf8"), "# 비공개 메모\n");
+  const selected = repositories[1], modelTree = page.getByRole("region", {name: "팀 공유 노트 · " + selected.name, exact:true});
+  await mkdir(path.join(selected.folder, "File Storage"), { recursive: true });
+  await writeFile(path.join(selected.folder, "File Storage", "로컬.txt"), "이 팀의 로컬 파일");
+  const peer = path.join(root, "peer");
+  git(root, "clone", "--branch", selected.branch, "--", selected.remote, peer);
+  await writeFile(path.join(peer, "받은 팀 노트.md"), "팀원의 변경\n");
+  git(peer, "add", "--", "받은 팀 노트.md"); git(peer, "commit", "-m", "Team peer note"); git(peer, "push");
+  const untouched = [personalBare, path.join(root, "remote-0.git"), path.join(root, "remote-2.git")];
+  const heads = untouched.map(repo => git(repo,"rev-parse","HEAD"));
+  await modelTree.getByRole("heading").click({button:"right"});
+  await page.getByRole("menuitem", {name:"지금 동기화", exact:true}).click();
+  await modelTree.getByRole("status").filter({hasText:"팀 노트 동기화됨"}).waitFor();
+  await modelTree.getByTitle("받은 팀 노트.md", {exact:true}).waitFor();
+  assert.equal(await readFile(path.join(selected.folder,"받은 팀 노트.md"),"utf8"),"팀원의 변경\n");
+  assert.equal(git(path.join(root,"remote-1.git"),"show",selected.branch+":검증 노트.md"),git(selected.folder,"show","HEAD:검증 노트.md"));
+  assert.deepEqual(untouched.map(repo => git(repo,"rev-parse","HEAD")),heads);
+  await modelTree.getByRole("status").getByRole("button").click();
+  await settings.locator("summary").filter({ hasText: "이 PC에만 있는 항목" }).click();
+  await settings.getByText("File Storage/로컬.txt · 동기화에서 지원하지 않는 파일 형식").waitFor();
+  assert.equal(git(path.join(root, "remote-1.git"), "ls-tree", selected.branch, "--", "File Storage/로컬.txt"), "");
   await app.close();
   app = null;
   app = await launch();
@@ -152,7 +172,7 @@ try {
   for (const repository of repositories)
     await reopened.getByRole("region", { name: `팀 공유 노트 · ${repository.name}`, exact: true }).waitFor({ timeout: 15000 });
   assert.deepEqual(errors, []);
-  console.log("Verified batch Git registration, targeted retries with an existing clone, native folder selection, vault-scoped note creation, and restart.");
+  console.log("Verified team registration, clone retries, scoped note creation, two-way panel sync on the selected branch, local-only files, untouched sibling repositories, and restart.");
 } finally {
   await app?.close();
   await rm(root, { recursive: true, force: true });

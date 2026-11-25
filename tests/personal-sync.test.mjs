@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,6 +13,9 @@ import {
   blobLimit,
 } from "../core/personal-sync-store.mjs";
 import { PersonalSync } from "../core/personal-sync.mjs";
+import { runGit } from "../core/git-backup.mjs";
+import { localOnlyFiles } from "../core/git-file-status.mjs";
+import { validFilePath, validPersonalFilePath } from "../core/vault.mjs";
 import { mergeCaptureBlocks } from "../core/personal-sync-text.mjs";
 import { integrate, chooseVersion, checkTreeChanges, normalizePublished } from "../core/personal-sync-merge.mjs";
 
@@ -36,6 +39,229 @@ async function fixture(t) {
   }
   return { root, store, config, cloud, local, late, checkpoint };
 }
+
+async function workingCopies(t) {
+  const { root, local, cloud, config } = await fixture(t);
+  const bare = root + ".git", remote = "https://example.invalid/personal.git";
+  await runGit(root, ["init", "--bare", "--initial-branch=main", bare]);
+  let time = 1000000;
+  async function pc(device) {
+    const dir = await realpath(await mkdtemp(path.join(path.dirname(root), "pc-")));
+    await runGit(dir, ["init", "--initial-branch=main"]);
+    await runGit(dir, ["config", "url." + bare + ".insteadOf", remote]);
+    const service = new PersonalSync({ root: dir }, runGit, device.id, { now: () => time });
+    const cfg = { ...config, branch: "main", deviceName: device.name, remote };
+    return { dir, service, cfg, sync: (options) => service.sync(cfg, options) };
+  }
+  return { a: await pc(local), b: await pc(cloud), bare, tick: () => new Date(++time).toISOString() };
+}
+
+test("File Storage uses the selected Git mode's eligibility rules for ZIP", async t => {
+  const { store, root } = await fixture(t), git = args => store.git(args);
+  await mkdir(path.join(root, "File Storage"));
+  await writeFile(path.join(root, "File Storage", "sample.zip"), "sample");
+  const team = await localOnlyFiles(git, validFilePath);
+  assert.deepEqual(team.map(file => file.name), ["File Storage/sample.zip"]);
+  assert.match(team[0].message, /형식/);
+  assert.deepEqual(await localOnlyFiles(git, validPersonalFilePath), []);
+});
+
+test("File Storage reports unsupported files and Git exclusions separately from transfer waits", async t => {
+  const { a, b, bare } = await workingCopies(t);
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  const folder = path.join(a.dir, "File Storage");
+  await mkdir(path.join(folder, "excluded"), { recursive: true });
+  await writeFile(path.join(a.dir, ".git", "info", "exclude"), "private.md\n/File Storage/excluded/\n");
+  for (const name of ["paper.docx", "private.md", "excluded/nested.md", "~$lock.docx", ".DS_Store", "desktop.ini", "copy.tmp"])
+    await writeFile(path.join(folder, name), name);
+  const large = path.join(folder, "large.pdf");
+  await writeFile(large, "");
+  await truncate(large, blobLimit + 1);
+  await writeFile(path.join(folder, "hand-off.md"), "received");
+  const mixed = await a.sync(), local = mixed.localOnlyFiles;
+  assert.deepEqual(local?.map(f => f.name).sort(), [
+    "File Storage/excluded/", "File Storage/paper.docx", "File Storage/private.md",
+  ]);
+  assert.match(local.find(f => f.name.endsWith(".docx")).message, /형식/);
+  assert.match(local.find(f => f.name.endsWith("private.md")).message, /Git.*제외/);
+  assert.match(local.find(f => f.name.endsWith("excluded/")).message, /Git.*제외/);
+  assert.deepEqual(mixed.pendingFiles.map(f => f.name), ["File Storage/large.pdf"]);
+  assert.match(mixed.message, /전송 대기/);
+  assert.match(mixed.message, /이 PC에만/);
+  await b.sync();
+  const received = await readFile(path.join(b.dir, "File Storage", "hand-off.md"), "utf8");
+  assert.equal(received, "received");
+  assert.deepEqual((await runGit(bare, ["ls-tree", "-r", "--name-only", "main", "--", "File Storage"])).stdout.trim().split("\n"),
+    ["File Storage/hand-off.md"]);
+  await rm(large);
+  const exclusions = await a.sync();
+  assert.equal(exclusions.phase, "local-only");
+  assert.match(exclusions.message, /이 PC에만/);
+  assert.deepEqual(exclusions.pendingFiles, []);
+  const copy = "File Storage/copy.pdf";
+  await writeFile(path.join(a.dir, copy), "incomplete");
+  assert((await a.sync()).pendingFiles.some(f => f.name === copy));
+  await appendFile(path.join(a.dir, ".git", "info", "exclude"), "/" + copy + "\n");
+  await writeFile(path.join(folder, "hand-off.md"), "new unsent edit");
+  const poll = await a.sync({ force: false });
+  assert(poll.localOnlyFiles.some(f => f.name === copy));
+  assert(!poll.pendingFiles.some(f => f.name === copy));
+});
+
+test("an incoming path collision leaves an ignored local document private and lets the download resume after a move", async t => {
+  const { a, b, bare } = await workingCopies(t);
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  await a.sync();
+  const name = "File Storage/private.md", file = path.join(a.dir, name);
+  for (const pc of [a, b]) await mkdir(path.join(pc.dir, "File Storage"));
+  await writeFile(path.join(a.dir, ".git", "info", "exclude"), "/File Storage/private.md\n");
+  await writeFile(file, "local-only bytes");
+  await writeFile(path.join(b.dir, name), "incoming bytes");
+  await b.sync();
+  const remoteHead = (await runGit(bare, ["rev-parse", "main"])).stdout;
+  await assert.rejects(a.sync(), /Git 제외 규칙/);
+  assert.equal(await readFile(file, "utf8"), "local-only bytes");
+  assert.equal((await runGit(a.dir, ["for-each-ref", "refs/dynote-sync/inputs/"])).stdout, "");
+  const moved = path.join(a.dir, "File Storage/private.copy");
+  await rename(file, moved);
+  await a.sync();
+  await a.sync();
+  assert.equal(await readFile(file, "utf8"), "incoming bytes");
+  assert.equal(await readFile(moved, "utf8"), "local-only bytes");
+  assert.equal((await runGit(bare, ["rev-parse", "main"])).stdout, remoteHead);
+});
+
+test("remote checks, downloads and blocked uploads retain the time of the last confirmed push", async t => {
+  const { a, b, tick } = await workingCopies(t);
+  const initial = tick(), events = [];
+  const onStage = (...event) => events.push(event);
+  const registered = await a.sync({ register: true, onStage });
+  assert.equal(registered.lastSuccess, initial);
+  assert.equal(registered.lastRemoteCheck, initial);
+  assert(events.some(([stage, done, time]) => stage === "push" && done && time === initial));
+  await b.sync({ register: true });
+  const download = tick(), received = await a.sync({ onStage });
+  assert.equal(received.lastRemoteCheck, download);
+  assert.equal(received.lastSuccess, undefined);
+  const idle = tick(), checked = await a.sync();
+  assert.equal(checked.lastRemoteCheck, idle);
+  assert.equal(checked.lastSuccess, undefined);
+  await writeFile(path.join(a.dir, "draft.pdf"), "copy in progress");
+  const pending = tick(), blocked = await a.sync();
+  assert.equal(blocked.phase, "pending");
+  assert.equal(blocked.lastRemoteCheck, pending);
+  assert.equal(blocked.lastSuccess, undefined);
+
+  const original = a.service.store.run;
+  a.service.store.run = async (...args) => {
+    const result = await original(...args);
+    if (args[1][0] === "push") throw new Error("lost acknowledgement");
+    return result;
+  };
+  await writeFile(path.join(a.dir, "handoff.md"), "new");
+  const advanced = tick(), saved = await a.sync({ onStage });
+  assert.equal(saved.lastSuccess, advanced);
+  assert(events.some(([stage, done, time]) => stage === "push" && done && time === advanced));
+  const updates = await b.sync();
+  assert(updates.changed.includes("handoff.md"));
+  assert.equal(updates.lastSuccess, undefined);
+});
+
+test("a lost upload response is confirmed when another PC already advanced the same branch", async t => {
+  const { a, b, tick } = await workingCopies(t);
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  await a.sync();
+  const run = a.service.store.run;
+  let pushes = 0;
+  a.service.store.run = async (...args) => {
+    const result = await run(...args);
+    if (args[1][0] === "push" && ++pushes === 1) {
+      await writeFile(path.join(b.dir, "other.md"), "other PC");
+      await b.sync();
+      throw new Error("lost acknowledgement");
+    }
+    return result;
+  };
+  await writeFile(path.join(a.dir, "local.md"), "this PC");
+  const saved = tick(), state = await a.sync();
+  assert.equal(pushes, 1);
+  assert.equal(state.lastSuccess, saved);
+  assert.equal(await readFile(path.join(a.dir, "other.md"), "utf8"), "other PC");
+});
+
+test("device JSON formatting is repaired before registration and incoming changes while user bytes are retained", async t => {
+  const { a, b, bare } = await workingCopies(t);
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  await a.sync();
+  const localPath = devicePath(a.service.deviceId), file = path.join(b.dir, localPath);
+  const original = await readFile(file);
+  const pretty = Buffer.from("\uFEFF" + JSON.stringify(JSON.parse(original), null, 4).replaceAll("\n", "\r\n") + "\r\n");
+  await writeFile(file, pretty);
+  await writeFile(path.join(b.dir, "user.md"), pretty);
+  const updated = await b.sync();
+  assert.equal(updated.phase, "synced");
+  assert.deepEqual(await readFile(file), original);
+  assert.deepEqual((await runGit(bare, ["show", "main:user.md"], { encoding: null })).stdout, pretty);
+  await writeFile(file, pretty);
+  a.cfg.deviceName = "Local renamed";
+  await a.sync({ register: true });
+  const received = await b.sync();
+  assert.equal(received.lastSuccess, undefined);
+  assert.equal(JSON.parse(await readFile(file)).name, "Local renamed");
+  const ownFile = path.join(b.dir, devicePath(b.service.deviceId));
+  await writeFile(ownFile, "\uFEFF" + await readFile(ownFile, "utf8"));
+  b.cfg.deviceName = "Cloud renamed";
+  await b.sync({ register: true });
+  assert.equal(JSON.parse(await readFile(ownFile)).name, "Cloud renamed");
+});
+
+test("real device-record edits, duplicate or unknown fields, and invalid bytes are preserved and identified", async t => {
+  const { a, bare } = await workingCopies(t);
+  await a.sync({ register: true });
+  const name = devicePath(a.service.deviceId), file = path.join(a.dir, name);
+  const original = await readFile(file, "utf8"), record = JSON.parse(original);
+  const originalHead = (await runGit(bare, ["rev-parse", "main"])).stdout;
+  for (const [bytes, detail] of [
+    [JSON.stringify({ ...record, active: false }), /active/],
+    [JSON.stringify({ ...record, name: "Private company title" }), /name/],
+    [JSON.stringify({ id: record.id, name: record.name }), /active|필드/],
+    [original.replace('"active":true', '"active":false,"active":true'), /형식|중복/],
+    [JSON.stringify({ ...record, extra: "Private company title" }), /형식|필드/],
+    [Buffer.concat([Buffer.from([0xff]), Buffer.from(original)]), /형식|UTF-8/],
+  ]) {
+    await writeFile(file, bytes);
+    await assert.rejects(a.sync(), error => {
+      assert.equal(error.syncReason, "managed-record");
+      assert.match(error.message, detail);
+      assert(!error.message.includes("Private company title"));
+      return true;
+    });
+    assert.deepEqual(await readFile(file), Buffer.from(bytes));
+    assert.equal((await runGit(bare, ["rev-parse", "main"])).stdout, originalHead);
+  }
+});
+
+test("changed device file modes and types are preserved even when Git ignores executable bits", { skip: process.platform === "win32" }, async t => {
+  const { a } = await workingCopies(t);
+  await a.sync({ register: true });
+  const name = devicePath(a.service.deviceId), file = path.join(a.dir, name);
+  const original = await readFile(file);
+  await runGit(a.dir, ["config", "core.filemode", "false"]);
+  await chmod(file, 0o654);
+  await assert.rejects(a.sync(), /권한/);
+  assert.equal((await lstat(file)).mode & 0o777, 0o654);
+  const target = path.join(a.dir, "reference");
+  await writeFile(target, original);
+  await rm(file);
+  await symlink(target, file);
+  await assert.rejects(a.sync(), error => error.syncReason === "managed-record" && /종류|링크/.test(error.message));
+  assert((await lstat(file)).isSymbolicLink());
+  assert.deepEqual(await readFile(target), original);
+});
 
 test("personal merge preserves all variants, includes independent notes, and protects selection when a later PC edits the published value", async (t) => {
   const { root, store, config, cloud, local, late, checkpoint } = await fixture(t);

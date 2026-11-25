@@ -25,13 +25,13 @@ function SpaceGitInfo({ vaultId, onReadGit }) {
   </div>;
 }
 
-export default function VaultSettings({ openSpaces, gitStates, currentId, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
+export default function VaultSettings({ openSpaces, gitStates, currentId, teamSetup, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const [teamRows, setTeamRows] = useState([]);
-  const [section, setSection] = useState(null);
+  const [teamRows, setTeamRows] = useState(() => teamSetup ? [{id:0, remote:"", branch:"main", folder:"", error:""}] : []);
+  const [section, setSection] = useState(teamSetup ? "team" : null);
   const [importing, setImporting] = useState(false);
-  const nextTeamRow = useRef(0);
+  const nextTeamRow = useRef(teamSetup ? 1 : 0);
   useEffect(() => {
     let mounted = true;
     onList().then((value) => { if (mounted) setData(value); }).catch((e) => { if (mounted) setError(e.message); });
@@ -120,6 +120,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, onImpo
     </div>}
     {section === "team" && teamRows.length > 0 && <form className="team-repositories" onSubmit={connectTeams} aria-label="팀 저장소 연결">
       <h4>팀 저장소 연결</h4>
+      {teamSetup && <p>선택한 팀 노트 · {teamSetup.name} · <code>{teamSetup.root}</code></p>}
       <p className="muted">모델마다 빈 폴더나 같은 저장소를 이미 가져온 폴더를 선택하세요.</p>
       {!personalSpaces.length && <p className="muted">연결한 팀은 아래 팀 공유 공간에서 열 수 있습니다. 개인 공간도 연결하면 왼쪽 파일 목록에서 모델을 함께 볼 수 있습니다.</p>}
       {teamRows.map((row, index) => <fieldset key={row.id} aria-label={`팀 저장소 ${index + 1}`} disabled={pending} className="team-repository-row">

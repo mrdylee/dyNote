@@ -96,3 +96,185 @@ test('remote display metadata omits URL credentials and tokens without changing 
   assert.deepEqual(await readFile(`${root}/.git/config`),config);
  }
 });
+
+async function teamFixture(t) {
+  const {dir,root}=await fixture(t), remote=`${dir}/team.git`, other=`${dir}/colleague`;
+  await runGit(root,['branch','-m','team-dev']);
+  await runGit(dir,['init','--bare','--initial-branch=team-dev',remote]);
+  await runGit(root,['remote','add','team',remote]);
+  await runGit(root,['push','--set-upstream','team','team-dev']);
+  await runGit(dir,['clone','--branch','team-dev','--',remote,other]);
+  for (const [key,value] of [['user.name','Colleague'],['user.email','colleague@example.test']])
+    await runGit(other,['config',key,value]);
+  const publish=async (name,bytes)=>{
+    await writeFile(`${other}/${name}`,bytes);
+    await runGit(other,['add','--force','--',name]);
+    await runGit(other,['commit','-m','team edit']);
+    await runGit(other,['push']);
+  };
+  const head=async (where,ref='HEAD')=>(await runGit(where,['rev-parse',ref])).stdout.trim();
+  return {dir,root,remote,other,publish,head,git:new tools.GitWorkspace(root)};
+}
+
+test('team quick-sync merges independent native edits on the tracked branch, reports local-only files and stays idle',async t=>{
+  const {dir,root,remote,other,git,publish,head}=await teamFixture(t);
+  await runGit(root,['remote','add','origin',`${dir}/unrelated.git`]);
+  await mkdir(`${root}/File Storage`);
+  await writeFile(`${root}/File Storage/only.zip`,'private archive');
+  await writeFile(`${root}/A.md`,'my edit\n');
+  await publish('B.md','their edit\n');
+  const result=await git.syncTeam();
+  assert.equal(result.phase,'synced');
+  assert(result.localOnlyFiles.some(file=>file.name==='File Storage/only.zip'));
+  assert.match(result.message,/로컬|기기/);
+  assert.equal(await readFile(`${root}/B.md`,'utf8'),'their edit\n');
+  assert.equal((await runGit(remote,['show','team-dev:A.md'])).stdout,'my edit\n');
+  const saved=await head(root);
+  assert.equal(await head(remote,'team-dev'),saved);
+  assert.equal(await head(root,'@{upstream}'),saved);
+  const names=(await runGit(remote,['ls-tree','--name-only','-r','team-dev'])).stdout;
+  assert.doesNotMatch(names,/only\.zip|\.dynote-sync/);
+  await runGit(other,['pull','--ff-only']);
+  assert.equal(await readFile(`${other}/A.md`,'utf8'),'my edit\n');
+  await git.syncTeam();
+  assert.equal(await head(root),saved);
+});
+
+test('team quick-sync leaves the index and both conflicting versions available without entering a merge',async t=>{
+  const {root,remote,git,publish,head}=await teamFixture(t);
+  await writeFile(`${root}/A.md`,'ours\n');
+  await runGit(root,['add','--','A.md']);
+  const before=await head(root);
+  await publish('A.md','theirs\n');
+  const upstream=await head(remote,'team-dev');
+  await assert.rejects(git.syncTeam(),/스테이징/);
+  assert.equal(await head(root),before);
+  assert.equal((await runGit(root,['show',':A.md'])).stdout,'ours\n');
+  await runGit(root,['restore','--staged','A.md']);
+  await assert.rejects(git.syncTeam(),/충돌/);
+  assert.equal(await readFile(`${root}/A.md`,'utf8'),'ours\n');
+  assert.equal((await runGit(root,['show','HEAD:A.md'])).stdout,'ours\n');
+  assert.equal((await runGit(root,['ls-files','--unmerged'])).stdout,'');
+  await assert.rejects(readFile(`${root}/.git/MERGE_HEAD`),{code:'ENOENT'});
+  assert.equal(await head(remote,'team-dev'),upstream);
+});
+
+test('team quick-sync protects an ignored worktree file which the incoming commit would replace',async t=>{
+  const {root,git,publish,head}=await teamFixture(t);
+  await writeFile(`${root}/.git/info/exclude`,'ignore.md\n');
+  await writeFile(`${root}/ignore.md`,'unsent copy');
+  await publish('ignore.md','remote copy');
+  const before=await head(root);
+  await assert.rejects(git.syncTeam());
+  assert.equal(await head(root),before);
+  assert.equal(await readFile(`${root}/ignore.md`,'utf8'),'unsent copy');
+});
+
+test('team quick-sync refuses a rewound or deleted upstream and a contradictory saved destination',async t=>{
+  const {dir,root,remote,git,publish,head}=await teamFixture(t);
+  const first=await head(root);
+  await publish('next.md','remote first');
+  await git.syncTeam();
+  const recent=await head(root);
+  await runGit(remote,['update-ref','refs/heads/team-dev',first,recent]);
+  await assert.rejects(git.syncTeam(),/이력|재작성/);
+  assert.equal(await head(remote,'team-dev'),first);
+  await runGit(remote,['update-ref','-d','refs/heads/team-dev',first]);
+  await assert.rejects(git.syncTeam(),/삭제|브랜치/);
+  assert.equal((await runGit(remote,['show-ref','--heads'],{allow:[0,1]})).stdout,'');
+  await runGit(root,['config',`url.${dir}/elsewhere.insteadOf`,'https://elsewhere.invalid/team.git']);
+  const mismatch=await git.syncTeam({remote:'https://elsewhere.invalid/team.git',branch:'team-dev',push:true});
+  assert.equal(mismatch.phase,'setup');
+});
+
+test('team quick-sync uses an explicit daily destination without a native remote and respects commit-only setup',async t=>{
+  const {root,remote,git,publish,head}=await teamFixture(t);
+  await runGit(root,['remote','remove','team']);
+  const alias='https://team.example.invalid/docs.git';
+  await runGit(root,['config',`url.${remote}.insteadOf`,alias]);
+  const config={remote:alias,branch:'team-dev',authorName:'Team Writer',authorEmail:'team@example.test',push:false};
+  const before=await head(root);
+  await writeFile(`${root}/A.md`,'mine');
+  assert.equal((await git.syncTeam(config)).phase,'setup');
+  assert.equal(await head(root),before);
+  await publish('incoming.md','theirs');
+  assert.equal((await git.syncTeam({...config,push:true})).phase,'synced');
+  assert.equal((await runGit(remote,['show','team-dev:A.md'])).stdout,'mine');
+  assert.equal(await readFile(`${root}/incoming.md`,'utf8'),'theirs');
+  assert.equal((await runGit(root,['log','-1','--format=%an'])).stdout.trim(),'Team Writer');
+});
+
+test('team quick-sync keeps Windows checkout line endings out of the remote PDF and follows incoming notes',async t=>{
+  const {dir,remote,publish,head}=await teamFixture(t), clone=`${dir}/windows`;
+  const pdf=Buffer.from('%PDF-1.4\nstartxref\n0\n%%EOF\n'), binary=Buffer.from([1,0,10,31]);
+  await publish('paper.pdf',pdf);
+  await publish('binary.png',binary);
+  await runGit(dir,['-c','core.autocrlf=true','clone','--config','core.autocrlf=true','--branch','team-dev','--',remote,clone]);
+  await runGit(clone,['config','user.name','Windows']);
+  await runGit(clone,['config','user.email','win@example.test']);
+  for(const name of ['A.md','paper.pdf']){
+    const bytes=await readFile(`${clone}/${name}`);
+    assert(bytes.includes('\r\n'));
+    await rm(`${clone}/${name}`);
+    await writeFile(`${clone}/${name}`,bytes);
+  }
+  assert.equal((await runGit(clone,['diff','--name-only'])).stdout.trim(),'A.md\npaper.pdf');
+  const git=new tools.GitWorkspace(clone), before=await head(remote,'team-dev');
+  assert.equal((await git.syncTeam()).phase,'synced');
+  assert.equal(await head(remote,'team-dev'),before);
+  assert.deepEqual((await runGit(remote,['show','team-dev:paper.pdf'],{encoding:null})).stdout,pdf);
+  assert.deepEqual(await readFile(`${clone}/binary.png`),binary);
+  await publish('A.md','incoming\n');
+  await git.syncTeam();
+  assert.equal(await readFile(`${clone}/A.md`,'utf8'),'incoming\r\n');
+  const edited=Buffer.from('%PDF-1.4\r\nchanged stream\r\n%%EOF\r\n');
+  await writeFile(`${clone}/paper.pdf`,edited);
+  await git.syncTeam();
+  assert.deepEqual((await runGit(remote,['show','team-dev:paper.pdf'],{encoding:null})).stdout,edited);
+});
+
+test('team quick-sync cannot re-create a branch deleted between the snapshot and the push',async t=>{
+  const {root,remote,git,head}=await teamFixture(t), initial=await head(root), native=git.git.bind(git);
+  await writeFile(`${root}/A.md`,'local addition\n');
+  git.git=async (args,options)=>{
+    if(args[0]==='push')await runGit(remote,['update-ref','-d','refs/heads/team-dev',initial]);
+    return native(args,options);
+  };
+  await assert.rejects(git.syncTeam());
+  assert.equal((await runGit(remote,['show-ref','--heads'],{allow:[0,1]})).stdout,'');
+  assert.equal((await runGit(root,['show','HEAD:A.md'])).stdout,'local addition\n');
+});
+
+test('team quick-sync respects previous origin history even after the local upstream was unset',async t=>{
+  const {root,remote,git,head}=await teamFixture(t);
+  await runGit(root,['remote','rename','team','origin']);
+  await runGit(root,['branch','--unset-upstream']);
+  const before=await head(root,'refs/remotes/origin/team-dev');
+  await runGit(remote,['update-ref','-d','refs/heads/team-dev',before]);
+  await assert.rejects(git.syncTeam(),/삭제/);
+  assert.equal((await runGit(remote,['show-ref','--heads'],{allow:[0,1]})).stdout,'');
+});
+
+test('team quick-sync opens setup if the saved URL has a different native push destination',async t=>{
+  const {dir,root,remote,git,head}=await teamFixture(t), alias='https://team.example.invalid/notes.git';
+  await runGit(root,['remote','remove','team']);
+  await runGit(root,['config',`url.${remote}.insteadOf`,alias]);
+  await runGit(root,['config',`url.${dir}/other-team.git.pushInsteadOf`,alias]);
+  const before=await head(remote,'team-dev');
+  await writeFile(`${root}/A.md`,'private team edit');
+  assert.equal((await git.syncTeam({remote:alias,branch:'team-dev',push:true})).phase,'setup');
+  assert.equal(await head(root),before);
+  assert.equal(await head(remote,'team-dev'),before);
+});
+
+test('team quick-sync sends an unconnected space to setup and preserves an ongoing Git operation',async t=>{
+  const {dir,root,remote,git,head}=await teamFixture(t);
+  const plain=`${dir}/plain`;
+  await mkdir(plain);
+  assert.equal((await new tools.GitWorkspace(plain).syncTeam()).phase,'setup');
+  const before=await head(root);
+  await writeFile(`${root}/.git/MERGE_HEAD`,before+'\n');
+  await assert.rejects(git.syncTeam(),/진행 중인 Git/);
+  assert.equal(await readFile(`${root}/.git/MERGE_HEAD`,'utf8'),before+'\n');
+  assert.equal(await head(remote,'team-dev'),before);
+});

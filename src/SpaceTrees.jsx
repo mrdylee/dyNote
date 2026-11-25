@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { spaceLabel } from "../core/document-workspace.mjs";
 
-export default function SpaceTrees({ spaces, renderTree, dropProps, onContext }) {
+export default function SpaceTrees({ spaces, renderTree, dropProps, onContext, syncMessage, onSyncDetails }) {
   const container = useRef(null), drag = useRef(null);
   const [split, setSplit] = useState(() => {
     try {
@@ -22,11 +22,17 @@ export default function SpaceTrees({ spaces, renderTree, dropProps, onContext })
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const render = scopes => scopes.map(scope => <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)} {...dropProps(scope.id, "")} data-drop-label={undefined}
-    onContextMenu={event => { if (!event.defaultPrevented) onContext?.(event, scope.id); }}>
-    <h3 tabIndex={0} {...dropProps(scope.id, "")} onContextMenu={event => onContext?.(event, scope.id)}>{spaceLabel(scope)}</h3>
-    {renderTree(scope)}
-  </section>);
+  const render = scopes => scopes.map(scope => {
+    const message = syncMessage?.(scope.id);
+    return <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)} {...dropProps(scope.id, "")} data-drop-label={undefined}
+      onContextMenu={event => { if (!event.defaultPrevented) onContext?.(event, scope.id); }}>
+      <h3 tabIndex={0} {...dropProps(scope.id, "")} onContextMenu={event => onContext?.(event, scope.id)}>{spaceLabel(scope)}</h3>
+      {message && <div className="space-tree-sync" role="status">
+        <button title={message + " · 동기화 설정 열기"} onClick={() => onSyncDetails(scope.id)}>{message}</button>
+      </div>}
+      {renderTree(scope)}
+    </section>;
+  });
   return <div className="space-trees" ref={container}>
     {divided ? <>
       <div className="space-tree-group" style={{ flex: split }}>{render(personal)}</div>

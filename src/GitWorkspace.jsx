@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
-export default function GitWorkspace({onStatus,onDiff,onAction,backupEnabled,busy,onOpen}) {
+import LocalOnlyFiles from './LocalOnlyFiles.jsx';
+export default function GitWorkspace({onStatus,onDiff,onAction,backupEnabled,busy,onOpen,teamResult}) {
   const [state,setState]=useState(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[diff,setDiff]=useState(''),[selected,setSelected]=useState('');
   const [message,setMessage]=useState(''),[branch,setBranch]=useState(''),[confirmed,setConfirmed]=useState(false);
   const locked=pending||busy;
@@ -17,6 +18,7 @@ export default function GitWorkspace({onStatus,onDiff,onAction,backupEnabled,bus
   return <section className="settings-section git-workspace" aria-label="Git 변경 관리">
     <h3>Git 변경 관리</h3><p>변경 파일을 검토하고 스테이징한 내용만 커밋합니다. 원격 작업은 버튼을 눌렀을 때 실행합니다.</p>
     {error&&<p role="alert" className="settings-message error">{error}</p>}
+    {teamResult && <><p className="settings-message" role="status">{teamResult.message}</p><LocalOnlyFiles files={teamResult.localOnlyFiles}/></>}
     <div className="git-workspace-actions"><button disabled={locked} onClick={refresh}>Git 상태 새로고침</button><strong>{state?.branch}</strong>
       {state?.available&&<><button disabled={locked||!state.remotes.length} onClick={()=>action('fetch')}>원격 정보 확인</button><button disabled={locked||!state.remotes.length} onClick={()=>action('pull')}>변경 가져오기 · FF만</button></>}
     </div>

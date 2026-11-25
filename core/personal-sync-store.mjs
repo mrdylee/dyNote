@@ -59,6 +59,8 @@ export function assertSyncEntry(name, entry) {
   const kind = metaType(name);
   if (!kind && !validPersonalFilePath(name)) throw new Error("동기화 범위 밖의 경로입니다: " + name);
   if (!entry) return;
+  if (kind === "device" && (entry.type !== "blob" || entry.mode !== "100644"))
+    throw Object.assign(new Error("동기화 관리 파일의 종류와 실행 권한을 확인해 주세요 · " + name), { syncReason: "managed-record" });
   if (entry.type !== "blob" || !["100644", "100755"].includes(entry.mode) || !oidPattern.test(entry.oid))
     throw new Error("일반 파일만 동기화할 수 있습니다: " + name);
   if (
@@ -71,10 +73,10 @@ export function assertSyncEntry(name, entry) {
 }
 
 export class PersonalSyncStore extends GitBackup {
-  async tree(ref) {
+  async tree(ref, prefix) {
     const files = new Map();
     if (!ref) return files;
-    const data = (await this.git(["ls-tree", "-r", "-l", "-z", ref], { encoding: null })).stdout;
+    const data = (await this.git(["ls-tree", "-r", "-l", "-z", ref, ...(prefix ? ["--", prefix] : [])], { encoding: null })).stdout;
     const raw = new TextDecoder("utf-8", { fatal: true }).decode(data);
     for (const row of raw.split("\0").filter(Boolean)) {
       const split = row.indexOf("\t");
