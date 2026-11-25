@@ -67,6 +67,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
     <div className="settings-actions">
       <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(()=>onSync(true))}>지금 동기화</button>
       <button className="secondary-button" disabled={busy || !status.enabled || status.config?.mode !== "github-api"} onClick={()=>run(onDisconnect)}>이 기기 동기화 끄기</button>
+      <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
     </div>
     <p className={`settings-message ${status.phase}`} role="status">{status.message}</p>
     {status.apiConflicts?.length>0 && <ul aria-label="최근 처리한 충돌">{status.apiConflicts.map(item=><li key={item}>{item}</li>)}</ul>}
