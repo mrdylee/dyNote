@@ -140,7 +140,9 @@ test('team quick-sync merges independent native edits on the tracked branch, rep
   assert.equal(result.phase,'synced');
   assert(result.localOnlyFiles.some(file=>file.name==='File Storage/only.zip'));
   assert.match(result.message,/로컬|기기/);
-  assert.equal(await readFile(`${root}/B.md`,'utf8'),'their edit\n');
+  assert.equal((await runGit(remote,['show','team-dev:B.md'])).stdout,'their edit\n');
+  const checkedOut=(await runGit(root,['cat-file','--filters','HEAD:B.md'],{nativeCheckout:true})).stdout;
+  assert.equal(await readFile(`${root}/B.md`,'utf8'),checkedOut);
   assert.equal((await runGit(remote,['show','team-dev:A.md'])).stdout,'my edit\n');
   const saved=await head(root);
   assert.equal(await head(remote,'team-dev'),saved);
