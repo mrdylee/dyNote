@@ -18,7 +18,7 @@ jobs:
       - name: Verify build platform and version
         run: |
           test "$(uname -m)" = arm64
-          node -e "if(require('./package.json').version !== '0.23.20') process.exit(1)"
+          node -e "if(require('./package.json').version !== '0.23.21') process.exit(1)"
       - run: npm ci
       - name: Unit tests on macOS
         run: npm test
@@ -28,9 +28,9 @@ jobs:
           node scripts/package-mac-distribution.mjs
       - name: Verify archives and packaged app UI
         run: |
-          package="$PWD/release/v0.23.20"
-          hdiutil verify "$package/Dynote-0.23.20-macos-arm64.dmg"
-          ditto -x -k "$package/Dynote-0.23.20-macos-arm64.zip" "$RUNNER_TEMP/dynote-extracted"
+          package="$PWD/release/v0.23.21"
+          hdiutil verify "$package/Dynote-0.23.21-macos-arm64.dmg"
+          ditto -x -k "$package/Dynote-0.23.21-macos-arm64.zip" "$RUNNER_TEMP/dynote-extracted"
           codesign --verify --deep --strict "$RUNNER_TEMP/dynote-extracted/Dynote.app"
           test -x "$RUNNER_TEMP/dynote-extracted/Dynote.app/Contents/MacOS/Dynote"
           npm install --prefix "$RUNNER_TEMP/dynote-ui-tools" --no-save --package-lock=false --ignore-scripts playwright@1.62.1
@@ -46,8 +46,8 @@ jobs:
         with:
           name: dynote-macos-arm64
           path: |
-            release/v0.23.20/Dynote-0.23.20-macos-arm64.dmg
-            release/v0.23.20/Dynote-0.23.20-macos-arm64.zip
-            release/v0.23.20/SHA256SUMS-macos-arm64.txt
+            release/v0.23.21/Dynote-0.23.21-macos-arm64.dmg
+            release/v0.23.21/Dynote-0.23.21-macos-arm64.zip
+            release/v0.23.21/SHA256SUMS-macos-arm64.txt
           if-no-files-found: error
           compression-level: 0

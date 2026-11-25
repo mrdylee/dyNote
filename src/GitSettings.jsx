@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import LocalOnlyFiles from "./LocalOnlyFiles.jsx";
 
 const initial = { remote: "", branch: "main", authorName: "", authorEmail: "", schedule: "daily", push: true };
-export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview }) {
+export default function GitSettings({ startPersonal = false, status, space, onRepositoryStatus, onManageSpaces, onConnect, onClone, onSync, onDisconnect, onZips, onAction, onReview, onCopyDiagnostics, onShowRecovery }) {
   const [form, setForm] = useState(() => ({ ...initial, ...status.config, ...(startPersonal ? {mode:"personal-sync"} : {}) }));
   const [pending, setPending] = useState(false), [error, setError] = useState("");
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(null);
   const edited = useRef(new Set());
   const [repository, setRepository] = useState(null), [refresh, setRefresh] = useState(0);
   const [zipPaths,setZipPaths]=useState(null);
   const personal=form.mode==="personal-sync" && space?.purpose==="personal";
+  const connectedPersonal = status.config?.mode === "personal-sync";
   useEffect(()=>{
     let current=true; setZipPaths(null);
     if(personal) onZips().then(list=>{if(current)setZipPaths(list);}).catch(e=>{if(current)setError(e.message);});
@@ -71,20 +74,26 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
     <div className="settings-actions">
       <button className="primary-button" disabled={busy || !form.remote || personal && (!form.deviceName?.trim() || zipPaths===null)} onClick={() => run(() => onConnect(personal?{...form,zipPaths}:form))}>{personal?"이 설정으로 동기화":status.enabled ? "백업 설정 적용" : "연결하고 백업 시작"}</button>
       <button className="secondary-button" disabled={busy || !form.remote || personal && !form.deviceName?.trim()} onClick={() => run(() => onClone(form))}>기존 저장소 가져오기</button>
-      <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onSync)}>{personal?"지금 동기화":"지금 백업"}</button>
+      <button className="secondary-button" disabled={busy || !status.enabled || personal !== connectedPersonal} onClick={() => run(() => onSync(personal))}>{personal?"지금 동기화":"지금 백업"}</button>
       <button className="secondary-button" disabled={busy || !status.enabled} onClick={() => run(onDisconnect)}>{personal?"이 기기 동기화 끄기":"자동 백업 끄기"}</button>
     </div>
     <p className={`settings-message ${status.phase}`} role="status">{status.message}</p>
+    {status.diagnostics && <button className="secondary-button" onClick={() => run(async () => {
+      await onCopyDiagnostics(status.diagnostics); setCopiedDiagnostics(status.diagnostics);
+    })}>{copiedDiagnostics === status.diagnostics ? "진단 복사됨" : "진단 복사"}</button>}
+    {status.recoveryFile && <button className="secondary-button" onClick={() => run(() => onShowRecovery(status.recoveryFile))}>복구 사본 위치 열기</button>}
     {status.enabled && status.config?.mode==="personal-sync" && <>
       <p>열린 파일 복구 사본 · {((status.recoveryBytes ?? 0)/1048576).toFixed(1)} MiB · <code>{space?.root}/.git/dynote-personal</code></p>
       <strong>등록 기기 {status.devices?.length ?? 0}대</strong>
       <ul>{status.devices?.map(d=><li key={d.id}>{d.name} · {d.id.slice(0,8)} {d.id===status.deviceId?"(이 기기)":<button disabled={busy} onClick={()=>run(()=>onAction({action:"device",deviceId:d.id}))}>등록 해제</button>}</li>)}</ul>
       {status.pendingFiles?.map(f=><p key={f.name}>{f.name} · {f.message} {f.oid && <button disabled={busy} onClick={()=>run(()=>onAction({action:"confirm",path:f.name,oid:f.oid}))}>복사 완료 확인</button>}</p>)}
+      <LocalOnlyFiles files={status.localOnlyFiles}/>
       {status.conflicts?.map(f=><button key={f.name} onClick={()=>onReview(f.name)}>{f.name} · 버전 확인 {f.count}개</button>)}
     </>}
-    {status.lastBackupDay && <p className="muted">마지막 일일 백업 확인: {status.lastBackupDay}</p>}
+    {!connectedPersonal && status.lastBackupDay && <p className="muted">마지막 일일 백업 확인: {status.lastBackupDay}</p>}
     {status.pendingCommit && <p className="muted">업로드 대기 중인 커밋이 있습니다. 재시도는 이 커밋만 전송하며 이후 편집은 다음 백업에 포함됩니다.</p>}
-    {status.lastSuccess && <p className="muted">마지막 원격 저장: {new Date(status.lastSuccess).toLocaleString()}</p>}
+    {connectedPersonal && status.lastRemoteCheck && <p className="muted">마지막 원격 확인 · {new Date(status.lastRemoteCheck).toLocaleString()}</p>}
+    {status.lastSuccess && <p className="muted">{connectedPersonal ? "마지막 업로드" : "마지막 원격 저장"} · {new Date(status.lastSuccess).toLocaleString()}</p>}
     {error && <p className="error-banner settings-message" role="alert">{error}</p>}
   </section>;
 }

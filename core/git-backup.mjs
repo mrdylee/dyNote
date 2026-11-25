@@ -3,6 +3,46 @@ import { lstat, mkdir, readdir, realpath, rmdir } from "node:fs/promises";
 import path from "node:path";
 import { FILE_STORAGE_FOLDER, validFilePath } from "./vault.mjs";
 
+export const gitFailureMessages = {
+  "git-missing": "Git을 설치하고 Dynote를 다시 시작해 주세요.",
+  ownership: "보관함에서 git status로 소유권을 확인하고 해당 폴더의 safe.directory 안내를 따라 주세요.",
+  timeout: "Git 작업 시간이 초과되었습니다. 연결 상태를 확인해 주세요.",
+  network: "원격 저장소와 연결이 끊겼습니다. 네트워크와 VPN 연결을 확인해 주세요.",
+  "remote-unavailable": "원격 저장소에 접근할 수 없습니다. 연결 상태와 저장소 주소·읽기 권한을 확인해 주세요.",
+  authentication: "Git 인증에 실패했습니다. SSH 키 또는 Git 자격 증명 로그인을 확인해 주세요.",
+  identity: "커밋 작성자 이름과 이메일을 입력하거나 Git 사용자 설정을 완료해 주세요.",
+  filesystem: "보관함과 .git 폴더의 쓰기 권한을 확인하고 파일을 사용 중인 프로그램을 닫아 주세요.",
+  "push-denied": "이 계정의 업로드가 거절됐습니다. 저장소·브랜치의 쓰기 권한을 확인해 주세요.",
+  "branch-policy": "서버가 브랜치 업데이트를 거절했습니다. 브랜치 보호 규칙과 서버 정책을 확인해 주세요.",
+  "non-fast-forward": "원격 브랜치가 변경되었습니다. 원격 변경을 가져온 뒤 다시 시도해 주세요.",
+  "storage-full": "로컬 디스크 또는 원격 저장소 공간이 부족합니다. 공간 확보 후 다시 동기화해 주세요.",
+  history: "로컬 기록이 보존되어 있습니다. 저장소·브랜치를 확인하고 공통 이력이 없으면 별도의 빈 폴더로 가져와 주세요.",
+  unknown: "Git 작업에 실패했습니다. 저장소 주소와 Git 상태를 확인해 주세요.",
+};
+
+function gitFailureReason(error, stage, stderr, stdout) {
+  if (error?.code === "ENOENT") return "git-missing";
+  if (error?.killed || error?.code === "ETIMEDOUT") return "timeout";
+  if (/quota|no space left|disk full|storage limit/i.test(stderr)) return "storage-full";
+  if (/identity unknown|unable to auto-detect email address|empty ident name/i.test(stderr)) return "identity";
+  if ((!stage || /cannot open |cannot lock ref|unable to create |could not write /.test(stderr)) &&
+      /permission denied|read-only file system|operation not permitted|access is denied/i.test(stderr)) return "filesystem";
+  const httpStatus = /\b(?:returned error:|HTTP(?:\/[\d.]+)?(?: (?:code|status))?:?)\s+(401|403|502|503|504)\b/i.exec(stderr)?.[1];
+  if (stage === "push") {
+    // With --porcelain the per-ref status lives on stdout. Never return ref names or server output.
+    const summary = String(stdout).split(/\r?\n/).filter(line => line.startsWith("!\t")).map(line => line.split("\t")[2]).join("\n");
+    const report = summary + "\n" + stderr;
+    if (/non-fast-forward|fetch first|stale info/i.test(report)) return "non-fast-forward";
+    if (/protected branch|branch protection|repository rule|GH006|GH013/i.test(report)) return "branch-policy";
+    if (httpStatus === "403" || /write access|write permission|(?:not allowed|not permitted|not authorized) to (?:push|upload)|permission to .+ denied|remote:\s*(?:access|permission) denied/i.test(report)) return "push-denied";
+    if (/hook declined|\[remote rejected\]/i.test(report)) return "branch-policy";
+  }
+  if (httpStatus === "401" || httpStatus === "403" || /authentication (?:failed|required)|permission denied|could not read (?:Username|Password)|invalid credentials/i.test(stderr)) return "authentication";
+  if (stage && (["502", "503", "504"].includes(httpStatus) || /could not resolve (?:host|hostname|proxy)|connection (?:refused|reset|timed out|closed)|failed to connect|network is unreachable|no route to host|remote end hung up|unexpected disconnect/i.test(stderr))) return "network";
+  if (stage && /does not appear to be a git repository|could not read from remote repository|repository .+ not found/i.test(stderr)) return "remote-unavailable";
+  return "unknown";
+}
+
 export function validateGitConfig(input) {
   const remote = typeof input?.remote === "string" ? input.remote.trim() : "";
   let valid = false;
@@ -23,24 +63,24 @@ export function validateGitConfig(input) {
   return { remote, branch, authorName, authorEmail, schedule: "daily", push: input.push !== false };
 }
 
-export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8", privateIndex, timeout = 60000 } = {}) {
+export function runGit(root, args, { input, env = process.env, allow = [0], encoding = "utf8", privateIndex, timeout = 60000, nativeCheckout = false } = {}) {
   const gitEnv = { ...env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"]) delete gitEnv[key];
   if (privateIndex) gitEnv.GIT_INDEX_FILE = privateIndex;
+  const checkingRoot = args[0] === "rev-parse" && args[1] === "--show-toplevel";
+  const syncStage = { "ls-remote": "remote-query", fetch: "fetch", clone: "fetch", push: "push" }[args[0]];
+  if (checkingRoot || syncStage) Object.assign(gitEnv, { LC_ALL: "C", LANGUAGE: "C" });
   return new Promise((resolve, reject) => {
-    const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, "-c", "core.autocrlf=false", "-c", "submodule.recurse=false", ...args], {
+    const child = execFile("git", ["-c", `core.hooksPath=${path.join(root, ".git", "dynote-disabled-hooks")}`, ...(nativeCheckout ? [] : ["-c", "core.autocrlf=false"]), "-c", "submodule.recurse=false", ...args], {
       cwd: root, windowsHide: true, timeout, maxBuffer: 32 * 1024 * 1024, encoding,
       env: { ...gitEnv, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes", GIT_LITERAL_PATHSPECS: "1" },
     }, (error, stdout, stderr) => {
-      const code = error ? (error.code ?? -1) : 0;
+      const code = error ? error.code ?? error.signal ?? "GIT_FAILED" : 0;
+      if (checkingRoot && code === 128 && /^fatal: detected dubious ownership in repository at /m.test(stderr))
+        return reject(Object.assign(new Error(`Git이 보관함의 소유권을 확인하지 못했습니다. 폴더: ${root}\n해당 폴더에서 Git Bash를 열고 git status를 실행하세요. Git이 표시한 경로가 본인의 보관함과 일치하면 안내된 safe.directory 명령을 실행한 뒤 다시 시도해 주세요.`), { code, syncReason: "ownership" }));
       if (allow.includes(code)) return resolve({ code, stdout });
-      const message = code === "ENOENT" ? "Git을 설치하고 Dynote를 다시 시작해 주세요."
-        : error?.killed ? "Git 연결 시간이 초과되었습니다. 로컬 문서는 저장되어 있습니다."
-        : /quota|no space left|disk full|storage limit/i.test(stderr) ? "로컬 디스크 또는 원격 저장소 공간이 부족합니다. 공간 확보 후 다시 동기화해 주세요."
-        : /authentication|permission denied|could not read Username|credential/i.test(stderr) ? "Git 인증에 실패했습니다. SSH 키 또는 Git 자격 증명 로그인을 확인해 주세요."
-        : /non-fast-forward|fetch first|rejected/i.test(stderr) ? "원격에 다른 변경사항이 있습니다. Git에서 변경사항을 통합한 뒤 다시 시도해 주세요."
-        : "Git 작업에 실패했습니다. 저장소 주소·접근 권한·네트워크와 Git 상태를 확인해 주세요.";
-      reject(Object.assign(new Error(message), { code }));
+      const syncReason = gitFailureReason(error, syncStage, String(stderr), stdout);
+      reject(Object.assign(new Error(gitFailureMessages[syncReason]), { code, syncStage, syncReason }));
     });
     child.stdin.on("error", () => {});
     child.stdin.end(input);
@@ -70,16 +110,20 @@ export class GitBackup {
     const { stdout } = await this.git(["ls-remote", "--refs", "--", config.remote]);
     const refs = stdout.trim().split(/\r?\n/).filter(Boolean).map(line => line.split("\t"));
     const ref = refs.find(([, name]) => name === "refs/heads/" + config.branch);
-    if (!ref && refs.length) throw new Error("원격 저장소에 지정한 브랜치가 없습니다. 브랜치 이름을 확인해 주세요.");
+    if (!ref && refs.length) throw Object.assign(new Error("원격 저장소에 지정한 브랜치가 없습니다. 브랜치 이름을 확인해 주세요."), { syncStage: "remote-query", syncReason: "history" });
     return ref?.[0];
   }
 
-  async checkPersonalConnection(config, exists) {
+  async checkPersonalConnection(config, exists, onStage = () => {}) {
+    onStage("remote-query");
     const remote = await this.initialPersonalRemote(config);
+    onStage("remote-query", true);
     if (!remote) return;
     const head = exists && (await this.git(["rev-parse", "--verify", "-q", "HEAD"], { allow: [0, 1] })).stdout.trim();
     if (head) {
+      onStage("fetch");
       await this.git(["fetch", "--no-write-fetch-head", "--no-tags", "--no-recurse-submodules", "--", config.remote, "refs/heads/" + config.branch]);
+      onStage("fetch", true);
       if (!(await this.git(["merge-base", head, remote], { allow: [0, 1] })).code) return;
     } else {
       const entries = await readdir(this.root, { withFileTypes: true });
@@ -87,7 +131,7 @@ export class GitBackup {
       if (!local.length || (local.length === 1 && local[0].name === FILE_STORAGE_FOLDER && local[0].isDirectory() &&
           !(await readdir(path.join(this.root, FILE_STORAGE_FOLDER))).length)) return;
     }
-    throw new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. ‘기존 Git 저장소에서 가져오기’로 빈 폴더를 선택해 주세요.");
+    throw Object.assign(new Error("로컬 노트와 원격 저장소에 공통 Git 이력이 없습니다. ‘기존 Git 저장소에서 가져오기’로 빈 폴더를 선택해 주세요."), { syncReason: "history" });
   }
 
   async connect(input) {
@@ -129,20 +173,25 @@ export class GitBackup {
     return paths;
   }
 
+  async checkpoint({ authorName, authorEmail }, paths) {
+    paths ??= await this.safePaths();
+    if (!paths.length) return;
+    const author = [];
+    if (authorName) author.push("-c", `user.name=${authorName}`);
+    if (authorEmail) author.push("-c", `user.email=${authorEmail}`);
+    const identity = await this.git([...author, "var", "GIT_AUTHOR_IDENT"], { allow: [0, 128] });
+    if (identity.code) throw new Error("커밋 작성자 이름과 이메일을 입력하거나 Git 사용자 설정을 완료해 주세요.");
+    const input = paths.join("\0") + "\0";
+    await this.git(["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"], { input });
+    if ((await this.git(["diff", "--cached", "--name-only", "-z"])).stdout)
+      await this.git([...author, "commit", "--no-gpg-sign", "--only", "-m", `Dynote backup ${new Date().toISOString()}`, "--pathspec-from-file=-", "--pathspec-file-nul"], { input });
+  }
+
   async sync(input, { commit = true, revision, onCommit = async () => {} } = {}) {
     const config = validateGitConfig(input);
     await this.assertReady(config);
-    const paths = await this.safePaths(), author = [];
-    if (config.authorName) author.push("-c", `user.name=${config.authorName}`);
-    if (config.authorEmail) author.push("-c", `user.email=${config.authorEmail}`);
-    if (commit && paths.length) {
-      const identity = await this.git([...author, "var", "GIT_AUTHOR_IDENT"], { allow: [0, 128] });
-      if (identity.code) throw new Error("커밋 작성자 이름과 이메일을 입력하거나 Git 사용자 설정을 완료해 주세요.");
-      const input = paths.join("\0") + "\0";
-      await this.git(["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"], { input });
-      if ((await this.git(["diff", "--cached", "--name-only", "-z"])).stdout)
-        await this.git([...author, "commit", "--no-gpg-sign", "--only", "-m", `Dynote backup ${new Date().toISOString()}`, "--pathspec-from-file=-", "--pathspec-file-nul"], { input });
-    }
+    if (commit) await this.checkpoint(config);
+    else await this.safePaths();
     const head = revision ?? (await this.git(["rev-parse", "--verify", "HEAD"], { allow: [0, 128] })).stdout.trim();
     if (revision) {
       if (!/^[a-f0-9]{40,64}$/.test(revision)) throw new Error("잘못된 백업 기록입니다.");

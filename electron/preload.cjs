@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld(
     gitStatus: (args) => call("git-status", args),
     personalSyncAction: (args) => call("personal-sync-action", args),
     personalSyncZips: (args) => call("personal-sync-zips", args),
+    showPersonalSyncRecovery: args => call("show-personal-sync-recovery", args),
     connectGit: (args) => call("git-connect", args),
     cloneGit: (args) => call("git-clone", args),
     syncGit: (args) => call("git-sync", args),

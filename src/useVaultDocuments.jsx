@@ -48,8 +48,8 @@ export default function useVaultDocuments(api, invoke) {
         }));
         byVault.get(id).set(draft);
       },
-      async flush() {
-        const pending = [...byVault].filter(([, queue]) => queue.dirty);
+      async flush(vaultId) {
+        const pending = [...byVault].filter(([id, queue]) => queue.dirty && (!vaultId || vaultId === id));
         const results = await Promise.allSettled(pending.map(([, queue]) => queue.flush()));
         const errors = results.flatMap((result, index) => {
           if (result.status === "fulfilled") return [];

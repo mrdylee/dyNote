@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, symlink, unlink, chmod, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rename, symlink, unlink, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -50,6 +50,287 @@ test("personal setup verifies the remote branch and shared history without repla
   await assert.rejects(new GitBackup(other, service.run).checkPersonalConnection(config, true), /공통 Git 이력/);
   assert.equal(git(other, "rev-parse", "HEAD"), original);
   assert.equal(await readFile(path.join(other, "draft.md"), "utf8"), "my draft");
+});
+
+test("the first repository probe identifies ownership rejection and leaves trust settings intact", async t => {
+  const { dir, root, cfg, git } = await fixture();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  git(root, "init", "--initial-branch=main");
+  const before = await readFile(cfg);
+  const run = (cwd, args, options) => runGit(cwd, args, { ...options, env: {
+    ...process.env, LC_ALL: "C", GIT_TEST_ASSUME_DIFFERENT_OWNER: "1", GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: "1"
+  } });
+  await assert.rejects(new GitBackup(root, run).repository(), error =>
+    error.syncReason === "ownership" && error.message.includes("소유권") && error.message.includes(root) && error.message.includes("safe.directory"));
+  assert.deepEqual(await readFile(cfg), before);
+});
+
+test("Git failures distinguish a missing remote, fetch, porcelain policy rejection and non-fast-forward", async t => {
+  const f = await fixture();
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  await f.service.connect(config);
+  await f.service.sync(config);
+  await assert.rejects(f.run(f.root, ["-c", "alias.denied-write=!echo 'fatal: cannot open .git/index.lock: Permission denied' >&2 && exit 1", "denied-write"]),
+    error => error.syncReason === "filesystem" && !error.message.includes("인증"));
+  await rename(f.bare, f.bare + ".offline");
+  for (const [command, stage] of [["ls-remote", "remote-query"], ["fetch", "fetch"]]) {
+    await assert.rejects(f.run(f.root, [command, "--", remote]), error =>
+      error.syncStage === stage && error.syncReason === "remote-unavailable" && !error.message.includes(f.dir));
+  }
+  await rename(f.bare + ".offline", f.bare);
+  await writeFile(path.join(f.root, "Home.md"), "second local revision");
+  await f.service.sync({ ...config, push: false });
+  const push = rev => f.run(f.root, ["push", "--porcelain", "--", remote, rev + ":refs/heads/main"]);
+  f.git(f.bare, "config", "receive.hideRefs", "refs/heads/main");
+  await assert.rejects(push("HEAD"), error => error.syncStage === "push" && error.syncReason === "branch-policy");
+  f.git(f.bare, "config", "--unset", "receive.hideRefs");
+  const hook = path.join(f.bare, "hooks", "pre-receive");
+  await writeFile(hook, "#!/bin/sh\necho 'Write access denied for company.example' >&2\nexit 1\n");
+  await chmod(hook, 0o755);
+  await assert.rejects(push("HEAD"), error => error.syncStage === "push" && error.syncReason === "push-denied" && !error.message.includes("company.example"));
+  await unlink(hook);
+  await push("HEAD");
+  await assert.rejects(push("HEAD~1"), error => error.syncStage === "push" && error.syncReason === "non-fast-forward");
+});
+
+async function personalController(t, realClock = false) {
+  const { GitController } = await import("../electron/git-controller.mjs");
+  const f = await fixture(), clock = { time: Date.UTC(2026, 10, 24, 9) };
+  const id = "personal", vault = { id, root: await realpath(f.root) }, settingsFile = path.join(f.dir, "backup.json");
+  const counters = { queries: 0, pushes: 0 };
+  const options = { settingsFile, isPersonal: () => true, now: () => realClock ? new Date() : new Date(clock.time), setTimer: () => null,
+    run: (root, args, opts) => {
+      if (args[0] === "ls-remote") counters.queries++;
+      if (args[0] === "push") counters.pushes++;
+      return f.run(root, args, opts);
+    } };
+  const controllers = [];
+  async function open() {
+    const controller = new GitController(options); controllers.push(controller);
+    await controller.open(vault);
+    await controller.tail;
+    return controller;
+  }
+  t.after(async () => {
+    for (const controller of controllers) controller.close();
+    await rm(f.dir, { recursive: true, force: true });
+  });
+  const cfg = { ...config, mode: "personal-sync", deviceName: "My PC", zipPaths: [] };
+  const controller = await open();
+  return { ...f, id, cfg, clock, counters, controller, open, settingsFile,
+    record: async () => JSON.parse(await readFile(settingsFile, "utf8"))[id] };
+}
+
+test("personal sync persists actual uploads and checks, stops policy retries and resumes on a manual fix", async t => {
+  const f = await personalController(t);
+  const first = await f.controller.connect(f.id, f.cfg);
+  assert.equal(first.phase, "synced", first.message);
+  const uploaded = new Date(f.clock.time).toISOString();
+  assert.equal(first.lastSuccess, uploaded);
+  f.clock.time += 60000;
+  const poll = await f.controller.sync(f.id, { automatic: true });
+  assert.equal(poll.lastSuccess, uploaded);
+  assert.equal(poll.lastRemoteCheck, new Date(f.clock.time).toISOString());
+  await writeFile(path.join(f.root, "Home.md"), "new protected work");
+  const hook = path.join(f.bare, "hooks", "pre-receive");
+  await writeFile(hook, "#!/bin/sh\nexit 1\n");
+  await chmod(hook, 0o755);
+  f.clock.time += 60000;
+  const rejected = await f.controller.sync(f.id);
+  assert.equal(rejected.phase, "error");
+  assert.match(rejected.message, /업로드/);
+  assert.match(rejected.diagnostics, /stage=push/);
+  assert.match(rejected.diagnostics, /branch-policy/);
+  assert.equal(rejected.lastRemoteCheck, new Date(f.clock.time).toISOString());
+  assert.equal(rejected.lastSuccess, uploaded);
+  const savedHead = f.git(f.root, "rev-parse", "HEAD"), before = { ...f.counters };
+  f.clock.time += 3600000;
+  f.controller.markDirty(f.id);
+  await f.controller.sync(f.id, { automatic: true, force: true });
+  f.controller.close();
+  const reopened = await f.open();
+  assert.deepEqual(f.counters, before, "background events and restart must respect a blocked upload");
+  assert.match(reopened.status().diagnostics, /stage=push/);
+  await unlink(hook);
+  const retried = reopened.sync(f.id);
+  assert.equal(retried, reopened.sync(f.id));
+  const recovered = await retried;
+  assert.equal(recovered.phase, "synced");
+  assert.equal(recovered.diagnostics, null);
+  assert.deepEqual(recovered.changed, [], "uploading the existing local commit applies no incoming files");
+  assert.equal(f.git(f.bare, "rev-parse", "main"), savedHead);
+  assert.equal((await f.record()).lastSuccess, new Date(f.clock.time).toISOString());
+  f.clock.time += 1000;
+  await reopened.sync(f.id, { automatic: true });
+  assert.ok(f.counters.queries > before.queries);
+  assert.equal((await f.record()).lastRemoteCheck, new Date(f.clock.time).toISOString());
+});
+
+test("personal automatic attempts use capped backoff and manual sync bypasses the wait", async t => {
+  const f = await personalController(t);
+  await f.controller.connect(f.id, f.cfg);
+  let attempts = 0;
+  const actualSync = f.controller.personal.sync.bind(f.controller.personal);
+  f.controller.personal.sync = async (_config, { onStage }) => {
+    attempts++;
+    onStage?.("local-save", true);
+    throw Object.assign(new Error("network unavailable"), { syncStage: "fetch", syncReason: "network", code: 128 });
+  };
+  const first = await f.controller.sync(f.id);
+  assert.match(first.message, /가져오기/);
+  assert.match(first.diagnostics, /lastSuccessfulStage=local-save/);
+  assert.equal(attempts, 1);
+  for (const minutes of [1, 2, 4, 8, 16, 30, 30]) {
+    const before = attempts;
+    f.clock.time += minutes * 60000 - 1;
+    f.controller.markDirty(f.id);
+    await f.controller.sync(f.id, { automatic: true, force: true });
+    assert.equal(attempts, before);
+    f.clock.time++;
+    await f.controller.sync(f.id, { automatic: true });
+    assert.equal(attempts, before + 1);
+  }
+  f.controller.personal.sync = actualSync;
+  const recovered = await f.controller.sync(f.id);
+  assert.equal(recovered.phase, "synced");
+  assert.equal(recovered.diagnostics, null);
+  const count = f.counters.queries;
+  await f.controller.sync(f.id, { automatic: true, force: true });
+  assert.ok(f.counters.queries > count);
+});
+
+test("personal sync saves an offline edit and automatically uploads the same commit after the remote recovers", async t => {
+  const f = await personalController(t);
+  const initial = await f.controller.connect(f.id, f.cfg);
+  await writeFile(path.join(f.root, "Home.md"), "offline edit");
+  await rename(f.bare, f.bare + ".offline");
+  f.clock.time += 1000;
+  const offline = await f.controller.sync(f.id), localHead = f.git(f.root, "rev-parse", "HEAD");
+  assert.match(offline.diagnostics, /stage=remote-query\ncode=remote-unavailable\/128\nlastSuccessfulStage=local-save/);
+  assert.equal(offline.lastSuccess, initial.lastSuccess);
+  assert.equal(offline.lastRemoteCheck, initial.lastRemoteCheck);
+  const attempts = f.counters.queries;
+  await rename(f.bare + ".offline", f.bare);
+  await f.controller.sync(f.id, { automatic:true });
+  assert.equal(f.counters.queries, attempts);
+  f.clock.time += 60000;
+  const uploaded = await f.controller.sync(f.id, { automatic:true });
+  assert.equal(uploaded.phase, "synced");
+  assert.equal(uploaded.diagnostics, null);
+  assert.equal(uploaded.lastSuccess, new Date(f.clock.time).toISOString());
+  assert.equal(f.git(f.bare, "rev-parse", "main"), localHead);
+  assert.equal(f.git(f.bare, "show", "main:Home.md"), "offline edit");
+});
+
+test("unknown personal errors expose a copyable version, stages and allowlisted code without private input", async t => {
+  const f = await personalController(t);
+  await f.controller.connect(f.id, f.cfg);
+  const secret = "https://user:secret@company.example/Patient.md";
+  f.controller.personal.sync = async (_config, { onStage }) => {
+    onStage?.("remote-query", true, new Date(f.clock.time).toISOString());
+    onStage?.("apply");
+    throw Object.assign(new Error(secret), { code: secret, syncStage: secret, syncReason: secret, recoveryFile:secret });
+  };
+  const result = await f.controller.sync(f.id);
+  const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(result.diagnostics.includes(version));
+  assert.match(result.diagnostics, /stage=apply/);
+  assert.match(result.diagnostics, /code=unknown/);
+  assert.match(result.diagnostics, /lastSuccessfulStage=remote-query/);
+  assert.doesNotMatch(result.diagnostics, /user|secret|company|Patient|My PC|https:|\.git/);
+  assert.equal(result.recoveryFile, null);
+  assert.match(result.message, /적용/);
+});
+
+test("legacy personal poll times do not appear as verified uploads after opening or reconfiguring", async t => {
+  const f = await personalController(t);
+  await f.controller.connect(f.id, f.cfg);
+  f.controller.close();
+  const record = await f.record(), legacy = "2026-11-01T00:00:00.000Z";
+  delete record.lastRemoteCheck;
+  record.lastSuccess = legacy;
+  await writeFile(f.settingsFile, JSON.stringify({ [f.id]: record }));
+  const reopened = await f.open();
+  assert.equal(reopened.status().lastSuccess, null);
+  assert.equal(reopened.status().lastBackupDay, null);
+  assert.equal((await f.record()).lastSuccess, null);
+  await writeFile(path.join(f.root, "Home.md"), "confirmed upload for this connection");
+  const uploaded = (await reopened.sync(f.id)).lastSuccess;
+  assert.ok(uploaded);
+  f.clock.time += 1000;
+  assert.equal((await reopened.connect(f.id, f.cfg)).lastSuccess, uploaded);
+  const daily = await reopened.connect(f.id, { ...config, push: false });
+  assert.equal(daily.lastRemoteCheck, null);
+  assert.equal(daily.lastSuccess, null);
+  assert.equal(daily.diagnostics, null);
+  assert.deepEqual(daily.localOnlyFiles, []);
+});
+
+test("one manual check preserves incoming changes and uploads a completed copy while leaving an incomplete PDF pending", async t => {
+  const f = await personalController(t, true);
+  await f.controller.connect(f.id, f.cfg);
+  const other = path.join(f.dir, "other");
+  f.git(f.dir, "clone", f.bare, other);
+  await writeFile(path.join(other, "Incoming.md"), "remote change");
+  f.git(other, "add", "Incoming.md");
+  f.git(other, "-c", "user.name=Other", "-c", "user.email=other@example.invalid", "commit", "-m", "incoming");
+  f.git(other, "push", "origin", "main");
+  const storage = path.join(f.root, "File Storage");
+  await mkdir(storage, { recursive: true });
+  await writeFile(path.join(storage, "complete.pdf"), "%PDF-1.4\n%%EOF\n");
+  await writeFile(path.join(storage, "partial.pdf"), "%PDF-1.4\ncopy in progress");
+  await writeFile(path.join(storage, "changing.pdf"), "%PDF-1.4\nfirst\n%%EOF\n");
+  const personal = f.controller.personal, sync = personal.sync.bind(personal);
+  let passes = 0;
+  personal.sync = async (...args) => {
+    const result = await sync(...args);
+    if (++passes === 1) await writeFile(path.join(storage, "changing.pdf"), "%PDF-1.4\nsecond version\n%%EOF\n");
+    return result;
+  };
+  const before = f.counters.queries;
+  const result = await f.controller.sync(f.id, { personalOnly: true });
+  assert.deepEqual(result.pendingFiles.map(file => file.name).sort(), ["File Storage/changing.pdf", "File Storage/partial.pdf"]);
+  assert.ok(result.changed.includes("Incoming.md"));
+  assert.equal(f.counters.queries, before + 2, "the follow-up checks once even when a file is still incomplete");
+  assert.equal(f.git(f.bare, "show", "main:File Storage/complete.pdf"), "%PDF-1.4\n%%EOF");
+  assert.doesNotMatch(f.git(f.bare, "ls-tree", "-r", "--name-only", "main"), /(?:partial|changing)\.pdf/);
+});
+
+test("watch events from applying incoming notes do not leave a clean sync pending, while an actual late edit stays pending", async t => {
+  const f = await personalController(t);
+  await f.controller.connect(f.id, f.cfg);
+  const other = path.join(f.dir, "other");
+  f.git(f.dir, "clone", f.bare, other);
+  await writeFile(path.join(other, "Incoming.md"), "received note");
+  f.git(other, "add", "Incoming.md");
+  f.git(other, "-c", "user.name=Other", "-c", "user.email=other@example.invalid", "commit", "-m", "incoming");
+  f.git(other, "push", "origin", "main");
+  await writeFile(path.join(f.root, "Outgoing.md"), "local note");
+  const store = f.controller.personal.store, git = store.git.bind(store);
+  let lateEdit = false;
+  store.git = async (args, options) => {
+    if (args.includes("status") && args.includes("--ignored=matching")) {
+      if (lateEdit) await writeFile(path.join(f.root, "Late.md"), "edited during sync");
+      // Deliver events during the status scan, when the OS can also report our own checkout.
+      f.controller.markDirty(f.id);
+    }
+    return git(args, options);
+  };
+  const complete = await f.controller.sync(f.id);
+  assert.equal(complete.phase, "synced", complete.message);
+  assert.deepEqual(complete.changed, ["Incoming.md"]);
+  assert.equal(f.git(f.bare, "show", "main:Outgoing.md"), "local note");
+  lateEdit = true;
+  const pending = await f.controller.sync(f.id);
+  assert.equal(pending.phase, "pending");
+  assert.doesNotMatch(f.git(f.bare, "ls-tree", "-r", "--name-only", "main"), /Late\.md/);
+  store.git = git;
+  f.clock.time += 299999;
+  await f.controller.sync(f.id, { automatic:true });
+  assert.doesNotMatch(f.git(f.bare, "ls-tree", "-r", "--name-only", "main"), /Late\.md/);
+  f.clock.time++;
+  assert.equal((await f.controller.sync(f.id, { automatic:true })).phase, "synced");
+  assert.equal(f.git(f.bare, "show", "main:Late.md"), "edited during sync");
 });
 
 test("legacy minute settings migrate to a daily schedule", () => {

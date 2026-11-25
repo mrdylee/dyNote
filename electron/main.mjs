@@ -74,7 +74,7 @@ let recovery;
 let registry;
 let vaultError = "";
 let restoring = false;
-let automaticCaptureVaultId = null;
+let exclusiveVaultId = null;
 let activeMutations = 0;
 let gitBackup;
 const openedVaults = new Map();
@@ -534,7 +534,7 @@ app
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
-      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips",
+      "git-status", "git-connect", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
       "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
@@ -721,9 +721,19 @@ app
         checkVault(args, vault);
         return gitBackup.enqueue(async () => {
           checkVault(args, vault);
+          const workspace = new GitWorkspace(vault.root);
+          if (args.action?.kind === "sync-team") {
+            if (registry.purposes[vault.root] !== "team") throw new Error("동기화할 팀 보관함을 다시 선택해 주세요.");
+            const backup = gitBackup.status();
+            try {
+              const status = await workspace.syncTeam(backup.enabled ? backup.config : null, remote => cloudBridge?.checkNoteRemote?.(remote));
+              return {status};
+            }
+            catch (error) { return { status:{phase:"error", message:error.message} }; }
+          }
           if (["create-branch", "switch-branch", "delete-branch"].includes(args.action?.kind) && gitBackup.status().enabled)
             throw new Error("브랜치를 변경하기 전에 자동 Git 백업을 꺼 주세요.");
-          const status = await new GitWorkspace(vault.root).action(args.action);
+          const status = await workspace.action(args.action);
           const snapshot = ["pull", "switch-branch", "create-branch"].includes(args.action.kind) ? await vault.snapshot() : null;
           return { status, snapshot };
         });
@@ -808,7 +818,25 @@ app
         cloudBridge?.checkNoteRemote?.(args.config?.remote);
         return gitBackup.connect(vault.id, args.config);
       },
-      "git-sync": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.sync(vault.id,{automatic:args.poll===true}); },
+      "git-sync": (args, vault, gitBackup) => {
+        checkVault(args, vault);
+        return gitBackup.sync(vault.id, { automatic: args.automatic === true || args.poll === true, force: args.poll !== true, personalOnly: args.personalOnly === true });
+      },
+      "show-personal-sync-recovery": (args, vault, gitBackup) => {
+        checkVault(args, vault);
+        return gitBackup.enqueue(async () => {
+          const status = gitBackup.status();
+          if (!status.recoveryFile || status.recoveryFile !== args.id)
+            throw new Error("현재 동기화의 복구 사본을 다시 확인해 주세요.");
+          const service = await gitBackup.startPersonal();
+          if (!service.disk) {
+            try { await service.init(); }
+            catch (error) { if (!service.disk) throw error; }
+          }
+          shell.showItemInFolder(await service.disk.recoveryPath(args.id));
+          return true;
+        });
+      },
       "personal-sync-zips": (args,vault,controller) => { checkVault(args,vault); return controller.enqueue(()=>controller.zipList()); },
       "personal-sync-action": (args,vault,controller) => { checkVault(args,vault); return controller.personalAction(vault.id,args); },
       "git-disconnect": (args, vault, gitBackup) => { checkVault(args, vault); return gitBackup.disconnect(vault.id); },
@@ -1047,11 +1075,12 @@ app
           const target = scoped ? workspaceVault(args.vaultId) : vault;
           if (scoped) checkVault(args, target);
           if (!readOnly) {
-            const independentMutation = automaticCaptureVaultId && target && target.id !== automaticCaptureVaultId && !exclusive;
+            const independentMutation = exclusiveVaultId && target && target.id !== exclusiveVaultId && !exclusive;
             if ((restoring && !independentMutation) || (exclusive && activeMutations)) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
             if (exclusive) {
               restoring = true;
-              if (name === "capture-sync" && args?.manual !== true) automaticCaptureVaultId = target?.id ?? null;
+              if (name === "capture-sync" && args?.manual !== true || name === "git-workspace-action" && args?.action?.kind === "sync-team")
+                exclusiveVaultId = target?.id ?? null;
             }
             activeMutations++; locked = true;
           }
@@ -1075,7 +1104,7 @@ app
         } finally {
           if (locked) {
             activeMutations--;
-            if (exclusive) { restoring = false; automaticCaptureVaultId = null; }
+            if (exclusive) { restoring = false; exclusiveVaultId = null; }
           }
         }
       });

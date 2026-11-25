@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import fs, { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { PersonalSync, installDevice } from "../core/personal-sync.mjs";
+import { conflictFolder } from "../core/personal-sync-store.mjs";
 import { runGit } from "../core/git-backup.mjs";
 
 async function fixture(t) {
@@ -72,6 +74,128 @@ test("independent working copies register, hand off Markdown and stable PDF, and
   assert.equal((await a.service.store.git(["status", "--porcelain"])).stdout, "");
 });
 
+test("a CRLF checkout registers, receives device changes, and still rejects edited registration data", async (t) => {
+  const { pc, bare } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  await local.sync({ register: true });
+  // Reproduce a Git for Windows checkout in the existing Cloud vault.
+  await cloud.service.store.git(["fetch", "--", bare, "main"]);
+  await cloud.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  const record = `.dynote-sync/devices/${local.service.deviceId}.json`;
+  assert.match((await cloud.read(record)).toString(), /\r\n$/);
+  const registered = await cloud.sync({ register: true });
+  assert.deepEqual(registered.devices.map(d => d.name).sort(), ["Cloud", "Local"]);
+  const attachment = "File Storage/test.png", bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  await mkdir(path.join(local.root, "File Storage"));
+  await local.write(attachment, bytes);
+  local.cfg.deviceName = "Local renamed";
+  await local.sync({ register: true });
+  const received = await cloud.sync();
+  assert.equal(received.phase, "synced");
+  assert.equal(JSON.parse(await cloud.read(record)).name, "Local renamed");
+  assert.deepEqual(await cloud.read(attachment), bytes);
+  const edited = JSON.stringify({ ...JSON.parse(await cloud.read(record)), active: false }) + "\r\n";
+  await cloud.write(record, edited);
+  await assert.rejects(cloud.sync({ force: false }), /동기화 관리 파일/);
+  assert.equal((await cloud.read(record)).toString(), edited);
+});
+
+test("a Windows checkout restores an LF-only PDF without publishing converted bytes", async t => {
+  const { pc, bare, advance } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  let body = "%PDF-1.4\n";
+  const offsets = [];
+  for (const object of ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>"]) {
+    offsets.push(body.length);
+    body += offsets.length + " 0 obj\n" + object + "\nendobj\n";
+  }
+  const pdf = Buffer.from(body + "xref\n0 4\n0000000000 65535 f \n" +
+    offsets.map(n => String(n).padStart(10, "0") + " 00000 n \n").join("") +
+    "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n" + body.length + "\n%%EOF\n");
+  await local.write("paper.pdf", pdf);
+  await local.sync({ register: true });
+  advance(2000);
+  await local.sync();
+  await cloud.service.store.git(["fetch", "--", bare, "main"]);
+  await cloud.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  assert.notDeepEqual(await cloud.read("paper.pdf"), pdf);
+  await cloud.sync({ register: true });
+  advance(2000);
+  await cloud.sync();
+  assert.deepEqual((await runGit(bare, ["show", "main:paper.pdf"], { encoding: null })).stdout, pdf);
+  assert.deepEqual(await cloud.read("paper.pdf"), pdf);
+  const edited = Buffer.from(pdf.toString().replace("200 200", "220 220"));
+  await cloud.write("paper.pdf", edited);
+  await cloud.sync();
+  advance(2000);
+  await cloud.sync();
+  assert.deepEqual((await runGit(bare, ["show", "main:paper.pdf"], { encoding: null })).stdout, edited);
+});
+
+test("receiving over a CRLF note leaves no phantom edit and retains an open draft", async t => {
+  const { pc, bare } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  await local.write("note.md", "first\n");
+  await local.sync({ register: true });
+  await cloud.service.store.git(["fetch", "--", bare, "main"]);
+  await cloud.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  const revision = createHash("sha256").update(await cloud.read("note.md")).digest("hex");
+  await cloud.sync({ register: true });
+  await local.write("note.md", "second\n");
+  await local.sync();
+  await cloud.sync();
+  const head = await cloud.service.disk.head();
+  assert.deepEqual((await cloud.sync()).conflicts, []);
+  assert.equal(await cloud.service.disk.head(), head);
+  assert.equal((await cloud.service.saveDraft("note.md", "my edit", revision, cloud.cfg))?.preserved, true);
+});
+
+test("a CRLF clone of existing conflict history can join and preserves original versions", async t => {
+  const { pc, bare } = await fixture(t);
+  const local = await pc("Local"), cloud = await pc("Cloud");
+  const file = "meeting.md";
+  await local.write(file, "before\n");
+  await local.write("photo.png", Buffer.from([137, 0, 10]));
+  await local.sync({ register: true });
+  await cloud.sync({ register: true });
+  await local.write(file, "local edit\n");
+  await cloud.write(file, "cloud edit\n");
+  await local.write("photo.png", Buffer.from([137, 0, 1, 10]));
+  await cloud.write("photo.png", Buffer.from([137, 0, 2, 10]));
+  await local.sync();
+  await cloud.sync();
+  const fresh = await pc("New PC");
+  await fresh.service.store.git(["fetch", "--", bare, "main"]);
+  await fresh.service.store.git(["-c", "core.autocrlf=true", "merge", "--ff-only", "FETCH_HEAD"]);
+  const versions = (await cloud.service.versions(file)).versions;
+  const state = await fresh.sync({ register: true });
+  assert.equal(state.devices.length, 3);
+  assert.equal((await fresh.sync({ force: false })).phase, "synced");
+  assert.equal((await fresh.service.store.tree(await fresh.service.disk.head())).get(file).oid,
+    (await cloud.service.store.tree(await cloud.service.disk.head())).get(file).oid);
+  for (const { commit } of versions)
+    assert.deepEqual(await fresh.service.preview(file, commit), await cloud.service.preview(file, commit));
+  await cloud.write("new.md", "available");
+  await cloud.sync();
+  await fresh.sync();
+  assert.equal((await fresh.read("new.md")).toString(), "available");
+  const files = await fresh.service.store.tree(await fresh.service.disk.head());
+  const body = [...files.keys()].find(name => name.startsWith(conflictFolder("photo.png")) && name.endsWith(".blob"));
+  const original = await fresh.read(body);
+  await fresh.write(body, Buffer.concat([original.subarray(0, -1), Buffer.from("\r\n")]));
+  await assert.rejects(fresh.sync({ force: false }), error => error.message.includes(body));
+  await fresh.write(body, original);
+  const unknown = ".dynote-sync/devices/unknown.json";
+  await fresh.write(unknown, "{}\n");
+  await assert.rejects(fresh.sync({ force: false }), error => error.message.includes(unknown));
+  await rm(path.join(fresh.root, unknown));
+  const record = [...files.keys()].find(name => name.startsWith(".dynote-sync/conflicts/") && name.endsWith(".json"));
+  await fresh.write(record, "{}\r\n");
+  await assert.rejects(fresh.sync(), error => error.message.includes(record));
+  assert.equal((await fresh.read(record)).toString(), "{}\r\n");
+});
+
 test("remote receive retains a displaced open writer and publishes the late bytes as a separate version", async (t) => {
   const { pc } = await fixture(t);
   const a = await pc("Cloud"),
@@ -103,6 +227,205 @@ test("remote receive retains a displaced open writer and publishes the late byte
   await a.service.resolve(a.cfg, "time.md", basis, picked.commit);
   await b.sync();
   assert.equal((await b.read("time.md")).toString(), "3시\n");
+});
+
+function interceptFs(t, method, intercept) {
+  const original = fs[method];
+  fs[method] = (...args) => intercept(original, ...args);
+  syncBuiltinESMExports();
+  t.after(() => {
+    fs[method] = original;
+    syncBuiltinESMExports();
+  });
+}
+
+for (const [method, code, advice] of [["link", "ENOTSUP", /하드링크/], ["rename", "EBUSY", /닫|사용 중/]]) {
+  test(`the storage probe detects a rejected ${method} between the vault and recovery folder before registration`, async t => {
+    const { pc } = await fixture(t), a = await pc("A");
+    await a.write("local.md", "mine");
+    const git = path.join(a.root, ".git") + path.sep;
+    let blocked = true;
+    interceptFs(t, method, (original, from, to) => {
+      if (blocked && from.startsWith(git) !== to.startsWith(git))
+        throw Object.assign(new Error("injected"), { code });
+      return original(from, to);
+    });
+    await assert.rejects(a.service.init(), error =>
+      error.code === code && error.syncStage === "apply" && advice.test(error.message));
+    assert.deepEqual((await readdir(a.root)).sort(), [".git", "local.md"]);
+    assert.deepEqual(await readdir(path.join(git, "dynote-personal")), []);
+    assert.equal((await a.read("local.md")).toString(), "mine");
+    blocked = false;
+    assert.equal((await a.sync({ register: true })).phase, "synced");
+  });
+}
+
+async function incomingNote(t) {
+  const { pc } = await fixture(t), a = await pc("A"), b = await pc("B");
+  const name = "paper.md", file = path.join(b.root, name);
+  await a.write(name, "original");
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  await a.sync();
+  await a.write(name, "incoming");
+  await a.sync();
+  return { a, b, name, file, restart: () => new PersonalSync({ root: b.root }, b.service.store.run, b.service.deviceId) };
+}
+
+test("failed publication keeps the original readable on repeated errors and saves a subsequent edit on restart", async t => {
+  const { b, name, file, restart } = await incomingNote(t);
+  const previous = await b.service.disk.head();
+  let blocked = true;
+  interceptFs(t, "link", (original, from, to) => {
+    if (blocked && to === file) throw Object.assign(new Error("injected"), { code: "ENOTSUP" });
+    return original(from, to);
+  });
+  for (let retry = 0; retry < 2; retry++) {
+    const error = await b.sync().then(() => null, failure => failure);
+    assert.equal((await b.read(name).catch(() => null))?.toString(), "original");
+    assert.equal(error?.code, "ENOTSUP");
+    assert.match(error.message, /하드링크/);
+    assert.equal(await b.service.disk.head(), previous);
+    assert(await b.service.disk.job());
+  }
+  await b.write(name, "edited during interruption");
+  blocked = false;
+  const service = restart();
+  await service.sync(b.cfg);
+  const { versions } = await service.versions(name);
+  assert.equal(versions.length, 2);
+  assert.deepEqual(new Set(await Promise.all(versions.map(async v => (await service.preview(name, v.commit)).toString()))),
+    new Set(["edited during interruption", "incoming"]));
+  assert.equal(await service.disk.job(), null);
+});
+
+test("a failed publication reports the retained original when another file occupies its destination", async t => {
+  const { b, name, file, restart } = await incomingNote(t);
+  let compete = true, unsupported = false;
+  interceptFs(t, "link", async (original, from, to) => {
+    if (unsupported) throw Object.assign(new Error("injected"), { code: "ENOTSUP" });
+    if (compete && to === file && from.endsWith(".part")) {
+      compete = false;
+      await writeFile(to, "competing file", { flag: "wx" });
+    }
+    return original(from, to);
+  });
+  const error = await b.sync().then(() => null, failure => failure);
+  const row = (await b.service.disk.job()).records.find(r => r.name === name);
+  assert.equal(error.code, "EEXIST");
+  assert.equal(error.recoveryFile, row.saved);
+  assert(error.message.includes(row.saved));
+  assert.equal(await readFile(await b.service.disk.recoveryPath(error.recoveryFile), "utf8"), "original");
+  await assert.rejects(b.service.disk.recoveryPath(row.saved + ".source.json"), /복구 사본/);
+  await assert.rejects(b.service.disk.recoveryPath(randomUUID()), /복구 사본/);
+  assert.equal((await b.read(name)).toString(), "competing file");
+  const service = restart();
+  unsupported = true;
+  await assert.rejects(service.sync(b.cfg), { code: "ENOTSUP", recoveryFile: row.saved });
+  assert.equal(await readFile(await service.disk.recoveryPath(row.saved), "utf8"), "original");
+  unsupported = false;
+  await service.sync(b.cfg);
+  const { versions } = await service.versions(name);
+  assert.equal(versions.length, 2);
+  assert.deepEqual(new Set(await Promise.all(versions.map(async v => (await service.preview(name, v.commit)).toString()))),
+    new Set(["competing file", "incoming"]));
+  await assert.rejects(service.disk.recoveryPath(row.saved), /복구 사본/);
+});
+
+test("running out of space preparing the incoming file never displaces the original", async t => {
+  const { b, name, file } = await incomingNote(t);
+  let moved = false;
+  interceptFs(t, "rename", (original, from, to) => {
+    if (from === file) moved = true;
+    return original(from, to);
+  });
+  interceptFs(t, "writeFile", (original, dest, ...args) => {
+    if (dest.endsWith(".part")) throw Object.assign(new Error("injected"), { code: "ENOSPC" });
+    return original(dest, ...args);
+  });
+  await assert.rejects(b.sync(), { code: "ENOSPC" });
+  assert.equal(moved, false);
+  assert.equal((await b.read(name)).toString(), "original");
+});
+
+test("a deletion after the original was restored survives another failed probe and restart", async t => {
+  const { b, name, file, restart } = await incomingNote(t);
+  let blocked = true;
+  interceptFs(t, "link", (original, from, to) => {
+    if (blocked) throw Object.assign(new Error("injected"), { code: "ENOTSUP" });
+    return original(from, to);
+  });
+  await assert.rejects(b.sync(), { code: "ENOTSUP" });
+  assert.equal((await b.read(name)).toString(), "original");
+  await rm(file);
+  const service = restart();
+  await assert.rejects(service.sync(b.cfg), { code: "ENOTSUP" });
+  await assert.rejects(b.read(name), { code: "ENOENT" });
+  blocked = false;
+  await service.sync(b.cfg);
+  const { versions } = await service.versions(name);
+  assert.equal(versions.length, 2);
+  assert(versions.some(version => version.blob === null));
+});
+
+test("a failed storage probe makes a displaced legacy original visible and leaves its journal resumable", async t => {
+  const { a, b, name, file, restart } = await incomingNote(t);
+  const disk = b.service.disk;
+  await b.service.store.git(["fetch", "--", a.root, "main"]);
+  await disk.begin("main", await disk.head(), await a.service.disk.head());
+  const row = (await disk.job()).records.find(r => r.name === name);
+  await rename(file, path.join(disk.dir, row.saved));
+  let blocked = true;
+  interceptFs(t, "link", (original, from, to) => {
+    if (blocked) throw Object.assign(new Error("injected"), { code: "ENOTSUP" });
+    return original(from, to);
+  });
+  const service = restart();
+  await assert.rejects(service.sync(b.cfg), { code: "ENOTSUP" });
+  assert.equal((await b.read(name).catch(() => null))?.toString(), "original");
+  assert.equal((await disk.job()).records.find(r => r.name === name).saved, row.saved);
+  blocked = false;
+  assert.equal((await service.sync(b.cfg)).phase, "synced");
+  assert.equal((await b.read(name)).toString(), "incoming");
+  assert.deepEqual((await service.versions(name)).versions, []);
+});
+
+test("a device permission change during replacement keeps the original record", { skip: process.platform === "win32" }, async t => {
+  const { pc } = await fixture(t), a = await pc("A"), b = await pc("B");
+  await a.sync({ register: true });
+  await b.sync({ register: true });
+  a.cfg.deviceName = "renamed";
+  await a.sync({ register: true });
+  const name = `.dynote-sync/devices/${a.service.deviceId}.json`, file = path.join(b.root, name);
+  const before = await b.read(name);
+  let change = true;
+  interceptFs(t, "rename", async (original, from, to) => {
+    if (change && from === file) {
+      change = false;
+      await fs.chmod(from, 0o755);
+    }
+    return original(from, to);
+  });
+  await assert.rejects(b.sync(), { syncReason: "managed-record" });
+  assert.deepEqual(await b.read(name), before);
+  assert((await fs.stat(file)).mode & 0o111);
+  await fs.chmod(file, 0o644);
+  assert.equal((await b.sync()).phase, "synced");
+  assert.equal(JSON.parse(await b.read(name)).name, "renamed");
+});
+
+test("an edited CRLF device record interrupts an older formatting repair without reading an unstored preimage", async t => {
+  const { pc } = await fixture(t), a = await pc("A");
+  await a.sync({ register: true });
+  const disk = a.service.disk, head = await disk.head(), name = `.dynote-sync/devices/${a.service.deviceId}.json`;
+  const entry = (await a.service.store.tree(head)).get(name), original = JSON.parse(await a.read(name));
+  await a.write(name, JSON.stringify(original, null, 2).replaceAll("\n", "\r\n") + "\r\n");
+  const before = (await disk.read(name)).oid;
+  await disk.startJob("main", head, head, [{ name, before, after: entry.oid, mode: entry.mode, size: entry.size, saved: randomUUID() }]);
+  const edited = JSON.stringify({ ...original, active: false }) + "\r\n";
+  await a.write(name, edited);
+  await assert.rejects(a.sync(), { syncReason: "managed-record", syncStage: "apply" });
+  assert.equal((await a.read(name)).toString(), edited);
 });
 
 test("restarts at the gap between rename and publication; an outside replacement remains reachable", async (t) => {

@@ -4,6 +4,7 @@ import {
   link,
   lstat,
   mkdir,
+  mkdtemp,
   open,
   readFile,
   readdir,
@@ -15,7 +16,7 @@ import {
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { assertSyncEntry, blobLimit, syncPrefix } from "./personal-sync-store.mjs";
+import { assertSyncEntry, blobLimit, isSyncDocumentText, isSyncRecordText, textConflictFolders, syncPrefix } from "./personal-sync-store.mjs";
 import { checkTreeChanges } from "./personal-sync-merge.mjs";
 
 export const batchLimit = 512 * 1024 * 1024;
@@ -24,6 +25,25 @@ const missing = (error) => {
   return null;
 };
 const fold = (s) => s.normalize("NFC").toLowerCase();
+
+function storageError(error, operation) {
+  if (typeof error.code !== "string" || error.syncReason) {
+    error.syncStage ??= "apply";
+    return error;
+  }
+  let advice = "저장 위치의 연결 상태를 확인한 뒤 다시 동기화해 주세요.";
+  if (["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(error.code))
+    advice = "이 위치에서 필요한 파일 교체를 지원하지 않습니다. 하드링크와 이름 변경을 지원하는 같은 드라이브에 보관함을 연결해 주세요.";
+  else if (["EBUSY", "EAGAIN", "ETXTBSY"].includes(error.code))
+    advice = "파일을 사용하는 프로그램을 닫은 뒤 다시 동기화해 주세요.";
+  else if (["EACCES", "EPERM", "EROFS"].includes(error.code))
+    advice = "열린 파일을 닫고 보관함의 쓰기·이름 변경 권한을 확인한 뒤 다시 동기화해 주세요.";
+  else if (["ENOSPC", "EDQUOT"].includes(error.code))
+    advice = "저장 위치에 여유 공간을 확보한 뒤 다시 동기화해 주세요.";
+  else if (error.code === "EEXIST")
+    advice = "같은 경로에 생긴 파일을 보존했습니다. 다시 동기화하면 변경된 버전을 확인할 수 있습니다.";
+  return Object.assign(new Error(operation + " " + advice, { cause: error }), { code: error.code, syncStage: "apply" });
+}
 
 export async function atomicJson(file, object) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -89,10 +109,23 @@ export async function readStable(file, format, limit = blobLimit) {
       .update("blob " + bytes.length + "\0")
       .update(bytes)
       .digest("hex");
-    return { oid, bytes, signature: signature(after) };
+    return { oid, bytes, mode: Number(before.mode), signature: signature(after) };
   } finally {
     await handle.close();
   }
+}
+
+export function windowsCheckoutBytes(stored) {
+  if (stored.includes(13) || stored.includes(0) || !stored.includes(10)) return null;
+  let length = stored.length;
+  for (const byte of stored) if (byte === 10) length++;
+  const checkout = Buffer.allocUnsafe(length);
+  let offset = 0;
+  for (const byte of stored) {
+    if (byte === 10) checkout[offset++] = 13;
+    checkout[offset++] = byte;
+  }
+  return checkout;
 }
 
 export class PersonalSyncDisk {
@@ -105,6 +138,16 @@ export class PersonalSyncDisk {
   }
   async read(name) {
     return readStable(await target(this.store.root, name), this.format);
+  }
+  async matchesBlob(name, current, oid, folders, exact = false) {
+    if (process.platform !== "win32" && name.startsWith(syncPrefix + "devices/") && (current?.mode & 0o111))
+      throw Object.assign(new Error("동기화 관리 파일의 실행 권한이 변경되었습니다. 파일 권한을 확인해 주세요: " + name),
+        { syncReason: "managed-record", syncStage: "apply" });
+    if ((current?.oid ?? null) === oid) return true;
+    if (exact || !current || !oid || !(isSyncRecordText(name, folders) || isSyncDocumentText(name)) || !current.bytes.includes("\r\n")) return false;
+    const stored = await this.store.blob(oid);
+    // Compare the complete Windows checkout representation without decoding or rewriting either file.
+    return stored.length < current.bytes.length && windowsCheckoutBytes(stored)?.equals(current.bytes) === true;
   }
   async head(ref = "HEAD") {
     return (await this.store.git(["rev-parse", "--verify", "-q", ref], { allow: [0, 1] })).stdout.trim() || null;
@@ -134,6 +177,80 @@ export class PersonalSyncDisk {
     return job;
   }
 
+  async recoveryPath(id) {
+    const unavailable = () => new Error("진행 중인 수신 작업의 복구 사본을 확인할 수 없습니다.");
+    if (await realpath(this.dir) !== this.dir || !(await this.job())?.records.some(row => row.saved === id))
+      throw unavailable();
+    const file = path.join(this.dir, id);
+    if (!(await lstat(file).catch(missing))?.isFile()) throw unavailable();
+    return file;
+  }
+
+  async restoreOriginal(job, row, failure, onlyMissing = false) {
+    if (onlyMissing && row.verified !== undefined) return;
+    const backup = path.join(this.dir, row.saved);
+    if (!(await lstat(backup).catch(missing))?.isFile()) return;
+    const showBackup = () => {
+      if (failure.recoveryFile) return;
+      failure.recoveryFile = row.saved;
+      failure.message += " 원본 복구 사본은 " + path.join(".git", "dynote-personal", row.saved) + "에 있습니다.";
+    };
+    if (onlyMissing && row.restored === row.saved) {
+      showBackup();
+      return;
+    }
+    try {
+      const file = await target(this.store.root, row.name);
+      if (onlyMissing && await lstat(file).catch(missing)) {
+        if (!(await this.matchesBlob(row.name, await readStable(file, this.format), row.after, new Set()))) showBackup();
+        return;
+      }
+      // Keep the displaced inode for open editors. Both recovery operations refuse an occupied name.
+      try {
+        await link(backup, file);
+      } catch (error) {
+        if (error.code === "EEXIST") throw error;
+        await copyFile(backup, file, constants.COPYFILE_EXCL);
+      }
+      failure.message += " ‘" + row.name + "’의 이전 내용을 원래 경로에 복구했습니다.";
+    } catch (error) {
+      showBackup();
+      if (error.code !== "EEXIST") return;
+    }
+    if (row.restored !== row.saved) {
+      // If this visible path disappears before retry, the user's deletion is a separate version.
+      row.restored = row.saved;
+      await atomicJson(this.journal, job);
+    }
+  }
+
+  async checkStorage() {
+    if (this.storageChecked) return;
+    try {
+      const work = await mkdtemp(path.join(this.store.root, ".dynote-probe-"));
+      try {
+        const recovery = await mkdtemp(path.join(this.dir, "probe-"));
+        try {
+          const file = path.join(work, "file"), moved = path.join(recovery, "moved");
+          await writeFile(file, "probe", { flag: "wx", mode: 0o600, flush: true });
+          await rename(file, moved);
+          await link(moved, file);
+        } finally {
+          await rm(recovery, { recursive: true, force: true });
+        }
+      } finally {
+        await rm(work, { recursive: true, force: true });
+      }
+    } catch (error) {
+      const failure = storageError(error, "개인 동기화 저장 위치 검사에 실패했습니다.");
+      const job = await this.job();
+      for (const row of job?.records.slice(job.offset) ?? [])
+        if (row.before && row.after) await this.restoreOriginal(job, row, failure, true);
+      throw failure;
+    }
+    this.storageChecked = true;
+  }
+
   async begin(branch, previous, next, captured = []) {
     if (previous === next) return;
     const [before, after] = await Promise.all([this.store.tree(previous), this.store.tree(next)]);
@@ -146,6 +263,9 @@ export class PersonalSyncDisk {
       size: after.get(name)?.size ?? 0,
       saved: randomUUID(),
     }));
+    await this.startJob(branch, previous, next, records, captured);
+  }
+  async startJob(branch, previous, next, records, captured = []) {
     const job = { branch, previous, next, records, captured, offset: 0, id: randomUUID() };
     // No worktree write precedes the durable candidate and the recovery manifest.
     await this.store.git(["update-ref", "refs/dynote-sync/apply", next]);
@@ -201,6 +321,13 @@ export class PersonalSyncDisk {
     const job = await this.job();
     if (!job) return { changed: [] };
     const captured = new Set(job.captured);
+    const folders = new Set();
+    if (job.records.some(row => row.name.startsWith(syncPrefix) && row.name.endsWith(".blob"))) {
+      for (const ref of [job.previous, job.next]) {
+        const { groups } = await this.store.metadata(await this.store.tree(ref));
+        for (const folder of textConflictFolders(groups)) folders.add(folder);
+      }
+    }
     let used = 0;
     if ((await this.head()) !== job.previous && (await this.head()) !== job.next)
       throw new Error("적용 중 브랜치가 변경되었습니다.");
@@ -211,57 +338,71 @@ export class PersonalSyncDisk {
         return { waiting: true, changed: [] };
       }
       if (captured.has(row.name)) continue; // New input after a local checkpoint stays dirty.
-      const file = await target(this.store.root, row.name, true);
-      const backup = path.join(this.dir, row.saved);
-      const current = await readStable(file, this.format);
-      if ((current?.oid ?? null) === row.after) {
-        row.verified = current?.signature ?? null;
-        continue;
-      }
-      const displaced = await lstat(backup).catch(missing);
-      if ((current?.oid ?? null) !== row.before && !(displaced && !current)) {
-        if (row.name.startsWith(syncPrefix)) throw new Error("공유 메타데이터가 외부에서 변경되었습니다.");
-        // Reconcile this independent input against its actual parent on the next pass.
-        return {
-          diverged: { name: row.name, entry: current && (await this.store.storeBytes(current.bytes)), job },
-          changed: [],
-        };
-      }
-      if (current) {
-        if (displaced) throw new Error("외부 파일을 다시 확인해야 합니다: " + row.name);
-        if (!row.name.startsWith(syncPrefix))
-          await atomicJson(backup + ".source.json", { name: row.name, parent: job.previous, oid: row.before });
-        await rename(file, backup);
-        const observed = await readStable(backup, this.format);
-        if (observed.oid !== row.before)
-          return {
-            diverged: { name: row.name, entry: await this.store.storeBytes(observed.bytes), job },
-            changed: [],
-          };
-      } else if (displaced && !row.name.startsWith(syncPrefix)) {
-        const moved = await readStable(backup, this.format),
-          marker = backup + ".source.json";
-        if (!(await stat(marker).catch(missing)))
-          await atomicJson(marker, { name: row.name, parent: job.previous, oid: row.before });
-        if (moved.oid !== row.before)
-          return {
-            diverged: { name: row.name, entry: await this.store.storeBytes(moved.bytes), job },
-            changed: [],
-          };
-      }
-      if (row.after) {
-        const bytes = await this.store.blob(row.after);
-        const temp = path.join(this.dir, randomUUID() + ".part");
-        try {
-          await writeFile(temp, bytes, { flag: "wx", mode: row.mode === "100755" ? 0o755 : 0o644, flush: true });
-          await link(temp, file);
-        } finally {
-          await rm(temp, { force: true });
+      let temp, failure;
+      try {
+        const file = await target(this.store.root, row.name, true);
+        let backup = path.join(this.dir, row.saved);
+        const current = await readStable(file, this.format);
+        if (await this.matchesBlob(row.name, current, row.after, folders)) {
+          row.verified = current?.signature ?? null;
+          continue;
         }
+        const displaced = await lstat(backup).catch(missing);
+        if (displaced && !row.name.startsWith(syncPrefix) && !(await stat(backup + ".source.json").catch(missing)))
+          await atomicJson(backup + ".source.json", { name: row.name, parent: job.previous, oid: row.before });
+        const interruptedMove = displaced && !current && row.restored !== row.saved;
+        // A same-head repair records the exact checkout hash, which need not exist in Git.
+        const repair = job.previous === job.next;
+        const managedChange = () => Object.assign(new Error("수신 도중 동기화 관리 파일이 변경되었습니다. ‘" + row.name + "’을 확인해 주세요."),
+          { syncReason: "managed-record", syncStage: "apply" });
+        if (!(await this.matchesBlob(row.name, current, row.before, folders, repair)) && !interruptedMove) {
+          if (row.name.startsWith(syncPrefix)) throw managedChange();
+          // Reconcile this independent input against its actual parent on the next pass.
+          return {
+            diverged: { name: row.name, entry: current && (await this.store.storeBytes(current.bytes)), job },
+            changed: [],
+          };
+        }
+        if (row.after) {
+          const bytes = await this.store.blob(row.after);
+          temp = path.join(this.dir, randomUUID() + ".part");
+          await writeFile(temp, bytes, { flag: "wx", mode: row.mode === "100755" ? 0o755 : 0o644, flush: true });
+        }
+        if (current) {
+          if (displaced) {
+            // A previous attempt restored the visible file. Keep both inodes available to their editors.
+            row.saved = randomUUID();
+            await atomicJson(this.journal, job);
+            backup = path.join(this.dir, row.saved);
+          }
+          if (!row.name.startsWith(syncPrefix))
+            await atomicJson(backup + ".source.json", { name: row.name, parent: job.previous, oid: current.oid });
+          await rename(file, backup);
+        }
+        if (current || displaced) {
+          const moved = await readStable(backup, this.format);
+          if (!(await this.matchesBlob(row.name, moved, row.before, folders, repair))) {
+            if (row.name.startsWith(syncPrefix)) throw managedChange();
+            return {
+              diverged: { name: row.name, entry: await this.store.storeBytes(moved.bytes), job },
+              changed: [],
+            };
+          }
+        }
+        if (temp) await link(temp, file);
+        const applied = await readStable(file, this.format);
+        if (await this.matchesBlob(row.name, applied, row.after, folders)) row.verified = applied?.signature ?? null;
+        used += row.size;
+      } catch (error) {
+        this.storageChecked = false;
+        failure = storageError(error, "‘" + row.name + "’ 파일을 적용하지 못했습니다.");
+        await this.restoreOriginal(job, row, failure);
+        throw failure;
+      } finally {
+        if (temp) await rm(temp, { force: true }).catch(error => {
+          if (!failure) throw storageError(error, "임시 수신 파일을 정리하지 못했습니다.");
+        });
       }
-      const applied = await readStable(file, this.format);
-      if ((applied?.oid ?? null) === row.after) row.verified = applied?.signature ?? null;
-      used += row.size;
     }
     // A completed chunk might have been edited while the application was stopped.
     for (const row of job.records) {
@@ -270,7 +411,7 @@ export class PersonalSyncDisk {
       const info = await lstat(file, { bigint: true }).catch(missing);
       if (row.verified === (info ? signature(info) : null)) continue;
       const current = await readStable(file, this.format);
-      if ((current?.oid ?? null) !== row.after) {
+      if (!(await this.matchesBlob(row.name, current, row.after, folders))) {
         if (row.name.startsWith(syncPrefix)) throw new Error("수신 도중 공유 메타데이터가 변경되었습니다.");
         job.offset = job.records.indexOf(row);
         return {

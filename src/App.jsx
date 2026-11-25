@@ -227,7 +227,7 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
               data-drop-label={undefined}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
-              onContextMenu={event => { event.preventDefault(); if (!other) onContext(event, {path, folder:false, word}); }}
+              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word, other}); }}
               onKeyDown={other ? undefined : event => renameOnF2(event, {path, folder:false})}
               onPointerDown={!draggable ? undefined : event => onCopyPointer(event, path)}
               title={path}
@@ -558,10 +558,11 @@ export default function App() {
     return () => document.removeEventListener('keydown', dismiss);
   }, []);
   const [treeMenu, setTreeMenu] = useState(null);
+  const [panelSyncs, setPanelSyncs] = useState({});
   const treeMenuRef = useRef(null);
   useEffect(() => {
     if (!treeMenu) return;
-    treeMenuRef.current?.querySelector('button')?.focus();
+    treeMenuRef.current?.querySelector('button:not(:disabled)')?.focus();
     const outside = event => { if (!treeMenuRef.current?.contains(event.target)) setTreeMenu(null); };
     const escape = event => { if (event.key === 'Escape') { event.preventDefault(); setTreeMenu(null); treeMenu.origin?.focus(); } };
     document.addEventListener('pointerdown', outside);
@@ -575,12 +576,27 @@ export default function App() {
   const openReview=(id,path)=>{setReviewFile({id,path});setModal("personal-review");};
   const gitStatus = gitStates[vault?.id] ?? checkingGit;
   const gitSettingsStatus = gitStates[gitVault?.id] ?? checkingGit;
+  const menuPurpose = vaults[treeMenu?.vaultId]?.purpose;
+  const personalMenu = menuPurpose === "personal";
+  const teamMenu = menuPurpose === "team";
+  const panelState = panelSyncs[treeMenu?.vaultId];
+  const panelWorking = !!panelState?.working;
+  const menuGit = personalMenu && gitStates[treeMenu.vaultId];
+  const menuSyncEnabled = menuGit?.enabled && menuGit.config?.mode === "personal-sync";
+  const menuFiles = personalMenu ? menuGit : panelState?.teamResult;
+  const menuFileState = menuFiles?.pendingFiles?.find(file => file.name === treeMenu.path)
+    ?? menuFiles?.localOnlyFiles?.find(file => file.name === treeMenu.path || file.name.endsWith("/") && (treeMenu.path + "/").startsWith(file.name));
+  useLayoutEffect(() => {
+    const menu = treeMenuRef.current;
+    if (menu) menu.style.top = Math.max(4, Math.min(treeMenu.y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+  }, [treeMenu, menuFileState]);
   const acceptGitStatus = useCallback(value => {
     if (value?.vaultId) setGitStates(old => ({ ...old, [value.vaultId]: value }));
   }, []);
   useEffect(() => api?.onGitStatus(acceptGitStatus), [acceptGitStatus]);
+  const inspectedGitId = personalMenu ? treeMenu.vaultId : gitVault?.id;
   useEffect(() => {
-    const id = gitVault?.id;
+    const id = inspectedGitId;
     if (!id) return;
     let mounted = true;
     invoke(api.gitStatus({ vaultId: id })).then(value => {
@@ -589,7 +605,7 @@ export default function App() {
       if (mounted) acceptGitStatus({ vaultId: id, phase: "error", message: error.message, enabled: false, config: null });
     });
     return () => { mounted = false; };
-  }, [gitVault?.id, acceptGitStatus]);
+  }, [inspectedGitId, acceptGitStatus]);
   const timer = useRef(null);
   const preview = useRef(null);
   const editState = useCopilotEdits({ api, vaults, onError: setError,
@@ -775,13 +791,13 @@ export default function App() {
     };
   }, [dailyVaultId, busy, automaticCaptureId, vaultsRef, revisionMap, updateVault]);
 
-  const flush = useCallback(async (allowDrafts = false) => {
-    if (!allowDrafts && editsRef.current.blocked()) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
-    clearTimeout(timer.current);
-    if (!queue.dirty) return;
+  const flush = useCallback(async (allowDrafts = false, vaultId) => {
+    if (!allowDrafts && editsRef.current.blocked(vaultId)) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
+    if (!vaultId) clearTimeout(timer.current);
+    if (vaultId ? !queue.dirtyIn(vaultId) : !queue.dirty) return;
     setStatus("saving");
     try {
-      await queue.flush();
+      await queue.flush(vaultId);
       setStatus(queue.dirty ? "dirty" : "saved");
       setError("");
     } catch (err) {
@@ -791,9 +807,43 @@ export default function App() {
     }
   }, [queue]);
 
+  const syncNow = async (vaultId, personalOnly) => {
+    await flush(false, personalOnly ? vaultId : undefined);
+    const result = await invoke(api.syncGit({ vaultId, personalOnly }));
+    acceptGitStatus(result);
+    return result;
+  };
+  const openPanelSettings = (vaultId, setup = false) => {
+    setGitSettingsId(vaultId);
+    setSettingsTab(vaultsRef.current[vaultId]?.purpose === "team" ? (setup ? "team-sync-setup" : "git-workspace") : "personal-sync");
+    setModal("settings");
+  };
+  const syncFromTree = async () => {
+    const { vaultId, origin } = treeMenu;
+    setTreeMenu(null);
+    origin.focus();
+    if (personalMenu && !menuSyncEnabled) { openPanelSettings(vaultId); return; }
+    setPanelSyncs(old => ({ ...old, [vaultId]: { working: true } }));
+    let message, teamResult;
+    try {
+      if (teamMenu) {
+        await flush(false, vaultId);
+        const { status } = await invoke(api.gitWorkspaceAction({ vaultId, action:{kind:"sync-team"} }));
+        teamResult = status;
+        message = status.message;
+        if (status.phase === "setup") openPanelSettings(vaultId, true);
+        else await refreshSyncedVault(vaultId);
+      } else {
+        const result = await syncNow(vaultId, true);
+        if (!result.enabled || result.config?.mode !== "personal-sync") openPanelSettings(vaultId);
+      }
+    } catch (cause) { message = cause.message; }
+    setPanelSyncs(old => ({ ...old, [vaultId]: { message, teamResult } }));
+  };
+
   const refreshSequence=useRef(new Map());
-  const refreshPersonal=useEffectEvent(async ({vaultId,changed})=>{
-    if (!changed?.length || !vaultsRef.current[vaultId]) return;
+  const refreshSyncedVault = async vaultId => {
+    if (!vaultsRef.current[vaultId]) return;
     const token=Symbol();refreshSequence.current.set(vaultId,token);
     while(vaultsRef.current[vaultId] && refreshSequence.current.get(vaultId)===token) {
       const generation=queue.generation(vaultId),snapshot=await invoke(api.snapshot({vaultId}));
@@ -801,12 +851,15 @@ export default function App() {
       if(refreshSequence.current.get(vaultId)===token && vaultsRef.current[vaultId]) installVault(snapshot);
       break;
     }
+  };
+  const refreshPersonal=useEffectEvent(async ({vaultId,changed})=>{
+    if (changed?.length) await refreshSyncedVault(vaultId);
   });
   const pollPersonal=useEffectEvent(async (poll)=>{
     const ids=Object.values(gitStates).filter(v=>v.enabled && v.config?.mode==="personal-sync").map(v=>v.vaultId);
     if(!ids.length)return;
     if(!poll)await flush(true);
-    await Promise.all(ids.map(vaultId=>invoke(api.syncGit({vaultId,poll}))));
+    await Promise.all(ids.map(vaultId=>invoke(api.syncGit({vaultId,poll,automatic:true,personalOnly:true}))));
   });
   useEffect(()=>{
     const focus=()=>pollPersonal(true).catch(e=>setError(e.message));
@@ -1605,17 +1658,17 @@ export default function App() {
   };
   const showTreeMenu = (origin, x, y, target, vaultId) => {
     const scope = vaultsRef.current[vaultId];
-    if (!scope || busy) {
+    if (!scope || busy || target.other && !scope.purpose) {
       setTreeMenu(null);
       return;
     }
     const rect = origin.getBoundingClientRect();
     const protectedFolder = target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences));
     setTreeMenu({
-      ...target, vaultId, origin, canTrash: !!target.path && !protectedFolder && !target.word,
+      ...target, vaultId, origin, canTrash: !!target.path && !protectedFolder && !target.word && !target.other,
       renameReason: target.path ? treeRenameReason(target, scope) : "보관함 이름은 설정에서 변경해 주세요.",
       x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
-      y: Math.max(4, Math.min(y || rect.bottom, window.innerHeight - 144)),
+      y: y || rect.bottom,
     });
   };
   const addTreeFolder = async event => {
@@ -2212,7 +2265,9 @@ export default function App() {
               )}
             </div>
           ) : (
-            <SpaceTrees spaces={together ? visibleSpaces : [vault]} renderTree={renderTree} dropProps={treeDropProps} onContext={rootTreeContext}/>
+            <SpaceTrees spaces={together ? visibleSpaces : [vault]} renderTree={renderTree} dropProps={treeDropProps} onContext={rootTreeContext}
+              syncMessage={id => panelSyncs[id] && (panelSyncs[id].working ? "동기화 중…" : panelSyncs[id].message || gitStates[id]?.message)}
+              onSyncDetails={id => openPanelSettings(id, panelSyncs[id]?.teamResult?.phase === "setup")}/>
           )}
           <div className="structured-create-actions">
             <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
@@ -2838,12 +2893,15 @@ export default function App() {
       </div>}
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
+        {(personalMenu || teamMenu) && <button role="menuitem" disabled={panelWorking || personalMenu && !menuGit}
+          onClick={syncFromTree}>{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
+        {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
         <button role="menuitem" onClick={() => {
           const parent = treeMenu.folder ? treeMenu.path : treeMenu.path.split("/").slice(0, -1).join("/");
           setNewFolder({ vaultId: treeMenu.vaultId, parent, name: "", error: "" }); setTreeMenu(null); setModal("new-folder");
         }}>폴더 추가</button>
-        {treeMenu.path && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
-        {treeMenu.path && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
+        {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
+        {treeMenu.path && !treeMenu.other && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
         {treeMenu.canTrash && <button className="tree-trash" role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>}
       </div>}
       {modal === "new-folder" && newFolder && <Modal title="폴더 추가" onClose={() => !newFolder.working && setModal(null)}>
@@ -3157,7 +3215,7 @@ export default function App() {
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
             {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["cloud-repository", "Copilot 중계 Git"], ["updates", "업데이트"]].map(([key, label]) =>
-              <button key={key} aria-current={(settingsTab === key || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+              <button key={key} aria-current={(settingsTab === key || (key === "vault" && settingsTab === "team-sync-setup") || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
             {[["git", "자동 백업"], ["history", "복원"], ["git-workspace", "고급 Git 관리"]].map(([key, label]) =>
@@ -3182,7 +3240,8 @@ export default function App() {
             <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
           </section>}
-          {settingsTab === "vault" && <VaultSettings currentId={selectedVaultId} gitStates={gitStates}
+          {["vault","team-sync-setup"].includes(settingsTab) && <VaultSettings key={settingsTab} currentId={selectedVaultId} gitStates={gitStates}
+            teamSetup={settingsTab === "team-sync-setup" ? gitVault : null}
             onList={loadSpaces} openSpaces={connectedSpaces} onReadGit={readSpaceGit}
             onPurpose={async (root, purpose) => {
               await flush();
@@ -3241,6 +3300,7 @@ export default function App() {
             onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
           {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onInstall={installUpdate} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
           {settingsTab === "git-workspace" && gitVault.id && <GitWorkspace key={gitVault.id} busy={busy} backupEnabled={gitSettingsStatus.enabled}
+            teamResult={panelSyncs[gitVault.id]?.teamResult}
             onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}
             onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: gitVault.id, path, staged }))}
             onOpen={(path) => { openFile(path, gitVault.id); setModal(null); }}
@@ -3259,9 +3319,11 @@ export default function App() {
             onZips={()=>invoke(api.personalSyncZips({vaultId:gitVault.id}))}
             onAction={args=>invoke(api.personalSyncAction({vaultId:gitVault.id,...args})).then(acceptGitStatus)}
             onReview={name=>openReview(gitVault.id,name)}
+            onCopyDiagnostics={text=>invoke(api.copyText({vaultId:gitVault.id,text}))}
+            onShowRecovery={id=>invoke(api.showPersonalSyncRecovery({vaultId:gitVault.id,id}))}
             onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (settingsTab === "personal-sync" && config.mode !== "personal-sync") setSettingsTab("git"); }}
             onClone={config => importGit({ vaultId: gitVault.id, config })}
-            onSync={async () => { await flush(); acceptGitStatus(await invoke(api.syncGit({ vaultId: gitVault.id }))); }}
+            onSync={personalOnly => syncNow(gitVault.id, personalOnly)}
             onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: gitVault.id })))} />}
           {settingsTab === "history" && gitVault.id && <GitHistory key={gitVault.id} busy={busy}
             onList={(month) => invoke(api.gitHistory({ vaultId: gitVault.id, month }))}
