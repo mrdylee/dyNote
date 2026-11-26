@@ -31,6 +31,22 @@ async function select(text, caretOnly = false) {
   }, { text, caretOnly });
 }
 
+async function chooseContextFormat(word, action) {
+  const point = await page.locator(".cm-content").evaluate((el, target) => {
+    const view = el.cmTile.root.view;
+    const rect = view.coordsAtPos(view.state.doc.toString().indexOf(target));
+    return { x: rect.left + 1, y: (rect.top + rect.bottom) / 2 };
+  }, word);
+  await page.mouse.click(point.x, point.y, { button: "right" });
+  await app.evaluate(async (_electron, id) => {
+    for (let i = 0; !globalThis.formattingMenu && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
+    const item = globalThis.formattingMenu?.getMenuItemById(id);
+    if (!item) throw new Error("Missing editor context action: " + id);
+    globalThis.formattingMenu = null;
+    item.click();
+  }, action);
+}
+
 try {
   await mkdir(profile); await mkdir(vault);
   await writeFile(file, original);
@@ -41,15 +57,16 @@ try {
     Menu.prototype.popup = function () { globalThis.formattingMenu = this; };
   });
   await select("회의록");
-  await page.locator(".cm-line").filter({hasText:"확인할 항목"}).click({button:"right"});
-  await app.evaluate(async () => {
-    for (let i = 0; !globalThis.formattingMenu && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-    const item = globalThis.formattingMenu?.getMenuItemById("format-size-large");
-    if (!item) throw new Error("Missing size action in the editor context menu");
-    item.click();
-  });
+  await chooseContextFormat("확인할", "format-size-large");
   const sizedTask = original.replace("확인할 항목", '<span style="font-size:1.25em">확인할 항목</span>');
   await page.waitForFunction(expected => document.querySelector(".cm-content")?.cmTile.root.view.state.doc.toString() === expected, sizedTask);
+  await page.keyboard.press(modifier + "+z");
+  assert.equal(await docText(), original);
+
+  await select("여기서 단어만");
+  await chooseContextFormat("단어만", "format-bold");
+  const boldSelection = original.replace("여기서 단어만", "**여기서 단어만**");
+  await page.waitForFunction(expected => document.querySelector(".cm-content").cmTile.root.view.state.doc.toString() === expected, boldSelection);
   await page.keyboard.press(modifier + "+z");
   assert.equal(await docText(), original);
 

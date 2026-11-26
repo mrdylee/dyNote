@@ -80,6 +80,7 @@ export default function Editor({
   }
   const host = useRef(null);
   const editor = useRef(null);
+  const beforeContextMenu = useRef(null);
   const callback = useRef(onChange);
   const lineBreak = useRef("\n");
   // CodeMirror keeps normalized offsets internally; disk content retains the
@@ -164,6 +165,12 @@ export default function Editor({
             indentWithTab,
           ]),
           EditorView.domEventHandlers({
+            pointerdown: (event, view) => {
+              // macOS can select the word under the pointer before the native menu opens.
+              beforeContextMenu.current = event.button === 2 || (event.button === 0 && event.ctrlKey)
+                ? { doc: view.state.doc, selection: view.state.selection } : null;
+              return false;
+            },
             paste: (event, view) => {
               if (view.state.readOnly) return false;
               const files = [...(event.clipboardData?.files ?? [])];
@@ -253,8 +260,13 @@ export default function Editor({
       runBulletFormat(view, format, position);
       return;
     }
-    if (position != null && !view.state.selection.ranges.some(range => range.from <= position && position <= range.to)) {
-      view.dispatch({ selection: { anchor: position } });
+    if (position != null) {
+      const saved = beforeContextMenu.current;
+      beforeContextMenu.current = null;
+      const selection = saved?.doc === view.state.doc ? saved.selection : view.state.selection;
+      const inside = selection.ranges.some(range => range.from <= position && position <= range.to);
+      if (!inside) view.dispatch({ selection: { anchor: position } });
+      else if (!selection.eq(view.state.selection)) view.dispatch({ selection });
     }
     applyFormat(view, format, textColor);
   }), [textColor]);
