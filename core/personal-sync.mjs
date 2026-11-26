@@ -636,17 +636,12 @@ export class PersonalSync {
     for (const name of log.stdout.split("\0")) if (name && !files.has(name)) blocked.add(name);
     return blocked;
   }
-  async hunks(name) {
+  async comparison(name) {
     const files = await this.store.tree(await this.disk.head()),
       group = (await this.store.metadata(files)).groups.get(name);
-    const parts =
-      group &&
-      (await textChoices(
-        this.store,
-        name,
-        group.pending.map((id) => group.versions.get(id))
-      ));
-    return parts?.filter((part) => typeof part !== "string") ?? [];
+    const basis = group?.pending ?? [];
+    const parts = group ? await textChoices(this.store, name, basis.map(id => group.versions.get(id))) : null;
+    return { basis, parts };
   }
   async removeDevice(config, id, onStage) {
     if (id === this.deviceId) throw new Error("현재 기기에서는 동기화를 끈 뒤 다른 기기에서 등록을 해제하세요.");

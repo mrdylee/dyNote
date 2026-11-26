@@ -146,7 +146,8 @@ export class GitController {
       const service=await this.startPersonal();await service.init();
       if (args.action==="versions") return service.versions(args.path,args.skip);
       if (args.action==="preview") return service.preview(args.path,args.commit);
-      if (args.action==="hunks") return service.hunks(args.path);
+      if (args.action==="comparison") return service.comparison(args.path);
+      if (args.action==="hunks") return (await service.comparison(args.path)).parts?.filter(part => part.key) ?? [];
       if (args.action==="confirm") { await service.confirm(args.path,args.oid); return this.perform(); }
       const progress = personalProgress(this.now);
       const revision = this.revision;

@@ -111,7 +111,7 @@ try {
   await page.keyboard.insertText('saved after closing');
   await tab('B').press('Shift+F10');
   for(const label of ['다른 탭 모두 닫기','왼쪽 탭 닫기','오른쪽 탭 닫기'])assert.equal(await action(label).isDisabled(),true);
-  await page.keyboard.press('Enter');
+  await action('이 탭 닫기').press('Enter');
   await tabs.first().waitFor({state:'detached'});
   assert.equal(await page.locator('.document-pane').count(),0);
   await page.locator('.save-status.saved').waitFor();

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { DocumentPanes } from "./DocumentWorkspace.jsx";
 
 function copyPath(name, id) {
   const lastDot = name.lastIndexOf(".");
@@ -6,13 +8,55 @@ function copyPath(name, id) {
   return name.slice(0, dot) + " (" + id.slice(0, 8) + ")" + name.slice(dot);
 }
 
+function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, busy, onSwitch, onPick}) {
+  const body = useRef(null);
+  useEffect(() => {
+    const view = body.current;
+    const block = view.querySelectorAll(".comparison-block")[target];
+    if (block) view.scrollTop += block.getBoundingClientRect().top - view.getBoundingClientRect().top - 24;
+  }, [target, id, parts]);
+  const version = rows.find(v => v.commit === id);
+  const title = version ? version.device || version.author : "공통 원문";
+  let hunkIndex = 0;
+  return <section className="document-pane comparison-pane" aria-label={title}>
+    <header className="pane-header">
+      {version && rows.length > 2
+        ? <select aria-label={"비교할 수정본 " + (slot === "left" ? 1 : 2)} value={id} onChange={e => onSwitch(e.target.value)}>
+            {rows.map(v => <option key={v.commit} value={v.commit} disabled={v.commit === other}>
+              {v.device || v.author} · {new Date(v.time).toLocaleString()} · {v.commit.slice(0, 8)}
+            </option>)}
+          </select>
+        : <strong>{title}</strong>}
+      {version && rows.length === 2 && <small>{new Date(version.time).toLocaleString()}</small>}
+    </header>
+    <div className="comparison-body" ref={body} tabIndex={0} aria-label={title + " 전체 본문"}>
+      {parts.map(part => {
+        if (typeof part === "string") return part;
+        const text = part.alternatives[id] ?? part.original;
+        if (!part.key) return text;
+        const number = ++hunkIndex;
+        const checked = (picks[part.key] ?? selected) === id;
+        return <div className="comparison-block" key={part.key}>
+          <label><input type="radio" name={"hunk-" + part.key} checked={checked}
+            disabled={busy || (id !== "original" && !Object.hasOwn(part.alternatives, id))}
+            onChange={() => onPick(part.key, id)}/>겹친 구간 {number} · {title}</label>
+          <span>{text || (id === "original" ? "(빈 원문)" : "(삭제)")}</span>
+        </div>;
+      })}
+    </div>
+  </section>;
+}
+
 export default function PersonalVersionReview({ path, count, action, onClose }) {
   const [rows, setRows] = useState([]),
     [basis, setBasis] = useState([]),
     [current, setCurrent] = useState(null);
   const [selected, select] = useState(""),
-    [hunks, setHunks] = useState([]),
+    [parts, setParts] = useState(null),
+    [compared, setCompared] = useState([]),
+    [target, setTarget] = useState(0),
     [picks, setPicks] = useState({});
+  const hunks = parts?.filter(part => part.key) ?? [];
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [limit, setLimit] = useState(50);
@@ -32,15 +76,27 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         }
         all.push(...page.versions);
       }
-      const intervals = await action({ action: "hunks", path });
+      const comparison = await action({ action: "comparison", path });
       if (active) {
+        if (JSON.stringify(comparison.basis) !== JSON.stringify(initial.basis)) {
+          setReload(n => n + 1);
+          return;
+        }
         setRows((old) => [
           ...old.filter((v) => all.some((a) => a.commit === v.commit)),
           ...all.filter((v) => !old.some((o) => o.commit === v.commit)),
         ]);
         setBasis(initial.basis);
         setCurrent(initial.current);
-        setHunks(intervals);
+        setParts(comparison.parts);
+        setCompared(old => {
+          const newest = [...all].reverse();
+          const left = all.find(v => v.commit === old[0]) ?? newest[0];
+          const rest = newest.filter(v => v !== left);
+          const right = rest.find(v => v.commit === old[1])
+            ?? rest.find(v => (v.id || v.author) !== (left.id || left.author)) ?? rest[0];
+          return [left?.commit, right?.commit].filter(Boolean);
+        });
         select((old) => (initial.basis.includes(old) ? old : ""));
       }
     }
@@ -94,28 +150,36 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
     const choice = picks[h.key] ?? selected;
     return choice === "original" || Object.hasOwn(h.alternatives, choice);
   }) : !!selected;
+  const actions = (
+    <div className="settings-actions">
+        <button
+          className="primary-button"
+          disabled={busy || !ready || rows.length !== basis.length}
+          onClick={apply}
+        >
+          {hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용"}
+        </button>
+        <button disabled={busy} onClick={onClose}>
+          나중에
+        </button>
+      </div>
+  );
   return (
     <section className="settings-section">
       <h3>{path}</h3>
-      {hunks.map((h, i) => (
-        <fieldset key={h.key} className="conflict-hunk" disabled={busy}>
-          <legend>겹친 구간 {i + 1}</legend>
-          <div className="conflict-columns">
-            {[{ id: "original", label: "공통 원문", text: h.original }, ...rows
-              .filter(v => Object.hasOwn(h.alternatives, v.commit))
-              .map(v => ({ id: v.commit, label: v.device || v.author, time: v.time, text: h.alternatives[v.commit] }))
-            ].map(option => (
-              <label key={option.id} className="conflict-option">
-                <span><input type="radio" name={"hunk" + i} checked={(picks[h.key] ?? selected) === option.id}
-                  onChange={() => setPicks(old => ({ ...old, [h.key]: option.id }))}/>
-                  {option.label}</span>
-                {option.time && <small>{new Date(option.time).toLocaleString()}</small>}
-                <span className="conflict-text">{option.text || (option.id === "original" ? "(빈 원문)" : "(삭제)")}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      ))}
+      {parts && compared.length === 2 && <div className="version-workspace">
+        {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
+          <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>
+            {hunks.map((h, i) => <option key={h.key} value={i}>겹친 구간 {i + 1}</option>)}
+          </select>
+        </label>}
+        <DocumentPanes panes={[{key:"original", id:"original"}, {key:"left", id:compared[0]}, {key:"right", id:compared[1]}]}
+          renderPane={({key, id}) => <ComparisonPane slot={key} id={id} rows={rows} other={compared[key === "left" ? 1 : 0]}
+            parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
+            onSwitch={id => setCompared(old => key === "left" ? [id, old[1]] : [old[0], id])}
+            onPick={(key, id) => setPicks(old => ({ ...old, [key]: id }))}/>}/>
+      </div>}
+      {parts && actions}
       <fieldset disabled={busy}>
         <legend>검토할 버전 {basis.length}개</legend>
         {rows.map((v) => (
@@ -157,18 +221,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         </>
       )}
       {error && <p role="alert">{error}</p>}
-      <div className="settings-actions">
-        <button
-          className="primary-button"
-          disabled={busy || !ready || rows.length !== basis.length}
-          onClick={apply}
-        >
-          {hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용"}
-        </button>
-        <button disabled={busy} onClick={onClose}>
-          나중에
-        </button>
-      </div>
+      {!parts && actions}
     </section>
   );
 }
