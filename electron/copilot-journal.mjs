@@ -406,7 +406,17 @@ export class CopilotJournal{
   const changed=migrating||updated.size>0||recreate.size>0;
   if(checkOnly&&changed)return {pending:true};
   const result=changed?await this.commit(vault,previous,next,recreate):{changed:false,status:await this.status(vault)};
-  if(importAll&&!result.changed&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length))result.noConversationHistory=true;
+  if(importAll&&!result.changed&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length)){
+   result.noConversationHistory=true;
+   if(requested){
+    const snapshot=await vault.snapshot();
+    if(snapshot.folders.includes(COPILOT_NOTE_FOLDER))result.snapshot=snapshot;
+    else{
+     await vault.createFolder(COPILOT_NOTE_FOLDER);
+     result.snapshot=await vault.snapshot();
+    }
+   }
+  }
   if(sources.error||incompatible)result.status.error=[sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }

@@ -4,6 +4,9 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,symlink,rename,realpath} from 'node:
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {randomUUID} from 'node:crypto';
+import {PersonalSync} from '../core/personal-sync.mjs';
+import {runGit} from '../core/git-backup.mjs';
 import {Vault} from '../core/vault.mjs';
 import {CopilotJournal} from '../electron/copilot-journal.mjs';
 import {localDate} from '../core/periodic-notes.mjs';
@@ -141,6 +144,49 @@ test('selected project history restores cached conversations after VS Code remov
  await assert.rejects(readFile(fileFor('Other')),{code:'ENOENT'});
  assert.equal((await restarted.sync(f.vault,{},true,options)).changed,false);
 });
+test('selected project with no conversation history recreates an empty Copilot Note folder',async t=>{
+ const f=await fixture(t);
+ await f.vault.createFolder('Copilot Note');
+ await rename(path.join(f.vault.root,'Copilot Note'),path.join(f.root,'trash'));
+ const options={allSessions:true,projectIds:['project']};
+ for(let attempt=0;attempt<2;attempt++){
+  const result=await f.controller.sync(f.vault,{},true,options);
+  assert.equal(result.noConversationHistory,true);
+  assert.equal(result.changed,false);
+  assert.ok(result.snapshot?.folders.includes('Copilot Note'));
+  assert.deepEqual(result.status.records,[]);
+ }
+});
+
+test('explicit project reimport restores a cached note after personal Git sync publishes its deletion',async t=>{
+ const f=await fixture(t);await f.configure(true);await f.put();
+ const options={allSessions:true,projectIds:['project']};
+ const initial=await f.controller.sync(f.vault,{},true,options);
+ const name=initial.status.records[0].sessions[0].path,file=path.join(f.vault.root,name);
+ const content=await readFile(file,'utf8');
+ const git=args=>runGit(f.vault.root,args);
+ const remote='https://example.invalid/personal.git',bare=path.join(f.root,'remote.git');
+ await git(['init','--bare','--initial-branch=main',bare]);
+ await git(['init','--initial-branch=main']);
+ await git(['config','url.'+bare.replaceAll('\\','/')+'.insteadOf',remote]);
+ const sync=new PersonalSync(f.vault,runGit,randomUUID());
+ const config={branch:'main',deviceName:'Test PC',authorName:'Writer',authorEmail:'test@example.invalid',remote};
+ await sync.sync(config,{register:true});
+ assert.match((await runGit(bare,['show','main:'+name])).stdout,/질문/);
+ await rename(path.join(f.vault.root,'Copilot Note'),path.join(f.root,'trash'));
+ await sync.sync(config);
+ const blocked=await sync.blockedSessions();
+ assert.ok(blocked.has(name));
+ await f.put('q2','자동으로 되살리지 않을 대화',f.now()+2);
+ assert.equal((await f.controller.sync(f.vault,{},false,{protectedPaths:blocked})).changed,false);
+ await rm(f.sourceFile);
+ const result=await f.controller.sync(f.vault,{},true,{...options,protectedPaths:await sync.blockedSessions({includeDeleted:false})});
+ assert.equal(result.changed,true);
+ assert.equal(await readFile(file,'utf8'),content);
+ await sync.sync(config);
+ assert.match((await runGit(bare,['show','main:'+name])).stdout,/질문/);
+});
+
 test('retrying an interrupted reimport recreates the missing file with the latest conversation',async t=>{
  const f=await fixture(t);await f.configure(true);await f.put();
  const options={allSessions:true,projectIds:['project']};

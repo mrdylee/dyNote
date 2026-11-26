@@ -662,12 +662,13 @@ export class PersonalSync {
     await this.disk.begin(config.branch, head, commit, [name]);
     await this.resume(device, config);
   }
-  async blockedSessions() {
+  async blockedSessions({ includeDeleted = true } = {}) {
     const head = await this.disk?.head();
     if (!head) return new Set();
     const files = await this.store.tree(head),
       states = await this.store.metadata(files);
     const blocked = new Set([...states.groups].filter(([, g]) => g.pending.length).map(([name]) => name));
+    if (!includeDeleted) return blocked;
     const log = await this.store.git([
       "log",
       "--full-history",

@@ -269,6 +269,19 @@ test("changed device file modes and types are preserved even when Git ignores ex
   assert.deepEqual(await readFile(target), original);
 });
 
+test("manual Copilot reimport still protects a note with unresolved Git versions", async t => {
+  const { root, store, cloud, local, config, checkpoint } = await fixture(t);
+  const name = "Copilot Note/project/session.md";
+  const base = await checkpoint(null, cloud, { [name]: "original" });
+  const first = await checkpoint(base, cloud, { [name]: "first edit" });
+  const second = await checkpoint(base, local, { [name]: "second edit" });
+  const merged = await integrate(store, first, second, local, config);
+  await store.git(["update-ref", "HEAD", merged]);
+  const sync = new PersonalSync({ root }, runGit, local.id);
+  await sync.init();
+  assert.ok((await sync.blockedSessions({ includeDeleted: false })).has(name));
+});
+
 test("personal merge preserves all variants, includes independent notes, and protects selection when a later PC edits the published value", async (t) => {
   const { root, store, config, cloud, local, late, checkpoint } = await fixture(t);
   const file = "회의록.md";

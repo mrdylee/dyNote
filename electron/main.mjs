@@ -771,8 +771,10 @@ app
       "capture-sync": (args, vault, gitBackup) => {
         checkVault(args, vault);if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
         const run=async()=>{checkVault(args,vault);
-          const protectedPaths=gitBackup.status().enabled && gitBackup.status().config?.mode==="personal-sync" ? await gitBackup.personal.blockedSessions() : undefined;
-          return copilotJournal.sync(vault,args.dailyOptions,args.checkOnly!==true && args.manual===true,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
+          const manual=args.checkOnly!==true && args.manual===true;
+          const reimport=manual && (Array.isArray(args.sessionIds) || (args.allSessions===true && Array.isArray(args.projectIds)));
+          const protectedPaths=gitBackup.status().enabled && gitBackup.status().config?.mode==="personal-sync" ? await gitBackup.personal.blockedSessions({includeDeleted:!reimport}) : undefined;
+          return copilotJournal.sync(vault,args.dailyOptions,manual,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
         };
         return args.checkOnly===true ? run() : gitBackup.enqueue(run);
       },

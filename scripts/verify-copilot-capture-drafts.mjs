@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,rename} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,realpath,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {runGit} from '../core/git-backup.mjs';
 import {Vault} from '../core/vault.mjs';
 import {CopilotJournal} from '../electron/copilot-journal.mjs';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE||'playwright');
@@ -51,11 +52,30 @@ try{
  assert.equal(status.records.length,1);
  assert.match(await readFile(path.join(personal,status.records[0].sessions[0].path),'utf8'),/질문/);
  const importedPath=path.join(personal,status.records[0].sessions[0].path),before=await readFile(importedPath);
- await rename(path.join(personal,'Copilot Note'),path.join(root,'trashed'));
+ const bare=path.join(root,'remote.git'),remote='https://example.invalid/personal.git';
+ await runGit(personal,['init','--bare','--initial-branch=main',bare]);
+ await runGit(personal,['init','--initial-branch=main']);
+ await runGit(personal,['config','url.'+bare.replaceAll('\\','/')+'.insteadOf',remote]);
+ const invoke=(method,args={})=>page.evaluate(async({method,args})=>{
+  const result=await window.notes[method](args);
+  if(!result.ok)throw new Error(result.error);
+  return result.value;
+ },{method,args:{vaultId:personalVault.id,...args}});
+ await invoke('connectGit',{config:{mode:'personal-sync',zipPaths:[],remote,branch:'main',deviceName:'Test PC',authorName:'Writer',authorEmail:'test@example.invalid'}});
+ const name=status.records[0].sessions[0].path;
+ await invoke('syncGit');
+ assert.match((await runGit(bare,['show','main:'+name])).stdout,/질문/);
+ // Keep this test's disposable trash outside the user's system Trash.
+ await app.evaluate(({shell},trash)=>{shell.trashItem=file=>process.getBuiltinModule('fs').promises.rename(file,trash);},path.join(root,'trashed'));
+ await invoke('trashFolder',{path:'Copilot Note'});
+ await invoke('syncGit');
+ assert.equal((await runGit(bare,['ls-tree','--name-only','main','--',name])).stdout.trim(),'');
  await rm(path.join(source,'project/chatSessions/session.json'));
  await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
- await page.waitForFunction(async id=>(await window.notes.snapshot({vaultId:id})).value.notes.some(note=>note.path.startsWith('Copilot Note/')),personalVault.id);
+ await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true,disabled:false}).waitFor();
+ await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();
  assert.deepEqual(await readFile(importedPath),before);
+ await invoke('disconnectGit');
  assert.equal(await readFile(path.join(team,'Home.md'),'utf8'),'# Original\n');
  assert.deepEqual(await page.evaluate(id=>JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`)),teamVault.id),drafts[teamVault.id]);
  await settings().getByRole('button',{name:'닫기',exact:true}).click();
@@ -70,4 +90,5 @@ try{
  assert.equal(await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).isDisabled(),false);
  assert.deepEqual(errors,[]);
  console.log('Copilot capture: selecting projects imports their chats without session selection; team drafts preserved; own drafts block writes and can be reviewed without losing content.');
-}finally{await app?.close();await rm(root,{recursive:true,force:true});}
+}catch(error){app?.process().kill();throw error;}
+finally{if(app&&!app.process().killed)await app.close();await rm(root,{recursive:true,force:true});}
