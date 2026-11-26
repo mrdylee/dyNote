@@ -4,7 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { history, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { wikiSyntax } from "../src/live-preview.mjs";
-import { runMarkdownFormat, runTextColor } from "../src/editorCommands.mjs";
+import { runMarkdownFormat, runTextColor, runTextSize } from "../src/editorCommands.mjs";
 import { runSelectionOrLine } from "../src/format-line.mjs";
 
 function editor(doc, anchor, head = anchor, readOnly = false) {
@@ -79,4 +79,27 @@ test("implicit formatting leaves metadata, code, non-prose lines and read-only o
   const composing = editor("한글 입력", 1);
   composing.composing = true;
   assert.equal(bold(composing), false);
+});
+
+test("the toolbar can resize, recolor and reset pending formatting before the first character", () => {
+  const view = editor("", 0);
+  const size = value => runSelectionOrLine(view, target => runTextSize(target, value));
+  assert.ok(size("1.25em"));
+  assert.ok(size("1.5em"));
+  assert.equal(view.state.doc.toString(), '<span style="font-size:1.5em"></span>');
+  assert.ok(runSelectionOrLine(view, target => runTextColor(target, "#abcdef")));
+  assert.ok(size(null));
+  const result = '<span style="color:#abcdef"></span>';
+  assert.equal(view.state.doc.toString(), result);
+  assert.equal(view.state.selection.main.head, result.indexOf("</span>"));
+});
+
+test("implicit formatting preserves the callout header while its body can be styled", () => {
+  const source = "> [!NOTE] 메모\n> 상세 내용";
+  const view = editor(source, 10);
+  assert.equal(bold(view), false);
+  assert.equal(view.state.doc.toString(), source);
+  view.dispatch({ selection: { anchor: source.indexOf("상세") } });
+  assert.ok(bold(view));
+  assert.equal(view.state.doc.toString(), source.replace("상세 내용", "**상세 내용**"));
 });

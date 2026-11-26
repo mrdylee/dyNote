@@ -1,3 +1,4 @@
+import { startsCallout } from "../core/callout.mjs";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection } from "@codemirror/state";
 
@@ -8,6 +9,7 @@ export function lineContent(state, line, tree) {
     if (node.to <= line.from || node.from >= line.to) return false;
     if (/^(FencedCode|CodeBlock|HTMLBlock|Table)$/.test(node.name)) return false;
     if (/^(Paragraph|Task|ATXHeading[1-6]|SetextHeading[12])$/.test(node.name)) {
+      if (node.from >= line.from && startsCallout(node.node, state.sliceDoc(node.from, line.to))) return false;
       from = Math.max(line.from, node.from);
       to = Math.min(line.to, node.to);
     } else if (from != null) {
@@ -27,6 +29,7 @@ export function lineContent(state, line, tree) {
     if (style.from === from && style.to === to) {
       from = style.firstChild.to;
       to = style.lastChild.from;
+      if (from === to) return EditorSelection.cursor(from);
     }
   }
   return from < to ? EditorSelection.range(from, to) : null;

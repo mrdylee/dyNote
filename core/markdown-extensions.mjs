@@ -1,3 +1,4 @@
+import { calloutHeader } from "./callout.mjs";
 import { installTextStyle, textWithoutStyleMarkup } from "./text-color.mjs";
 import { installOutlineRegions } from "./outline-regions.mjs";
 import { headingId } from "./headings.mjs";
@@ -109,9 +110,7 @@ export function installMarkdownExtensions(
         inline.children = [input, ...children];
       }
       if (token.type === "blockquote_open" && inline?.type === "inline") {
-        const match = /^\[!([a-z]+)\][+-]?(?:[ \t]+([^\n]*))?(?:\n|$)/i.exec(
-          inline.content,
-        );
+        const match = calloutHeader.exec(inline.content);
         if (match) {
           token.attrSet("class", "callout");
           token.attrSet("data-callout", match[1].toLowerCase());

@@ -1,3 +1,4 @@
+import { startsCallout } from "./callout.mjs";
 import { textSizeOptions } from "./text-size-options.mjs";
 
 const sizes = textSizeOptions.flatMap(({ value }) => value ? [value] : []);
@@ -93,9 +94,9 @@ export function rewriteTextStyle(source, tree, targets, selections, property, va
     output += open; map(start, end, output.length); output += source.slice(start, end) + "</span>";
     raw(end, to);
   };
-  const frontmatter = /^\uFEFF?---\n[\s\S]*?\n(?:---|\.\.\.)(?:\n|$)/.exec(source)?.[0].length ?? 0;
+  let protectedUntil = /^\uFEFF?---\n[\s\S]*?\n(?:---|\.\.\.)(?:\n|$)/.exec(source)?.[0].length ?? 0;
   const text = (from, to, current) => {
-    if (from < frontmatter) { const end = Math.min(to, frontmatter); raw(from, end); from = end; }
+    if (from < protectedUntil) { const end = Math.min(to, protectedUntil); raw(from, end); from = end; }
     if (from >= to) return;
     const boundaries = [from, to];
     for (const range of targets) for (const pos of [range.from, range.to]) if (pos > from && pos < to) boundaries.push(pos);
@@ -117,7 +118,12 @@ export function rewriteTextStyle(source, tree, targets, selections, property, va
     text(pos, to, current);
   };
   const walk = (node, current = null) => {
-    if (node.to <= frontmatter || block.has(node.name) || /(?:Mark|Delimiter)$/.test(node.name)) { raw(node.from, node.to); return; }
+    if (node.name === "Paragraph" && node.parent?.name === "Blockquote") {
+      const newline = source.indexOf("\n", node.from);
+      const end = newline < 0 ? node.to : Math.min(newline, node.to);
+      if (startsCallout(node, source.slice(node.from, end))) protectedUntil = Math.max(protectedUntil, end);
+    }
+    if (node.to <= protectedUntil || block.has(node.name) || /(?:Mark|Delimiter)$/.test(node.name)) { raw(node.from, node.to); return; }
     if (!current && !overlaps(node.from, node.to)) { raw(node.from, node.to); return; }
     if (node.name === "TextStyle") {
       const span = readStyleSpan(source, node.from);

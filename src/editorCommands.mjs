@@ -30,6 +30,7 @@ const markdownMarkers = { bold: "**", italic: "*", strike: "~~", code: "`" };
 export function runMarkdownFormat(view, format) {
   if (!view || view.state.readOnly || !Object.hasOwn(markdownMarkers, format)) return false;
   const state = view.state;
+  const marks = { bold: "StrongEmphasis", italic: "Emphasis", strike: "Strikethrough" };
   const formatRange = range => {
     let { from, to } = range;
     let text = state.sliceDoc(from, to);
@@ -55,6 +56,36 @@ export function runMarkdownFormat(view, format) {
         return { changes: { from, to, insert: text }, range: EditorSelection.range(from, from + text.length) };
       }
     }
+    // Merge complete runs of the requested style when a selection also contains plain text.
+    // Two different runs can start and end with the same marker without enclosing the selection.
+    if (format !== "code" && /[*_~]/.test(text)) {
+      const delimiters = [];
+      let whole;
+      tree?.iterate({ from, to, enter(ref) {
+        if (ref.name !== marks[format] || ref.from < from || ref.to > to) return;
+        const node = ref.node;
+        if (ref.from === from && ref.to === to) whole = node;
+        // In ***text*** the strong run can sit just inside the emphasis markers.
+        if (format === "bold" && ref.from === from + 1 && ref.to === to - 1 && node.parent?.name === "Emphasis"
+          && node.parent.from === from && node.parent.to === to) whole = node;
+        delimiters.push(node.firstChild, node.lastChild);
+      } });
+      if (whole) {
+        const body = state.sliceDoc(from, whole.firstChild.from) + state.sliceDoc(whole.firstChild.to, whole.lastChild.from)
+          + state.sliceDoc(whole.lastChild.to, to);
+        return { changes: { from, to, insert: body }, range: EditorSelection.range(from, from + body.length), addsStyle: false };
+      }
+      if (delimiters.length) {
+        let body = "", pos = from;
+        for (const mark of delimiters.sort((a, b) => a.from - b.from)) {
+          body += state.sliceDoc(pos, mark.from);
+          pos = mark.to;
+        }
+        body += state.sliceDoc(pos, to);
+        return { changes: { from, to, insert: marker + body + marker },
+          range: EditorSelection.range(from + marker.length, from + marker.length + body.length), addsStyle: true };
+      }
+    }
     const selectedWrapper = text.length >= marker.length * 2 && text.startsWith(marker) && text.endsWith(marker)
       && (format !== "italic" || (/^\*+/.exec(text)[0].length % 2 === 1 && /\*+$/.exec(text)[0].length % 2 === 1));
     const surroundingWrapper = from >= marker.length && state.sliceDoc(from - marker.length, from) === marker
@@ -69,11 +100,12 @@ export function runMarkdownFormat(view, format) {
       insert = marker + pad + text + pad + marker;
       anchor = from + marker.length + pad.length; head = anchor + text.length;
     }
-    return { changes: { from, to, insert }, range: EditorSelection.range(anchor, head) };
+    return { changes: { from, to, insert }, range: EditorSelection.range(anchor, head), addsStyle: !selectedWrapper && !surroundingWrapper };
   };
   const multiline = range => format !== "code" && state.doc.lineAt(range.from).number !== state.doc.lineAt(range.to).number;
   const multilineRanges = state.selection.ranges.filter(multiline);
-  const tree = multilineRanges.length && ensureSyntaxTree(state, state.doc.lineAt(multilineRanges.at(-1).to).to, 100);
+  const needsTree = multilineRanges.length || (format !== "code" && state.selection.ranges.some(r => /[*_~]/.test(state.sliceDoc(r.from, r.to))));
+  const tree = needsTree ? ensureSyntaxTree(state, state.doc.lineAt(state.selection.ranges.at(-1).to).to, 100) : null;
   if (multilineRanges.length && !tree) return false;
   const startOfBody = multilineRanges.length ? frontmatterEnd(state.doc) : 0;
   const changes = state.changeByRange(range => {
@@ -86,11 +118,11 @@ export function runMarkdownFormat(view, format) {
       const body = lineContent(state, line, tree);
       if (!body) continue;
       const from = Math.max(range.from, body.from), to = Math.min(range.to, body.to);
-      if (from < to && /\S/.test(state.sliceDoc(from, to))) edits.push(formatRange({ from, to }).changes);
+      if (from < to && /\S/.test(state.sliceDoc(from, to))) edits.push(formatRange({ from, to }));
     }
     // A mixed selection gains the style on its plain lines; a fully styled selection removes it.
-    const addsStyle = edit => edit.insert.length > edit.to - edit.from;
-    const combined = state.changes(edits.some(addsStyle) ? edits.filter(addsStyle) : edits);
+    const additions = edits.filter(edit => edit.addsStyle);
+    const combined = state.changes((additions.length ? additions : edits).map(edit => edit.changes));
     return { changes: combined, range: range.map(combined) };
   });
   if (changes.changes.empty) return false;

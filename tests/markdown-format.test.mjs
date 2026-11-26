@@ -120,3 +120,28 @@ test("multiline formatting fills mixed styles and stops at a trailing line bound
   runMarkdownFormat(view, "bold");
   assert.equal(view.state.doc.toString(), "**기존**\n**일반**\n끝");
 });
+
+for (const [format, marker, tag] of [["bold", "**", "strong"], ["italic", "*", "em"], ["strike", "~~", "s"]]) {
+  test(`applying ${format} across separately styled words includes the plain words between them`, () => {
+    const plain = "하나 중간 둘";
+    const line = marker + "하나" + marker + " 중간 " + marker + "둘" + marker;
+    const source = line + "\n\n다음 줄";
+    const view = editor(source, 0, source.length);
+    assert.ok(runMarkdownFormat(view, format));
+    const saved = view.state.doc.toString();
+    assert.equal(saved, marker + plain + marker + "\n\n" + marker + "다음 줄" + marker);
+    assert.ok(renderMarkdown(saved, [], "메모.md").includes(`<${tag}>${plain}</${tag}>`));
+    assert.ok(undo(view));
+    assert.equal(view.state.doc.toString(), source);
+  });
+}
+
+test("toggling existing underscore and nested emphasis removes only the requested marks", () => {
+  for (const [source, format, expected] of [
+    ["__메모__", "bold", "메모"], ["_메모_", "italic", "메모"], ["***메모***", "bold", "*메모*"]
+  ]) {
+    const view = editor(source, 0, source.length);
+    runMarkdownFormat(view, format);
+    assert.equal(view.state.doc.toString(), expected);
+  }
+});

@@ -189,3 +189,19 @@ test("sized notes retain natural titles, searchable phrases, literal code and li
   const legacy = buildKnowledge([{ path: "Legacy.md", content: "도입\r\r쪽" + sized("지") + " 고정" }]).notes;
   assert.equal(searchNotes(legacy, '"쪽지 고정"')[0].path, "Legacy.md");
 });
+
+test("sizing or coloring a whole callout preserves its title and styles the body", () => {
+  const header = "> [!NOTE] 메모";
+  const doc = header + "\n> 본문";
+  for (const apply of [editor => runTextSize(editor, "1.5em"), editor => runTextColor(editor, "#1565c0")]) {
+    const editor = view(doc, 0, doc.length);
+    assert.equal(apply(editor), true);
+    const result = editor.state.doc.toString();
+    assert.equal(result.split("\n")[0], header);
+    const html = renderMarkdown(result, [], "Home.md");
+    assert.match(html, /class="callout-title">메모<\/strong>/);
+    assert.match(html, /<span style="[^"]+">본문<\/span>/);
+    undo(editor);
+    assert.equal(editor.state.doc.toString(), doc);
+  }
+});
