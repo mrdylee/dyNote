@@ -93,6 +93,16 @@ test("requests enforce size, role and model boundaries without silently truncati
   assert.throws(() => prepareRequest(request({ mode: "edit", context: { kind: "none" } })), /문서/);
 });
 
+test("Agent and Edit share the instruction to preserve Markdown tables during cell edits", () => {
+  const tableRule = (mode) => sessionOptions("test-model", mode).systemMessage.content
+    .split("\n").find(line => line.includes("Markdown table"));
+  const rule = tableRule("edit");
+  assert.match(rule, /cell/);
+  assert.match(rule, /delimiter row/);
+  assert.equal(tableRule("agent"), rule);
+  assert.equal(tableRule("chat"), undefined);
+});
+
 test("sessions expose no tools, disable discovery and reject permissions", () => {
   const options = sessionOptions("test-model", "chat");
   assert.deepEqual(options.availableTools, []);
