@@ -32,6 +32,12 @@ function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active
 function DocumentPane(props) {
   const {note,notes,vault,mode,active,onFocus,onContext,fonts,onFontSettings,onChange,onImportFiles,onLink,onPreviewLink,jump,disabled,pending,edits}=props;
   const searchHost=useRef(null),editor=useRef(null),preview=useRef(null),selection=useRef(null);
+  const readingPreview = useRef(false);
+  const trackReadingSide = event => {
+    if (mode !== "split") return;
+    if (preview.current?.contains(event.target)) readingPreview.current = true;
+    else if (event.target.closest(".code-editor")) readingPreview.current = false;
+  };
   const [findMode,setFindMode]=useState(null);
   const renderedOpen=active && mode===findMode;
   useEffect(()=>{setFindMode(null);},[active,mode]);
@@ -77,13 +83,14 @@ function DocumentPane(props) {
     }else onChange(note.path,note.content+(note.content.endsWith('\n\n')?'':note.content.endsWith('\n')?'\n':'\n\n')+text+'\n',vault.id);
     props.onTabLinkInserted(key,{x:event.clientX,y:event.clientY});
   };
-  return <PaneReadingPosition mode={mode} content={note.content} jump={jump} header={searchHost} editor={editor} preview={preview}><Pane {...props} searchHost={searchHost} renderedFind={renderedFind} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+  return <PaneReadingPosition mode={mode} readingPreview={readingPreview} content={note.content} jump={jump} header={searchHost} editor={editor} preview={preview}><Pane {...props} searchHost={searchHost} renderedFind={renderedFind} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
       {pending.userEdited&&<p>직접 편집한 내용이 포함되어 있습니다. 유지하거나 복구본을 저장해 주세요.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
     </section>}>
     {pending&&compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
-    <div className="editor-preview">
+    <div className="editor-preview" onWheelCapture={trackReadingSide} onPointerDownCapture={trackReadingSide}
+      onFocusCapture={trackReadingSide} onKeyDownCapture={trackReadingSide}>
       {mode!=='read'&&<Editor searchHost={searchHost} note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
       {(mode==='read'||mode==='split')&&<DiagramPreview tabIndex={-1} previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/>}
     </div>

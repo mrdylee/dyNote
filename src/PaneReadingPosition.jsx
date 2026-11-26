@@ -73,6 +73,10 @@ function previewTop(preview, { line, fraction }) {
 }
 
 export default class PaneReadingPosition extends Component {
+  usesPreview(mode) {
+    return mode === "read" || (mode === "split" && this.props.readingPreview.current);
+  }
+
   // Capture while the old editor/preview and its original layout still exist.
   getSnapshotBeforeUpdate(previous) {
     if (previous.mode === this.props.mode) return null;
@@ -81,7 +85,10 @@ export default class PaneReadingPosition extends Component {
     const pane = header.parentElement;
     if (pane.scrollTop <= 0) return { start: true };
     const y = header.getBoundingClientRect().bottom + 1;
-    if (previous.mode === "read") return previewAnchor(this.props.preview.current, y);
+    if (this.usesPreview(previous.mode)) {
+      const anchor = previewAnchor(this.props.preview.current, y);
+      if (anchor) return anchor;
+    }
     const view = this.props.editor.current;
     if (!view) return null;
     const pos = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y }, false);
@@ -97,7 +104,8 @@ export default class PaneReadingPosition extends Component {
     const pane = header.parentElement;
     if (anchor.start) { pane.scrollTop = 0; return; }
 
-    const view = this.props.editor.current, preview = this.props.preview.current;
+    const preview = this.props.preview.current;
+    const view = this.usesPreview(this.props.mode) ? null : this.props.editor.current;
     this.pending = anchor;
     const pos = view && editorPosition(view, anchor.line, anchor.fraction);
     const targetY = () => header.getBoundingClientRect().bottom + 1 + anchor.offset;
@@ -126,6 +134,7 @@ export default class PaneReadingPosition extends Component {
     }
     this.events = new AbortController();
     const options = { capture: true, passive: true, signal: this.events.signal };
+    if (this.props.mode === "split") pane.addEventListener("focusin", this.cancel, options);
     for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
       pane.addEventListener(event, this.cancel, options);
     schedule();

@@ -214,12 +214,12 @@ try {
   await page.locator('.file-row[title="Other.md"]').dragTo(first, { targetPosition: { x: box.width - 10, y: 28 } });
   await other.waitFor();
   // Use visible paragraph text as the oracle, independent of the app's source mapping.
-  const paragraphOffset = (pane, section, align = false) => pane.evaluate((el, {section, align}) => {
+  const paragraphOffset = (pane, section, align = false, preview = false) => pane.evaluate((el, {section, align, preview}) => {
     const text = `내용 ${section}`;
     const y = el.querySelector(".pane-header").getBoundingClientRect().bottom;
     const cm = el.querySelector(".cm-content");
     let top;
-    if (cm) {
+    if (cm && !preview) {
       const view = cm.cmTile.root.view, pos = view.state.doc.toString().indexOf(`**${text}**`);
       top = view.coordsAtPos(pos)?.top ?? view.documentTop + view.lineBlockAt(pos).top;
     } else {
@@ -228,15 +228,16 @@ try {
     }
     if (align) el.scrollTop += top - y + 3;
     return top - y;
-  }, {section, align});
-  const place = async (pane, section) => {
-    await pane.hover();
+  }, {section, align, preview});
+  const place = async (pane, section, side) => {
+    const preview = side === "preview";
+    await (side ? pane.locator(preview ? ".markdown-preview" : ".cm-content") : pane).hover();
     await page.mouse.wheel(0, 80);
     await page.waitForTimeout(100);
     for (let i = 0; i < 5; i++) {
-      await paragraphOffset(pane, section, true);
+      await paragraphOffset(pane, section, true, preview);
       await page.waitForTimeout(100);
-      if (Math.abs(await paragraphOffset(pane, section) + 3) < 10) return;
+      if (Math.abs(await paragraphOffset(pane, section, false, preview) + 3) < 10) return;
     }
     assert.fail(`could not position the test at paragraph ${section}`);
   };
@@ -272,6 +273,36 @@ try {
   const wrappedOffset = await paragraphOffset(first, 130);
   assert.ok(Math.abs(wrappedOffset + 3) < 32, `paragraph after a long wrapped line moved to ${wrappedOffset}`);
   assert.equal(await other.evaluate(el => el.scrollTop), otherScroll);
+  await switchMode("분할 보기");
+  await place(first, 45, "preview");
+  assert.ok(Math.abs(await paragraphOffset(first, 45)) > 80, "the editor and preview show different source positions");
+  const firstSplitScroll = await first.evaluate(el => el.scrollTop);
+  await other.locator(".pane-title").click();
+  await switchMode("분할 보기");
+  await place(other, 20, "preview");
+  await place(other, 26, "editor");
+  const otherSplitScroll = await other.evaluate(el => el.scrollTop);
+  assert.equal(await first.evaluate(el => el.scrollTop), firstSplitScroll);
+
+  await first.locator(".pane-title").click();
+  for (const target of ["읽기 보기", "편집 보기", "Live Preview"]) {
+    await switchMode(target);
+    await page.waitForTimeout(250);
+    const offset = await paragraphOffset(first, 45);
+    assert.ok(Math.abs(offset + 3) < 32, `preview paragraph moved to ${offset} in ${target}`);
+    assert.equal(await other.evaluate(el => el.scrollTop), otherSplitScroll);
+    await switchMode("분할 보기");
+    await page.waitForTimeout(250);
+    const restored = await paragraphOffset(first, 45, false, true);
+    assert.ok(Math.abs(restored + 3) < 32, `returning to split moved the preview paragraph to ${restored}`);
+  }
+  const restoredFirst = await first.evaluate(el => el.scrollTop);
+  await other.locator(".pane-title").click();
+  await switchMode("읽기 보기");
+  await page.waitForTimeout(250);
+  assert.ok(Math.abs(await paragraphOffset(other, 26) + 3) < 32, "using the editor again makes it the reading side");
+  assert.equal(await first.evaluate(el => el.scrollTop), restoredFirst);
+  report.checks.push("each split pane follows its last used side when leaving and returning, without scrolling its neighbour");
   assert.equal(await readFile(`${vaultRoot}/Long.md`, "utf8"), longText);
   assert.equal(await readFile(`${vaultRoot}/Other.md`, "utf8"), longText);
   report.checks.push("two independently scrolled panes retain their paragraphs across live, source, split and reading modes");
