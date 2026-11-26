@@ -6,6 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import fs, { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { PersonalSync, installDevice } from "../core/personal-sync.mjs";
+import { integrate } from "../core/personal-sync-merge.mjs";
 import { conflictFolder } from "../core/personal-sync-store.mjs";
 import { runGit } from "../core/git-backup.mjs";
 
@@ -635,4 +636,135 @@ test("renaming a device keeps its identity, and deregistration blocks a stale de
   const joined = await a.sync();
   assert.equal(joined.devices.length, 2);
   assert.equal((await a.read("offline.md")).toString(), "kept");
+});
+
+async function conflictingPCs(t) {
+  const {pc} = await fixture(t);
+  const [a, b, c] = await Promise.all(["A", "B", "C"].map(name => pc(name)));
+  const file = "meeting.md";
+  await a.write(file, "0");
+  for (const device of [a, b, c]) await device.sync({register:true});
+  await a.sync();
+  await b.sync();
+  await a.write(file, "a");
+  await b.write(file, "b");
+  await a.sync();
+  await b.sync();
+  await a.sync();
+  async function choose(device, value) {
+    const {basis, versions} = await device.service.versions(file);
+    for (const version of versions) {
+      if (String(await device.service.preview(file, version.commit)) === value)
+        return device.service.resolve(device.cfg, file, basis, version.commit);
+    }
+    assert.fail("Missing review candidate: " + value);
+  }
+  return {a, b, c, file, choose};
+}
+
+test("offline decisions and subsequent edits keep their own source commits", async t => {
+  const {a, b, file, choose} = await conflictingPCs(t);
+  await choose(a, "a");
+  await choose(b, "b");
+  await b.write(file, "b edited");
+  await a.sync();
+  await b.sync();
+  await a.sync();
+  const {versions} = await a.service.versions(file);
+  const alternatives = await Promise.all(versions.map(async v => String(await a.service.preview(file, v.commit))));
+  assert.deepEqual(alternatives.sort(), ["a", "b", "b edited"]);
+  await choose(a, "b edited");
+  await a.sync();
+  await b.sync();
+  assert.equal(String(await b.read(file)), "b edited");
+  assert.deepEqual((await b.service.versions(file)).basis, []);
+});
+
+for (const choiceFirst of [true, false]) {
+  test(`published text remains selectable beside an unseen edit (choice published first: ${choiceFirst})`, async t => {
+    const {a, b, c, file, choose} = await conflictingPCs(t);
+    await choose(b, "a");
+    await c.write(file, "c");
+    if (choiceFirst) await b.sync();
+    await c.sync();
+    await b.sync();
+    await a.sync();
+    assert.equal(String(await a.read(file)), "a");
+    const {versions} = await a.service.versions(file);
+    const alternatives = await Promise.all(versions.map(async v => String(await a.service.preview(file, v.commit))));
+    assert.deepEqual(alternatives.sort(), ["a", "c"]);
+    await choose(a, "a");
+    await a.sync();
+    await c.sync();
+    assert.equal(String(await c.read(file)), "a");
+    assert.deepEqual((await c.service.versions(file)).basis, []);
+  });
+}
+
+test("local resolution completes while a previous remote query is still waiting", async t => {
+  const {b, file} = await conflictingPCs(t);
+  const {GitController} = await import("../electron/git-controller.mjs");
+  const controller = new GitController({
+    settingsFile:path.join(path.dirname(b.root), "settings.json"), isPersonal:() => true, setTimer:() => null,
+  });
+  const config = {...b.cfg, mode:"personal-sync"};
+  Object.assign(controller, {
+    vault:{id:"B", root:b.root}, canonicalRoot:b.root, personal:b.service,
+    current:{enabled:true, config, phase:"synced"}, records:{B:{...config, enabled:true}},
+  });
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  const remoteHead = b.service.store.remoteHead.bind(b.service.store);
+  t.mock.method(b.service.store, "remoteHead", async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return remoteHead(...args);
+  });
+  const {basis, versions} = await b.service.versions(file);
+  const poll = controller.sync("B", {automatic:true});
+  await entered.promise;
+  const applied = controller.personalAction("B", {action:"resolve", path:file, basis, commit:versions.find(v => v.device === "B").commit});
+  let timeout;
+  try {
+    await Promise.race([applied, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("Local apply waited for the remote query")), 15000);
+    })]);
+    assert.equal(String(await b.read(file)), "b");
+  } finally {
+    clearTimeout(timeout);
+    release.resolve();
+    await Promise.all([poll, applied]);
+    await controller.tail;
+    controller.close();
+  }
+});
+
+test("retry repairs an unpublished beta.6 decision merge from its parents and retains its original head", async t => {
+  const {a, b, file, choose} = await conflictingPCs(t);
+  await choose(a, "a");
+  await choose(b, "b");
+  const {store, disk} = b.service, device = {id:b.service.deviceId, name:"B"};
+  const decision = await disk.head();
+  await b.write(file, "b edited");
+  await b.service.checkpointFile(b.cfg, file, "후속 편집");
+  const edit = await disk.head();
+  await a.sync();
+  await store.git(["fetch", "--", b.cfg.remote, "main"]);
+  const remote = await disk.head("FETCH_HEAD");
+  const merged = await integrate(store, remote, edit, device, b.cfg);
+  const files = await store.tree(merged), folder = conflictFolder(file);
+  const record = (await store.metadata(files)).groups.get(file).versions.get(decision);
+  const legacyTree = await store.writeTree(merged, new Map([
+    [folder + decision + ".json", await store.storeRecord({...record, blob:(await store.tree(edit)).get(file).oid})],
+    [folder + edit + ".json", null],
+  ]));
+  const legacy = await store.commitTree(legacyTree, [remote, edit], "개인노트 변경 통합", device, b.cfg);
+  await disk.begin(b.cfg.branch, edit, legacy);
+  await b.service.resume(device, b.cfg);
+  await b.sync();
+  assert.equal(await disk.head("refs/dynote-sync/recovery/" + legacy), legacy);
+  await a.sync();
+  await choose(a, "b edited");
+  await a.sync();
+  await b.sync();
+  assert.equal(String(await b.read(file)), "b edited");
 });

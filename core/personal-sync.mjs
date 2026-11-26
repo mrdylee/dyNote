@@ -385,11 +385,30 @@ export class PersonalSync {
         )
           throw new Error("버전 기록이 브랜치의 원본을 가리키지 않습니다.");
         const original = (await this.store.tree(record.commit)).get(record.path);
-        if ((original?.oid ?? null) !== record.blob) throw new Error("버전 기록과 원본 파일의 내용이 다릅니다.");
+        if ((original?.oid ?? null) !== record.blob)
+          throw Object.assign(new Error("버전 기록과 원본 파일의 내용이 다릅니다."), {invalidMerge:ref, invalidRecord:name});
       }
     }
   }
-  async sync(input, { force = true, register = false, onStage = () => {} } = {}) {
+  async rebuildUnpublishedDecision(error, head, device, config) {
+    if (!head || error.invalidMerge !== head) return null;
+    const [subject, parents] = (await this.store.git(["show", "-s", "--format=%s%n%P", head])).stdout.trim().split("\n");
+    const refs = parents?.split(" ") ?? [];
+    if (subject !== "개인노트 변경 통합" || refs.length !== 2) return null;
+    const rebuilt = await integrate(this.store, refs[0], refs[1], device, config);
+    const [before, after] = await Promise.all([head, rebuilt].map(ref => this.store.tree(ref)));
+    const changes = checkTreeChanges(before, after);
+    if (!changes.has(error.invalidRecord)) return null;
+    for (const name of changes) {
+      // Only replace the rejected version record or add missing candidates. Preserve all visible files.
+      if (!name.startsWith(syncPrefix + "conflicts/") || !after.has(name) || (before.has(name) && name !== error.invalidRecord))
+        return null;
+    }
+    await this.validateRange(refs[0], rebuilt);
+    await this.store.git(["update-ref", "refs/dynote-sync/recovery/" + head, head]);
+    return rebuilt;
+  }
+  async sync(input, { force = true, register = false, onStage = () => {}, querySignal } = {}) {
     const config = personalConfig(input),
       device = deviceRecord(this.deviceId, config.deviceName);
     const times = {};
@@ -402,10 +421,23 @@ export class PersonalSync {
       onStage(name, done, time);
     };
     const queryRemote = async () => {
+      const signal = querySignal;
+      if (signal?.aborted) return;
       stage("remote-query");
-      const remote = await this.store.remoteHead(config);
-      stage("remote-query", true);
-      return remote;
+      const interrupted = Promise.withResolvers();
+      signal?.addEventListener("abort", interrupted.resolve, {once:true});
+      try {
+        const result = this.store.remoteHead(config, signal);
+        const remote = signal ? await Promise.race([result, interrupted.promise]) : await result;
+        if (!signal?.aborted) {
+          stage("remote-query", true);
+          return remote;
+        }
+      } catch (error) {
+        if (!signal?.aborted) throw error;
+      } finally {
+        signal?.removeEventListener("abort", interrupted.resolve);
+      }
     };
     const applyJob = async () => {
       if (!(await this.disk.job())) return true;
@@ -487,6 +519,7 @@ export class PersonalSync {
     let unacknowledgedHead = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       let remote = await queryRemote();
+      if (querySignal?.aborted) return status(true);
       if (seen && !remote) throw historyError("원격 브랜치가 삭제되었습니다. 로컬 기록을 보존했습니다.");
       if (remote) {
         if (remote !== seen) {
@@ -536,6 +569,17 @@ export class PersonalSync {
         .split("\n")
         .filter(Boolean);
       for (const saved of inputs) merged = await integrate(this.store, merged, saved, device, config);
+      // Validate new records before adopting the merge on disk or moving the local branch.
+      try {
+        await this.validateRange(remote, merged);
+      } catch (error) {
+        const rebuilt = await this.rebuildUnpublishedDecision(error, head, device, config);
+        if (!rebuilt || attempt === 3) throw error;
+        await this.disk.begin(config.branch, head, rebuilt);
+        if (!(await applyJob())) return status(true);
+        head = rebuilt;
+        continue;
+      }
       if (merged !== head) {
         await this.disk.begin(config.branch, head, merged);
         if (!(await applyJob())) return status(true);
@@ -551,7 +595,7 @@ export class PersonalSync {
       stage("push");
       if (remote && (await this.store.git(["merge-base", "--is-ancestor", remote, head], { allow: [0, 1] })).code)
         throw historyError("원격 이력 보호를 위해 업로드를 중지했습니다.");
-      await this.validateRange(remote, head);
+      await this.validateRange(merged, head);
       const dst = "refs/heads/" + config.branch;
       try {
         const result = await this.store.git([
@@ -570,6 +614,7 @@ export class PersonalSync {
         if (["push-denied", "branch-policy", "authentication", "ownership", "storage-full", "git-missing"].includes(error.syncReason))
           throw error;
         const latest = await queryRemote().catch(() => { throw error; });
+        if (querySignal?.aborted) return status(true);
         if (latest === head) {
           if (error.syncReason !== "non-fast-forward") stage("push", true);
         }

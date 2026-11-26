@@ -361,6 +361,25 @@ test("simultaneous decisions survive even if one chooses the already published c
   assert.equal((await store.blob((await store.tree(chosen)).get(name).oid)).toString(), "2시");
 });
 
+test("a beta.6 review with only a late edit regains the still-visible decision", async t => {
+  const {store, config, cloud, local, late, checkpoint} = await fixture(t);
+  const file = "meeting.md";
+  const base = await checkpoint(null, cloud, {[file]:"0"});
+  const a = await checkpoint(base, cloud, {[file]:"a"});
+  const b = await checkpoint(base, local, {[file]:"b"});
+  const review = await integrate(store, a, b, local, config);
+  const choice = await chooseVersion(store, review, file, [a, b], a, local, config);
+  const c = await checkpoint(base, late, {[file]:"c"});
+  const withLate = await integrate(store, review, c, late, config);
+  const choiceRecord = [...await store.tree(choice)].find(([key]) => key.endsWith(".choice.json"));
+  const tree = await store.writeTree(withLate, new Map([choiceRecord]));
+  const legacy = await store.commitTree(tree, [withLate, choice], "개인노트 변경 통합", local, config);
+  assert.deepEqual((await store.metadata(await store.tree(legacy))).groups.get(file).pending, [c]);
+  const recovered = await normalizePublished(store, legacy, local, config);
+  assert.deepEqual((await store.metadata(await store.tree(recovered))).groups.get(file).pending, [choice,c].sort());
+  assert.equal(await normalizePublished(store, recovered, local, config), recovered);
+});
+
 test("a new clone reconstructs edits published by a plain Git client while review was open", async (t) => {
   const { store, config, cloud, local, checkpoint } = await fixture(t);
   const name = "meeting.md",
