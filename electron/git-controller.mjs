@@ -81,7 +81,7 @@ export class GitController {
     if (id !== this.vault?.id) return;
     this.revision++;
     if (this.current.enabled && this.current.config?.mode==="personal-sync" && this.personal) this.scheduleBatch();
-    if (this.current.enabled && !["saving", "error"].includes(this.current.phase)) this.publish({ phase: "pending", message: "Git 자동 저장 대기 중" });
+    if (this.current.enabled && !["saving", "error"].includes(this.current.phase)) this.publish({ phase: "pending", message: "자동 저장 대기 중" });
   }
   scheduleBatch(since = this.personal?.firstDirty ?? this.now().getTime()) {
     if(!this.personal || this.batchTimer || !this.due())return;
@@ -508,7 +508,7 @@ export class GitController {
       }
       await this.persist();
       this.retryAfter = 0;
-      return this.publish({ ...result, ...(revision !== this.revision ? { phase: "pending", message: "새 변경사항 Git 저장 대기 중" } : {}) });
+      return this.publish({ ...result, ...(revision !== this.revision ? { phase: "pending", message: "새 변경사항 저장 대기 중" } : {}) });
     } catch (error) {
       if (progress) return this.personalError(error,progress);
       this.retryAfter = this.now().getTime() + 10 * 60 * 1000;
