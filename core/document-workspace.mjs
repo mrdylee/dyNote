@@ -24,6 +24,15 @@ export function workspaceAction(value, action) {
     const paths = [...new Set(state.paths.map(key => key === path ? action.to : key))];
     return {...state, paths, active:state.active === path ? action.to : state.active, modes};
   }
+  if (action.type === 'remove-tree') {
+    const keep = key => {
+      const ref = documentRef(key);
+      return ref.vaultId !== action.vaultId || !(ref.path === path || (action.folder && ref.path.startsWith(path + '/')));
+    };
+    const paths = state.paths.filter(keep);
+    return {...state, paths, active:keep(state.active) ? state.active : paths.at(-1) ?? null,
+      modes:Object.fromEntries(Object.entries(state.modes).filter(([key]) => keep(key)))};
+  }
   if (action.type === 'reconcile' || action.type === 'close' || action.type === 'reconcile-vault') {
     const paths = state.paths.filter(p => {
       if (action.type === 'close') return p !== path;

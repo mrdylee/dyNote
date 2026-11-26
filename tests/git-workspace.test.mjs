@@ -36,6 +36,12 @@ test('GIT-01 clean fast-forward pull succeeds and dirty worktree is preserved',a
  assert.equal(typeof tools.GitWorkspace,'function');const {dir,root}=await fixture(t),git=new tools.GitWorkspace(root),remote=`${dir}/remote.git`,other=`${dir}/other`;
  await runGit(dir,['init','--bare',remote]);await runGit(root,['remote','add','origin',remote]);await runGit(root,['push','--set-upstream','origin','main']);await runGit(dir,['clone','--branch','main','--',remote,other]);await runGit(other,['config','user.name','Fixture']);await runGit(other,['config','user.email','fixture@example.test']);
  await writeFile(`${other}/A.md`,'remote\n');await runGit(other,['add','--','A.md']);await runGit(other,['commit','-m','remote']);await runGit(other,['push']);
+ await assert.rejects(git.action({kind:'pull'},async apply=>{
+   await writeFile(`${root}/A.md`,'edited during download\n');
+   return apply();
+ }),/변경사항/);
+ assert.equal(await readFile(`${root}/A.md`,'utf8'),'edited during download\n');
+ await runGit(root,['restore','--','A.md']);
  await git.action({kind:'fetch'});await git.action({kind:'pull'});assert.equal(await readFile(`${root}/A.md`,'utf8'),'remote\n');
  await writeFile(`${root}/A.md`,'dirty\n');await assert.rejects(git.action({kind:'pull'}),/변경사항/);assert.equal(await readFile(`${root}/A.md`,'utf8'),'dirty\n');
  await git.action({kind:'stage',path:'A.md'});await git.action({kind:'commit',message:'local diverged'});const localHead=(await runGit(root,['rev-parse','HEAD'])).stdout;

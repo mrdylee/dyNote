@@ -1,3 +1,4 @@
+import { VaultOperations } from "./vault-operations.mjs";
 import { documentRef } from "../core/document-workspace.mjs";
 import { contextMenuTemplate } from "./context-menu.mjs";
 import {
@@ -14,11 +15,11 @@ import {
   powerMonitor,
 } from "electron";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, lstat, realpath, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, realpath, readdir } from "node:fs/promises";
 import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Vault, validFilePath, validNotePath } from "../core/vault.mjs";
+import { Vault, validNotePath } from "../core/vault.mjs";
 import { canTrashFolder, managedCopilotPath, treeRenameDestination } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
@@ -75,9 +76,7 @@ let stickyNotes;
 let recovery;
 let registry;
 let vaultError = "";
-let restoring = false;
-let exclusiveVaultId = null;
-let activeMutations = 0;
+const vaultOperations = new VaultOperations();
 let gitBackup;
 const openedVaults = new Map();
 let copilot;
@@ -175,8 +174,7 @@ async function stickyVault(root) {
 }
 
 async function saveStickyNote(root, relative, content, revision) {
-  if (restoring) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
-  activeMutations++;
+  const release = vaultOperations.begin([root]);
   try {
     const { vault: target, git } = await stickyVault(root);
     const saved = revision ? await git.saveNote(relative,content,revision,()=>target.save(relative,content,revision)) : await target.create(relative, content);
@@ -184,7 +182,7 @@ async function saveStickyNote(root, relative, content, revision) {
     if (window && !window.webContents.isDestroyed()) window.webContents.send("notes:sticky-saved", { vaultId: target.id, note: saved });
     return saved;
   } finally {
-    activeMutations--;
+    release();
   }
 }
 
@@ -205,7 +203,7 @@ async function finishQuit() {
     if (stickyNotes && !await stickyNotes.flushForQuit()) return;
     await temporaryDocuments?.dispose();
     if (updateInstallation) {
-      if (activeMutations || restoring) throw new Error("저장 작업이 진행 중이어서 업데이트를 연기했습니다.");
+      if (vaultOperations.active) throw new Error("저장 작업이 진행 중이어서 업데이트를 연기했습니다.");
       await launchUpdate(await updateInstallation);
     }
     quitReady = true;
@@ -678,7 +676,7 @@ app
       "update-download": () => updates.download(),
       "update-show": async () => {shell.showItemInFolder(await updates.readyPath());return true;},
       "update-install": async () => {
-        if (updateInstallation || quitRequested || closePending || activeMutations || restoring) throw new Error("다른 작업이 끝난 후 업데이트를 설치해 주세요.");
+        if (updateInstallation || quitRequested || closePending || vaultOperations.active) throw new Error("다른 작업이 끝난 후 업데이트를 설치해 주세요.");
         const pending = updates.beginInstall(args => stageUpdate({ ...args, directory: updates.directory, executable: process.execPath }));
         updateInstallation = pending;
         try {
@@ -771,14 +769,14 @@ app
             if (registry.purposes[vault.root] !== "team") throw new Error("동기화할 팀 보관함을 다시 선택해 주세요.");
             const backup = gitBackup.status();
             try {
-              const status = await workspace.syncTeam(backup.enabled ? backup.config : null, remote => cloudBridge?.checkNoteRemote?.(remote));
+              const status = await workspace.syncTeam(backup.enabled ? backup.config : null, remote => cloudBridge?.checkNoteRemote?.(remote), operation => vault.applySyncChanges(operation));
               return {status};
             }
             catch (error) { return { status:{phase:"error", message:error.message} }; }
           }
           if (["create-branch", "switch-branch", "delete-branch"].includes(args.action?.kind) && gitBackup.status().enabled)
             throw new Error("브랜치를 변경하기 전에 자동 Git 백업을 꺼 주세요.");
-          const status = await workspace.action(args.action);
+          const status = await workspace.action(args.action, operation => vault.applySyncChanges(operation));
           const snapshot = ["pull", "switch-branch", "create-branch"].includes(args.action.kind) ? await vault.snapshot() : null;
           return { status, snapshot };
         });
@@ -1048,7 +1046,7 @@ app
           ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
           : vault.moveFile(args.from, args.to, args.revision);
       },
-      "rename-tree-entry": (args, vault, gitBackup) => gitBackup.enqueue(async () => {
+      "rename-tree-entry": (args, vault, gitBackup) => gitBackup.enqueueLocal(async () => {
         checkVault(args, vault);
         if (typeof args.from !== "string" || typeof args.name !== "string" || typeof args.folder !== "boolean")
           throw new Error("이름을 바꿀 파일 또는 폴더를 선택해 주세요.");
@@ -1081,23 +1079,9 @@ app
       },
       "trash-folder": (args, vault, gitBackup) => {
         checkVault(args, vault);
-        return gitBackup.enqueue(async () => {
+        return gitBackup.enqueueLocal(() => {
           checkVault(args, vault);
-          if (!validFilePath(`${args.path}/folder.md`) || !canTrashFolder(args.path, args.protectedFolders))
-            throw new Error("기본 폴더이거나 허용되지 않는 폴더 경로입니다.");
-          if (await realpath(vault.root) !== vault.root) throw new Error("보관함 경로가 바뀌었습니다. 보관함을 다시 열어 주세요.");
-          await vault.snapshot();
-          let folder = vault.root;
-          for (const part of args.path.split("/")) {
-            folder = path.join(folder, part);
-            const stat = await lstat(folder);
-            if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("보관함 안의 일반 폴더만 휴지통으로 이동할 수 있습니다.");
-          }
-          folder = await realpath(folder);
-          const relative = path.relative(vault.root, folder);
-          if (!relative || path.isAbsolute(relative) || relative.split(path.sep).includes("..")) throw new Error("보관함 밖 폴더는 휴지통으로 이동할 수 없습니다.");
-          await shell.trashItem(folder);
-          return { path: args.path, systemTrash: true };
+          return vault.trashFolder(args.path, args.protectedFolders, folder => shell.trashItem(folder));
         });
       },
       "restore-trash": (args, vault) => {
@@ -1114,23 +1098,29 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
+        const globalOperation = ["pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories"].includes(name);
+        const transfer = name === "move-across-vaults" || name === "copy-file";
+        const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
+        const exclusive = globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
-        let locked = false;
+        let release;
         try {
           validateSender(event);
           const scoped = args?.workspace === true && scopedActions.has(name);
           const target = scoped ? workspaceVault(args.vaultId) : vault;
           if (scoped) checkVault(args, target);
           if (!readOnly) {
-            const independentMutation = exclusiveVaultId && target && target.id !== exclusiveVaultId && !exclusive;
-            if ((restoring && !independentMutation) || (exclusive && activeMutations)) throw new Error("다른 저장 작업이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
-            if (exclusive) {
-              restoring = true;
-              if (name === "capture-sync" && args?.manual !== true || name === "git-workspace-action" && args?.action?.kind === "sync-team")
-                exclusiveVaultId = target?.id ?? null;
+            const roots = target && !globalOperation ? [target.root] : [];
+            if (target && transfer && args?.sourceVaultId) {
+              const source = workspaceVault(args.sourceVaultId);
+              if (source) roots.push(source.root);
             }
-            activeMutations++; locked = true;
+            if (name === "transfer-dropped-file" && args?.operation === "move" && typeof args.source === "string") {
+              for (const {vault: source} of openedVaults.values()) {
+                if (args.source.startsWith(source.root + path.sep)) roots.push(source.root);
+              }
+            }
+            release = vaultOperations.begin(roots, exclusive, exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry");
           }
           const entry = openedVaults.get(target?.id);
           if (entry && scoped) {
@@ -1150,10 +1140,7 @@ app
         } catch (error) {
           return { ok: false, error: error.message };
         } finally {
-          if (locked) {
-            activeMutations--;
-            if (exclusive) { restoring = false; exclusiveVaultId = null; }
-          }
+          release?.();
         }
       });
     ipcMain.on("notes:close-ready", (event, id, ready) => {
@@ -1162,7 +1149,7 @@ app
       const { mode, timer } = closePending;
       clearTimeout(timer);
       closePending = null;
-      if (ready === false || restoring) {
+      if (ready === false || vaultOperations.blocksClose) {
         const showMain = quitRequested;
         quitRequested = false;
         if (showMain) showMainWindow();
@@ -1180,7 +1167,7 @@ app
       if (quitReady || window.webContents.isDestroyed()) return;
       event.preventDefault();
       if (finishingQuit) return;
-      if (restoring) { quitRequested = false; void cancelUpdateInstallation("진행 중인 작업이 있어 업데이트를 연기했습니다."); return; }
+      if (vaultOperations.blocksClose) { quitRequested = false; void cancelUpdateInstallation("진행 중인 작업이 있어 업데이트를 연기했습니다."); return; }
       if (window.webContents.isCrashed()) {
         if (updateInstallation) { quitRequested = false; void cancelUpdateInstallation("문서 상태를 확인할 수 없어 업데이트를 중지했습니다. 앱을 다시 연 뒤 시도해 주세요."); return; }
         quitRequested = true;

@@ -119,6 +119,7 @@ const EXTERNAL_TAB_DRAG = "application/x-dynote-external-tab";
 const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(([name, method]) => [
   name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
 ]));
+const includesTreePath = (target, path) => path === target.path || (target.folder && path?.startsWith(target.path + "/"));
 const emptyFiles = [];
 const stickyBoardKey = "sticky-board";
 const isReadyDraft = draft => draft && !draft.running && draft.content !== null;
@@ -586,6 +587,8 @@ export default function App() {
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
   const captureScanning = useRef(false);
+  const [treeWrites, setTreeWrites] = useState([]);
+  const writingPath = (id, path) => treeWrites.some(target => target.vaultId === id && includesTreePath(target, path));
   const [fileTarget, setFileTarget] = useState(null);
   const dismissModal = useCallback(() => {
     setModal(null);
@@ -935,7 +938,7 @@ export default function App() {
   },[]);
   const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
   const updateComposing = useRef(false);
-  updateContext.current = { busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
+  updateContext.current = { treeWriting: treeWrites.length > 0, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
   const installUpdate = async (automatic = false) => {
     if (updateRequest.current) return;
     if (updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
@@ -962,7 +965,7 @@ export default function App() {
     if (!updateState?.installSupported || updateState.phase !== "ready" || !updateState.preferences.autoInstall || !tag || dismissedUpdate === tag || updateState.preferences.ignored.includes(tag) || updateState.installation?.tag === tag) return;
     updateInteraction.current = Date.now();
     const timer = setInterval(() => {
-      if (updateContext.current.busy || updateContext.current.modal || audioActive.current || updateComposing.current) { updateInteraction.current = Date.now(); return; }
+      if (updateContext.current.busy || updateContext.current.treeWriting || updateContext.current.modal || audioActive.current || updateComposing.current) { updateInteraction.current = Date.now(); return; }
       if (Date.now() - updateInteraction.current >= 60000) automaticInstall();
     }, 1000);
     return () => clearInterval(timer);
@@ -996,6 +999,7 @@ export default function App() {
           api.confirmClose(id, false);
           return;
         }
+        if (updateContext.current.treeWriting) { api.confirmClose(id, false); return; }
         if (mode === "quit") await editsRef.current.close();
         await flush(true);
         await Promise.all(draftsRef.current.map(persistDocumentDraft));
@@ -1265,7 +1269,7 @@ export default function App() {
     changeFile(note.path, content);
   };
   const changeFile = (path, content, id = vault?.id, allowCreate = false) => {
-    if (editState.forVault(id).edit(path, content)) return;
+    if (writingPath(id, path) || editState.forVault(id).edit(path, content)) return;
     const scope = vaultsRef.current[id];
     const field = documentKind(path) ? "documents" : "notes";
     const source = scope?.[field].find(file => file.path === path);
@@ -1873,37 +1877,66 @@ export default function App() {
   };
   const alterFile = async (event) => {
     event?.preventDefault();
-    setBusy(true);
+    const { vaultId, path, folder } = fileTarget;
+    const action = modal;
+    const background = action === "trash" || action === "rename";
+    if (treeWrites.some(target => target.vaultId === vaultId)) {
+      setError("이 보관함의 파일 작업이 끝난 뒤 다시 시도해 주세요.");
+      return;
+    }
+    const scope = vaultsRef.current[vaultId];
+    let to;
+    if (action === "rename") {
+      try {
+        to = treeRenameDestination(path, newName, folder);
+        if (to === path) throw new Error("현재 이름과 다른 이름을 입력해 주세요.");
+        const existing = [...scope.notes, ...scope.documents, ...scope.attachments, ...(scope.otherFiles ?? []), ...(scope.wordDocuments ?? [])];
+        if (scope.folders.includes(to) || existing.some(file => file.path === to)) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
+      } catch (error) { setError(error.message); return; }
+    }
+    if (background) {
+      setTreeWrites(old => [...old, { ...fileTarget, action }]);
+      setModal(null);
+    } else setBusy(true);
     try {
-      await flush();
-      const vaultId = fileTarget.vaultId;
-      const revision = revisionMap(vaultId).get(fileTarget.path) ?? fileTarget.revision;
-      const preferences = vaultsRef.current[vaultId]?.journalPreferences;
-      if (modal === "rename") {
-        const from = fileTarget.path, folder = fileTarget.folder;
-        const to = treeRenameDestination(from, newName, folder);
-        const snapshot = await invoke(api.renameTreeEntry({ vaultId, from, name: newName, folder, revision, protectedFolders: protectedTreeFolders(preferences) }));
-        applyWorkspaceRename(vaultId, from, to, snapshot);
+      if (action !== "trash" || [...scope.notes, ...scope.documents].some(file => includesTreePath(fileTarget, file.path) && queue.get(vaultId, file.path)))
+        await flush(false, vaultId);
+      const revision = revisionMap(vaultId).get(path) ?? fileTarget.revision;
+      const protectedFolders = protectedTreeFolders(scope.journalPreferences);
+      if (action === "rename") {
+        const snapshot = await invoke(api.renameTreeEntry({ vaultId, from: path, name: newName, folder, revision, protectedFolders }));
+        if (!vaultsRef.current[vaultId]) return;
+        queue.markChanged(vaultId);
+        applyWorkspaceRename(vaultId, path, to, snapshot);
         setTreeReveal({ vaultId, folder: to.split('/').slice(0, -1).join('/') });
-      } else if (modal === "move") {
-        await moveWorkspaceFile(vaultId, fileTarget.path, newName.trim(), revision);
+      } else if (action === "move") {
+        await moveWorkspaceFile(vaultId, path, newName.trim(), revision);
         if (/\.(md|canvas|base)$/i.test(newName.trim())) openNote(newName.trim(), vaultId);
         else await openAttachment(newName.trim(), "", vaultId);
+        setModal(null);
       } else {
-        const item = await invoke(
-          fileTarget.folder
-            ? api.trashFolder({ vaultId, path: fileTarget.path, protectedFolders: protectedTreeFolders(preferences) })
-            : api.trashFile({ vaultId, path: fileTarget.path, revision }),
-        );
+        const item = await invoke(folder ? api.trashFolder({ vaultId, path, protectedFolders }) : api.trashFile({ vaultId, path, revision }));
+        if (!vaultsRef.current[vaultId]) return;
+        queue.markChanged(vaultId);
+        const removed = name => includesTreePath(fileTarget, name);
+        const remaining = files => files.filter(file => !removed(file.path));
+        updateVault(vaultId, old => {
+          const navigation = { recent: old.navigation.recent.filter(name => !removed(name)), bookmarks: old.navigation.bookmarks.filter(name => !removed(name)) };
+          persist(`dynote.navigation.${vaultId}`, navigation);
+          return { ...old, navigation, notes: remaining(old.notes), documents: remaining(old.documents), attachments: remaining(old.attachments),
+            otherFiles: remaining(old.otherFiles ?? []), wordDocuments: remaining(old.wordDocuments ?? []), folders: old.folders.filter(name => !removed(name)) };
+        });
+        for (const name of revisionMap(vaultId).keys()) if (removed(name)) revisionMap(vaultId).delete(name);
+        workspace.dispatch({ type: "remove-tree", vaultId, path, folder });
+        setTabs(old => old.filter(key => { const ref = documentRef(key); return ref.vaultId !== vaultId || !removed(ref.path); }));
+        setAttachment(old => old?.vaultId === vaultId && removed(old.path) ? null : old);
         setLastTrash({ ...item, vaultId });
-        updateNavigation({ type: "remove", path: fileTarget.path }, vaultId);
-        install(await invoke(api.snapshot({ vaultId })));
       }
-      setModal(null);
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      if (background) setTreeWrites(old => old.filter(target => target.vaultId !== vaultId));
+      else setBusy(false);
     }
   };
   const restoreLast = async () => {
@@ -2186,7 +2219,7 @@ export default function App() {
     return document && {
       note: document, notes, vault: scope, journalPaths: journalPaths.get(vaultId),
       scopeLabel: together ? spaceLabel(scope) : undefined,
-      captureLocked: automaticCaptureId === vaultId,
+      captureLocked: automaticCaptureId === vaultId || writingPath(vaultId, path),
       edits: editState.forVault(vaultId),
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
@@ -2644,9 +2677,9 @@ export default function App() {
               onImportFiles={files => importFiles(files, vault.id)} onLink={followEditorLink}
               jump={editorJump?.vaultId === vault.id ? editorJump : null}
               fonts={fonts} onFontSettings={() => { setSettingsTab("fonts"); setModal("settings"); }}
-              disabled={!registryReady || busy || captureLocked || edits.blocked()} capture={captureControls}/>
+              disabled={!registryReady || busy || captureLocked || edits.blocked()} isPathLocked={path => writingPath(vault.id, path)} capture={captureControls}/>
             : section === "planner" ? <Planner key={vault.id} api={api} session={aiSession} vaultId={vault.id} notes={raw}
-              disabled={busy || (aiSession.provider === "copilot" ? edits.drafts.some(draft => draft.path === BOARD_PATH) : edits.blocked())}
+              disabled={busy || writingPath(vault.id, BOARD_PATH) || (aiSession.provider === "copilot" ? edits.drafts.some(draft => draft.path === BOARD_PATH) : edits.blocked())}
               onOpen={openNote}
               onImported={file => setVault(old => ({...old, attachments:[...(old.attachments??[]),file]}))}
               onSave={async (content, expectedRevision) => {
@@ -2675,9 +2708,9 @@ export default function App() {
             ) : externalPreview ? externalPreview : structured && !attachment ? (
               structured.kind === "canvas" ? <CanvasEditor key={`${vault.id}:${structured.path}`} document={structured}
                 files={[...model.notes, ...documents, ...(vault.attachments ?? [])]} attachments={vault.attachments ?? []} vaultId={vault.id}
-                onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy || captureLocked} />
+                onChange={(content) => changeFile(structured.path, content)} onOpen={openFile} onExternal={openExternal} onError={setError} readOnly={busy || captureLocked || writingPath(vault.id, structured.path)} />
                 : <BasesView key={`${vault.id}:${structured.path}`} document={structured} notes={model.notes}
-                  onChange={(content) => changeFile(structured.path, content)} onNoteChange={changeFile} onOpen={openFile} onError={setError} readOnly={busy || captureLocked} />
+                  onChange={(content) => changeFile(structured.path, content)} onNoteChange={changeFile} onOpen={openFile} onError={setError} readOnly={busy || captureLocked || writingPath(vault.id, structured.path)} />
             ) : attachment ? (
               <div className="attachment-view">
                 <div className="attachment-heading">
@@ -2737,7 +2770,7 @@ export default function App() {
                   />
                 )}
               </div>
-            ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || edits.blocked()} onError={setError}/>
+            ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || writingPath(vault.id, note.path) || edits.blocked()} onError={setError}/>
             : activeDocumentDraft ? null : note ? (
               <DocumentWorkspace workspace={workspace} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
@@ -2787,6 +2820,9 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
+            {treeWrites.map(target => <span key={target.vaultId} role="status" title={target.path}>
+              {target.action === "trash" ? "휴지통으로 이동 중…" : "이름 변경 중…"}
+            </span>)}
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             {connectedSpaces.filter(scope => scope.id !== vault.id && scope.purpose === "personal" && gitStates[scope.id]?.phase === "saving").map(scope => {
               const label = `${gitStates[scope.id].message} · ${scope.name}`;
@@ -3482,13 +3518,16 @@ export default function App() {
             onDiff={(path, staged) => invoke(api.gitWorkspaceDiff({ vaultId: gitVault.id, path, staged }))}
             onOpen={(path) => { openFile(path, gitVault.id); setModal(null); }}
             onAction={async (action) => {
-              setBusy(true);
+              const id = gitVault.id;
+              if (!["fetch", "commit", "unstage", "delete-branch"].includes(action.kind)) await flush(false, id);
               try {
-                await flush();
-                const result = await invoke(api.gitWorkspaceAction({ vaultId: gitVault.id, action }));
-                if (result.snapshot) install(result.snapshot);
+                const result = await invoke(api.gitWorkspaceAction({ vaultId: id, action }));
+                if (result.snapshot && vaultsRef.current[id]) acceptSnapshot(result.snapshot);
                 return result.status;
-              } finally { setBusy(false); }
+              } catch (error) {
+                setError(error.message);
+                throw error;
+              }
             }}/>}
           {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && !gitVault.id && <p>먼저 보관함에서 노트 폴더를 선택해 주세요.</p>}
           {["git", "personal-sync"].includes(settingsTab) && gitVault.id && <GitSettings startPersonal={settingsTab === "personal-sync"} key={`${settingsTab}:${gitVault.id}:${gitSettingsStatus.config?.remote ?? ""}`} status={gitSettingsStatus} space={gitVault.root ? gitVault : null} onManageSpaces={() => setSettingsTab("vault")}

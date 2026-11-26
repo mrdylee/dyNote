@@ -76,6 +76,13 @@ export class GitController {
   enqueue(action) {
     const result = this.tail.then(action); this.tail = result.catch(() => {}); return result;
   }
+  enqueueLocal(action) {
+    if (this.current.config?.mode === "personal-sync") {
+      this.remoteQueries.abort();
+      this.remoteQueries = new AbortController();
+    }
+    return this.enqueue(action);
+  }
   check(id) { if (id !== this.vault?.id) throw new Error("보관함이 변경되었습니다. Git 설정을 다시 열어 주세요."); }
   markDirty(id) {
     if (id !== this.vault?.id) return;
@@ -131,7 +138,7 @@ export class GitController {
     if(!this.current.enabled || this.current.config?.mode!=="personal-sync")return save();
     try { return await save(); } catch(error) {
       if (!this.isPersonal(this.vault) || (error.code!=="ENOENT" && !/외부.*변경/.test(error.message))) throw error;
-      return this.enqueue(async()=>{
+      return this.enqueueLocal(async()=>{
         const service=await this.startPersonal();
         const draft=await service.saveDraft(name,content,revision,this.current.config);
         if(!draft)throw error;
@@ -141,12 +148,7 @@ export class GitController {
     }
   }
   async personalAction(id,args) {
-    if (args.action === "resolve" && id === this.vault?.id && this.current.config?.mode === "personal-sync") {
-      // Yield read-only remote lookups. Local writes and pushes still finish under the same queue.
-      this.remoteQueries.abort();
-      this.remoteQueries = new AbortController();
-    }
-    return this.enqueue(async()=>{
+    const run = async () => {
       this.check(id);
       if (!this.current.enabled || this.current.config?.mode!=="personal-sync") throw new Error("개인 동기화를 먼저 연결해 주세요.");
       const service=await this.startPersonal();await service.init();
@@ -187,7 +189,8 @@ export class GitController {
         }
         throw error;
       }
-    });
+    };
+    return args.action === "resolve" && id === this.vault?.id ? this.enqueueLocal(run) : this.enqueue(run);
   }
   schedule() {
     this.close();

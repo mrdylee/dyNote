@@ -16,7 +16,7 @@ import { attachmentMime, validateAttachment, decodeHtml } from "./attachments.mj
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createLinkIndex, resolvePath, rewriteLinks, rewriteLinkPaths, scanLinks } from "./links.mjs";
-import { renamedTreePath } from "./file-tree.mjs";
+import { canTrashFolder, renamedTreePath } from "./file-tree.mjs";
 import { documentKind, initialDocument, validateDocument } from "./documents.mjs";
 import { parseCanvas, rewriteCanvas, rewriteCanvasPaths } from "./canvas.mjs";
 import { noteAliases, parseMetadata } from "./metadata.mjs";
@@ -287,7 +287,7 @@ export class Vault {
   }
 
   captureSelection(paths) { return this.#enqueue(() => this.#captureSelection(paths)); }
-  applyPersonalSync(operation) { return this.#enqueue(operation); }
+  applySyncChanges(operation) { return this.#enqueue(operation); }
 
   async #restoreTarget(relative, validPath = validFilePath) {
     if (!validPath(relative)) throw new Error("잘못된 복원 경로입니다.");
@@ -1048,6 +1048,23 @@ export class Vault {
         throw error;
       }
       return this.#snapshot();
+    });
+  }
+
+  trashFolder(relative, protectedFolders, moveToTrash) {
+    return this.#enqueue(async () => {
+      if (!validFilePath(relative + "/folder.md") || !canTrashFolder(relative, protectedFolders))
+        throw new Error("기본 폴더이거나 허용되지 않는 폴더 경로입니다.");
+      if (await realpath(this.root) !== this.root) throw new Error("보관함 경로가 바뀌었습니다. 보관함을 다시 열어 주세요.");
+      let folder = this.root;
+      for (const part of relative.split("/")) {
+        folder = path.join(folder, part);
+        const stat = await lstat(folder);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("보관함 안의 일반 폴더만 휴지통으로 이동할 수 있습니다.");
+      }
+      if (await realpath(folder) !== folder) throw new Error("보관함 폴더 경로가 바뀌었습니다.");
+      await moveToTrash(folder);
+      return { path: relative, systemTrash: true };
     });
   }
 

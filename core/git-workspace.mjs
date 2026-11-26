@@ -1,3 +1,5 @@
+import {readFile} from 'node:fs/promises';
+import path from 'node:path';
 import {GitBackup,runGit,validateGitConfig} from './git-backup.mjs';
 import {validFilePath} from './vault.mjs';
 import {localOnlyFiles} from './git-file-status.mjs';
@@ -126,7 +128,7 @@ export class GitWorkspace {
     }
     return {url,remoteBranch,upstream:upstream?.startsWith('refs/remotes/') ? upstream : null,author:saved ?? {}};
   }
-  async syncTeam(config,checkNoteRemote){
+  async syncTeam(config,checkNoteRemote,applyChanges = operation => operation()){
     if(!await this.backup.repository())return {phase:'setup',message:'팀 노트 Git 저장소를 먼저 연결해 주세요.'};
     const branch=(await this.git(['symbolic-ref','--quiet','--short','HEAD'],{allow:[0,1]})).stdout.trim();
     if(!branch)return {phase:'setup',message:'팀 저장소에서 동기화할 로컬 브랜치를 선택해 주세요.'};
@@ -155,30 +157,33 @@ export class GitWorkspace {
     for(const oid of new Set([remote,previous].filter(Boolean)))
       if((await this.git(['ls-tree','--name-only',oid,'--','.dynote-sync'])).stdout)
         throw new Error('개인 노트 동기화 기록이 있는 저장소입니다. 팀 전용 저장소를 확인해 주세요.');
-    await this.backup.assertReady({branch});
-    // Native Git knows which CRLF checkouts match their stored blobs. Stage actual edits with their original bytes.
-    const state=await this.git(['--no-optional-locks','status','--porcelain=v1','--no-renames','--untracked-files=all','-z'],{nativeCheckout:true});
-    const dirty=new Set(state.stdout.split('\0').filter(Boolean).map(row=>row.slice(3)));
-    if(dirty.size)await this.backup.checkpoint(target.author,(await this.backup.safePaths()).filter(name=>dirty.has(name)));
-    const local=await head('HEAD');
-    let next=local || remote;
-    if(remote && local && remote!==local && !await ancestor(remote,local)){
-      if(await ancestor(local,remote))next=remote;
-      else {
-        const result=await this.git(['merge-tree','--write-tree','--no-messages',local,remote],{allow:[0,1]});
-        if(result.code)throw new Error('팀 노트의 변경사항이 충돌합니다. 양쪽 원문은 Git 커밋에 보존했습니다. Git에서 충돌을 해결한 뒤 다시 동기화해 주세요.');
-        const author=[];
-        if(target.author.authorName)author.push('-c','user.name='+target.author.authorName);
-        if(target.author.authorEmail)author.push('-c','user.email='+target.author.authorEmail);
-        next=(await this.git([...author,'commit-tree','--no-gpg-sign',result.stdout.trim(),'-p',local,'-p',remote,'-m','팀 노트 동기화'])).stdout.trim();
-      }
-    }
-    if(next && next!==local){
+    const next = await applyChanges(async () => {
       await this.backup.assertReady({branch});
-      if(await head('HEAD')!==local)throw new Error('팀 브랜치가 변경되었습니다. 다시 동기화해 주세요.');
-      const applied=await this.git(['merge','--ff-only','--no-overwrite-ignore','--no-autostash','--',next],{allow:[0,1,128],nativeCheckout:true});
-      if(applied.code)throw new Error('받을 파일과 같은 경로에 로컬 변경이 있거나 파일을 교체할 수 없습니다. 로컬 파일을 확인한 뒤 다시 동기화해 주세요.');
-    }
+      // Native Git knows which CRLF checkouts match their stored blobs. Stage actual edits with their original bytes.
+      const state=await this.git(['--no-optional-locks','status','--porcelain=v1','--no-renames','--untracked-files=all','-z'],{nativeCheckout:true});
+      const dirty=new Set(state.stdout.split('\0').filter(Boolean).map(row=>row.slice(3)));
+      if(dirty.size)await this.backup.checkpoint(target.author,(await this.backup.safePaths()).filter(name=>dirty.has(name)));
+      const local=await head('HEAD');
+      let next=local || remote;
+      if(remote && local && remote!==local && !await ancestor(remote,local)){
+        if(await ancestor(local,remote))next=remote;
+        else {
+          const result=await this.git(['merge-tree','--write-tree','--no-messages',local,remote],{allow:[0,1]});
+          if(result.code)throw new Error('팀 노트의 변경사항이 충돌합니다. 양쪽 원문은 Git 커밋에 보존했습니다. Git에서 충돌을 해결한 뒤 다시 동기화해 주세요.');
+          const author=[];
+          if(target.author.authorName)author.push('-c','user.name='+target.author.authorName);
+          if(target.author.authorEmail)author.push('-c','user.email='+target.author.authorEmail);
+          next=(await this.git([...author,'commit-tree','--no-gpg-sign',result.stdout.trim(),'-p',local,'-p',remote,'-m','팀 노트 동기화'])).stdout.trim();
+        }
+      }
+      if(next && next!==local){
+        await this.backup.assertReady({branch});
+        if(await head('HEAD')!==local)throw new Error('팀 브랜치가 변경되었습니다. 다시 동기화해 주세요.');
+        const applied=await this.git(['merge','--ff-only','--no-overwrite-ignore','--no-autostash','--',next],{allow:[0,1,128],nativeCheckout:true});
+        if(applied.code)throw new Error('받을 파일과 같은 경로에 로컬 변경이 있거나 파일을 교체할 수 없습니다. 로컬 파일을 확인한 뒤 다시 동기화해 주세요.');
+      }
+      return next;
+    });
     if(next && next!==remote){
       // Require both ancestry and the exact observed remote tip. A rewind or concurrent deletion can never be pushed over.
       if(remote && !await ancestor(remote,next))throw new Error('원격 팀 브랜치의 이력을 보호하기 위해 업로드를 중지했습니다.');
@@ -191,7 +196,7 @@ export class GitWorkspace {
     const files=await localOnlyFiles(args=>this.git(args),validFilePath);
     return {phase:'synced',message:'팀 노트 동기화됨'+(files.length ? ' · 이 기기에만 있는 파일 '+files.length+'개' : ''),localOnlyFiles:files};
   }
-  async action(input){
+  async action(input, applyChanges = operation => operation()){
     if(!input || typeof input.kind!=='string')throw new Error('Git 작업을 선택해 주세요.');
     if(input.kind==='init'){
       if(!await this.backup.repository())await this.git(['init','--initial-branch=main']);
@@ -215,7 +220,29 @@ export class GitWorkspace {
       const state=await this.status(),remote=input.remote || (state.remotes.includes('origin')?'origin':state.remotes[0]);
       if(!remote || !state.remotes.includes(remote) || remote.startsWith('-'))throw new Error('원격 저장소를 먼저 연결해 주세요.');
       if(input.kind==='fetch')await this.git(['fetch','--',remote]);
-      else {await this.clean();await this.git(['pull','--no-rebase','--ff-only','--no-autostash']);}
+      else {
+        await this.clean();
+        const branch=state.branchName;
+        const merge=branch && (await this.git(['config','--get-all',`branch.${branch}.merge`],{allow:[0,1]})).stdout.trim();
+        if (!merge || merge.includes('\n')) {
+          // Let Git handle repositories without a single configured merge branch.
+          await applyChanges(async () => { await this.clean(); await this.git(['pull','--no-rebase','--ff-only','--no-autostash']); });
+        } else {
+          const before=(await this.git(['rev-parse','--verify','HEAD'],{allow:[0,128]})).stdout;
+          await this.git(['fetch']);
+          const fetchFile = (await this.git(['rev-parse','--git-path','FETCH_HEAD'])).stdout.trim();
+          const heads = [...(await readFile(path.resolve(this.root,fetchFile),'utf8')).matchAll(/^([0-9a-f]+)\t\t/gm)];
+          if (heads.length !== 1) throw new Error('가져온 원격 브랜치를 확인할 수 없습니다. 브랜치 설정을 확인해 주세요.');
+          const incoming = heads[0][1];
+          await applyChanges(async () => {
+            if ((await this.git(['symbolic-ref','--short','HEAD'])).stdout.trim()!==branch ||
+                (await this.git(['rev-parse','--verify','HEAD'],{allow:[0,128]})).stdout!==before)
+              throw new Error('가져오는 동안 현재 브랜치가 변경되었습니다. 다시 시도해 주세요.');
+            await this.clean();
+            await this.git(['merge','--ff-only','--no-autostash','--',incoming]);
+          });
+        }
+      }
     } else if(['create-branch','switch-branch','delete-branch'].includes(input.kind)){
       const branch=await this.branch(input.branch);
       await this.clean();

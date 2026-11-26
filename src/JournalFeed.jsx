@@ -20,7 +20,7 @@ function ReceivedLinks({note,records,notes,onOpen}) {
     ? <button className="capture-record-title" key={name} onClick={()=>onOpen(name)}>{title}</button>
     : <p key={name}>연결된 대화 파일 확인 필요 · {title}</p>);
 }
-export default function JournalFeed({notes,preferences,vault,currentDate,pendingDate,conflicts,onReview,onOpen,onChange,onImportFiles,onLink,jump,fonts,onFontSettings,disabled,capture}) {
+export default function JournalFeed({notes,preferences,vault,currentDate,pendingDate,conflicts,onReview,onOpen,onChange,onImportFiles,onLink,jump,fonts,onFontSettings,disabled,isPathLocked,capture}) {
   const [editingDate,setEditingDate]=useState(null),[count,setCount]=useState(14);
   const today=editingDate??currentDate;
   const editor=useRef(null),focused=useRef(false);
@@ -35,7 +35,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
     catch(e){return {templateError:e.message};}
   },[target,todayNote,preferences,notes]);
   const current=todayNote??draft;
-  const readOnly=disabled||(!todayNote&&today===pendingDate);
+  const readOnly=disabled||isPathLocked?.(current?.path)||(!todayNote&&today===pendingDate);
   useEffect(()=>{
     const view=editor.current;
     if(!view||readOnly||focused.current)return;

@@ -262,8 +262,8 @@ export class PersonalSync {
     while (true) {
       const job = await this.disk.job();
       if (job && job.branch !== config.branch) throw new Error("진행 중인 적용 작업의 브랜치가 다릅니다.");
-      const result = this.vault.applyPersonalSync
-        ? await this.vault.applyPersonalSync(() => this.disk.resume())
+      const result = this.vault.applySyncChanges
+        ? await this.vault.applySyncChanges(() => this.disk.resume())
         : await this.disk.resume();
       if (!result.diverged) {
         this.changed.push(...result.changed);

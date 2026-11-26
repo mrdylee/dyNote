@@ -31,6 +31,7 @@ export default function useVaultDocuments(api, invoke) {
     return {
       get dirty() { return [...byVault.values()].some(queue => queue.dirty); },
       dirtyIn(id) { return !!byVault.get(id)?.dirty; },
+      markChanged: changed,
       generation(id) { return generations.get(id) ?? 0; },
       get(id, path) { return byVault.get(id)?.get(path); },
       set(id, draft) {
