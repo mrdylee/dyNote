@@ -8,7 +8,7 @@ const { _electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "play
 const root = await mkdtemp(path.join(tmpdir(), "dynote-format-"));
 const profile = path.join(root, "profile"), vault = path.join(root, "vault");
 const file = path.join(vault, "서식.md");
-const original = "# 회의록\n\n- [ ] 확인할 항목\n\n여기서 단어만 확대\n\n반복 색상\n\n추가 검토 예정\n";
+const original = "# 회의록\n\n- [ ] 확인할 항목\n\n여기서 단어만 확대\n\n반복 색상\n\n추가 검토 예정\n\n[[서식|기본 링크]] · <span style=\"background-color:#ffe58a\">[[서식|강조 링크]]</span>\n";
 const modifier = process.platform === "darwin" ? "Meta" : "Control";
 let app, page;
 const errors = [];
@@ -31,20 +31,22 @@ async function select(text, caretOnly = false) {
   }, { text, caretOnly });
 }
 
-async function chooseContextFormat(word, action) {
+async function chooseContextFormat(word, action, expectAbsent = false) {
   const point = await page.locator(".cm-content").evaluate((el, target) => {
     const view = el.cmTile.root.view;
     const rect = view.coordsAtPos(view.state.doc.toString().indexOf(target));
     return { x: rect.left + 1, y: (rect.top + rect.bottom) / 2 };
   }, word);
   await page.mouse.click(point.x, point.y, { button: "right" });
-  await app.evaluate(async (_electron, id) => {
+  await app.evaluate(async (_electron, { id, expectAbsent }) => {
     for (let i = 0; !globalThis.formattingMenu && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
     const item = globalThis.formattingMenu?.getMenuItemById(id);
-    if (!item) throw new Error("Missing editor context action: " + id);
+    if (!globalThis.formattingMenu) throw new Error("Missing editor context menu");
     globalThis.formattingMenu = null;
-    item.click();
-  }, action);
+    if (expectAbsent && item) throw new Error("Unexpected editor context action: " + id);
+    if (!expectAbsent && !item) throw new Error("Missing editor context action: " + id);
+    if (item) item.click();
+  }, { id: action, expectAbsent });
 }
 
 try {
@@ -59,22 +61,70 @@ try {
   // Exercise the real menu and editor with a deterministic Copilot response.
   await app.evaluate(({ ipcMain }) => {
     globalThis.editRequests = [];
+    globalThis.canceledRequests = [];
+    globalThis.pendingReplies = new Map();
+    ipcMain.removeHandler("notes:copilot-cancel");
+    ipcMain.handle("notes:copilot-cancel", (_event, { requestId }) => {
+      globalThis.canceledRequests.push(requestId);
+      return { ok: true };
+    });
     ipcMain.removeHandler("notes:copilot-status");
     ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, models: [{ id: "auto", name: "Auto" }] } }));
     ipcMain.removeHandler("notes:copilot-send");
     ipcMain.handle("notes:copilot-send", (event, args) => {
       globalThis.editRequests.push(args);
-      event.sender.send("notes:copilot-event", { requestId: args.requestId, type: "done", content: "확인 필요" });
+      const reply = data => event.sender.send("notes:copilot-event", { requestId: args.requestId, ...data });
+      if (globalThis.deferReply) globalThis.pendingReplies.set(args.requestId, reply);
+      else if (globalThis.failReply) reply({ type: "error", error: "연결 끊김" });
+      else reply({ type: "done", content: "확인 필요" });
       return { ok: true, value: { requestId: args.requestId } };
     });
   });
+  // Use CodeMirror's actual read-only state: its content DOM is still contenteditable.
+  const content = page.locator(".cm-content");
+  await content.evaluate(el => {
+    const view = el.cmTile.root.view, State = view.state.constructor;
+    const originalState = view.state;
+    window.restoreEditor = () => view.setState(originalState);
+    view.setState(State.create({ doc: originalState.doc, extensions: [State.readOnly.of(true)] }));
+  });
+  assert.equal(await content.getAttribute("aria-readonly"), "true");
+  await chooseContextFormat("확인할", "ai-suggestion", true);
+  await page.evaluate(() => { window.restoreEditor(); delete window.restoreEditor; });
   const proposal = page.getByRole("dialog", { name: "AI 제안" });
   await select("여기서 단어만");
   await chooseContextFormat("단어만", "ai-suggestion");
   assert.equal(await proposal.locator("pre").innerText(), "여기서 단어만");
   assert.equal(await app.evaluate(() => globalThis.editRequests.length), 0);
   await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await app.evaluate(() => { globalThis.failReply = true; });
   await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("alert").filter({ hasText: "연결 끊김" }).waitFor();
+  assert.equal(await proposal.locator("pre").last().innerText(), "확인 필요");
+  assert.ok(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled());
+  await app.evaluate(() => { globalThis.failReply = false; globalThis.deferReply = true; });
+  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("status").waitFor();
+  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  const canceledId = await app.evaluate(() => globalThis.editRequests.at(-1).requestId);
+  await page.keyboard.down("Escape");
+  try {
+    await proposal.waitFor({ state: "detached" });
+    assert.deepEqual(await app.evaluate(() => globalThis.canceledRequests), [canceledId]);
+    assert.ok(await content.evaluate(el => el.contains(document.activeElement)));
+  } finally { await page.keyboard.up("Escape"); }
+  assert.equal(await docText(), original);
+  await select("검토");
+  await chooseContextFormat("검토 예정", "ai-suggestion");
+  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("status").waitFor();
+  await app.evaluate((_electron, canceledId) => {
+    globalThis.pendingReplies.get(canceledId)({ type: "done", content: "취소한 요청의 늦은 응답" });
+    globalThis.deferReply = false;
+  }, canceledId);
+  assert.deepEqual(await proposal.locator("pre").allTextContents(), ["검토"]);
+  await app.evaluate(() => globalThis.pendingReplies.get(globalThis.editRequests.at(-1).requestId)({ type: "done", content: "새 제안" }));
+  await proposal.getByText("새 제안", { exact: true }).waitFor();
   await proposal.getByRole("button", { name: "버리기" }).click();
   assert.equal(await docText(), original);
   await select("회의록");
@@ -186,7 +236,9 @@ try {
   await launch();
   await control("분할 보기").click();
   const preview = page.locator(".markdown-preview");
-  const highlighted = preview.locator('span[style*="background-color"]');
+  const linkColor = link => link.evaluate(el => getComputedStyle(el).color);
+  assert.equal(await linkColor(preview.getByText("강조 링크", { exact: true })), await linkColor(preview.getByText("기본 링크", { exact: true })));
+  const highlighted = preview.locator('span[style*="background-color"]').filter({ hasText: "검토" });
   assert.equal(await highlighted.innerText(), "검토");
   assert.equal(await highlighted.evaluate(el => getComputedStyle(el).backgroundColor), "rgb(255, 229, 138)");
   const enlarged = preview.locator('span[style*="font-size"]');
@@ -199,7 +251,7 @@ try {
   assert.equal(await strong.last().evaluate(el => getComputedStyle(el).color), "rgb(21, 101, 192)");
   await control("Live Preview").click();
   await select("반복 색상", true);
-  assert.equal(await page.locator(".cm-live-background-color").innerText(), "검토");
+  assert.equal(await page.locator(".cm-live-background-color").filter({ hasText: "검토" }).innerText(), "검토");
   assert.equal(await page.locator(".cm-live-font-size").innerText(), "단어만");
   await select("단어만");
   await page.getByRole("combobox", { name: "글자 크기 적용" }).selectOption("size-default");
@@ -207,7 +259,7 @@ try {
   assert.ok(!reset.includes("font-size:"));
   assert.ok(reset.includes('<span style="color:#1565c0">**단어만**</span>'));
   assert.deepEqual(errors, []);
-  console.log("PASS: right-click AI requests, scope, retry, discard, stale protection, apply and undo, line and selection formatting, drag selection toolbar, highlight removal and undo, saved highlights in reading and Live Preview after restart");
+  console.log("PASS: right-click AI requests, scope, failed retry, Escape cancellation, late response, read-only menu, highlighted link color, discard, stale protection, apply and undo, line and selection formatting, drag selection toolbar, highlight removal and undo, saved highlights in reading and Live Preview after restart");
 } finally {
   if (app) await app.close();
   await rm(root, { recursive: true, force: true });

@@ -561,7 +561,7 @@ kbd {
   font-weight: 600;
   color: var(--text);
 }
-.markdown-preview span[style*="color:"] :is(strong, a, code) { color: inherit; }
+.markdown-preview span[style^="color:"] :is(strong, a, code) { color: inherit; }
 .markdown-preview span[style*="font-size:"] code { font-size: inherit; }
 .markdown-preview ::selection { background: var(--accent-soft); }
 .markdown-preview a {

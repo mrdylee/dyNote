@@ -525,7 +525,7 @@ app
       const subframe = params.frame !== contents.mainFrame;
       const context = await contents.executeJavaScript(`({
         file: window.dynoteContextFile?.(${subframe}, ${JSON.stringify(point)}),
-        markdownEditor: ${!subframe} && !!(${point ? `document.elementFromPoint(${point.x}, ${point.y})` : "document.activeElement"})?.closest('.code-editor .cm-content[contenteditable="true"]')
+        markdownEditor: ${!subframe} && !!(${point ? `document.elementFromPoint(${point.x}, ${point.y})` : "document.activeElement"})?.closest('.code-editor .cm-content[contenteditable="true"]:not([aria-readonly="true"])')
       })`).catch(() => null);
       if (contents.isDestroyed()) return;
       const menu = Menu.buildFromTemplate(contextMenuTemplate({ ...params, markdownEditor: context?.markdownEditor },

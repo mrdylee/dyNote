@@ -7,6 +7,12 @@ const instructions = {
   "맞춤법 교정": "원문의 뜻과 어조, Markdown 형식을 유지하며 맞춤법, 띄어쓰기, 문법만 바로잡아 주세요.",
   "간결하게": "핵심 내용과 Markdown 형식을 유지하며 중복을 줄이고 간결하게 써 주세요.",
 };
+function cancelActive(request) {
+  const requestId = request.current;
+  request.current = null;
+  if (requestId) window.notes.copilotCancel({ requestId }).catch(() => {});
+}
+
 export default function AiSuggestion({ target, editor, readOnly, onClose }) {
   const dialog = useRef(null), active = useRef(null);
   const [action, setAction] = useState("문장 다듬기");
@@ -41,11 +47,18 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
       if (event.type === "done") setAnswer(event.content);
       if (event.type === "error") setError(event.error);
     });
+    const escape = event => {
+      if (event.key !== "Escape" || !active.current || !element.open) return;
+      event.preventDefault();
+      event.stopPropagation();
+      element.requestClose();
+    };
+    window.addEventListener("keydown", escape, true);
     return () => {
+      window.removeEventListener("keydown", escape, true);
       mounted = false;
       unsubscribe();
-      if (active.current) window.notes.copilotCancel({ requestId: active.current }).catch(() => {});
-      active.current = null;
+      cancelActive(active);
       element.close();
     };
   }, []);
@@ -54,7 +67,7 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
     if (active.current || invalid || stale() || !model || !prompt) return;
     const requestId = crypto.randomUUID();
     active.current = requestId;
-    setError(""); setAnswer(""); setRunning(true);
+    setError(""); setRunning(true);
     try {
       const result = await window.notes.copilotSend({ requestId, vaultId, workspace: true, model, mode: "edit",
         prompt, context: { kind: "selection", content: original, path: "선택.md" },
@@ -64,14 +77,18 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
       if (active.current === requestId) { active.current = null; setRunning(false); setError(e.message); }
     }
   };
-  const apply = () => {
-    if (!answer.trim() || stale()) return;
-    editor.dispatch({ changes: { from, to, insert: answer }, annotations: isolateHistory.of("full"), scrollIntoView: true });
+  const close = () => {
+    cancelActive(active);
     dialog.current.close();
     onClose();
     editor.focus();
   };
-  return <dialog className="ai-suggestion" ref={dialog} aria-label="AI 제안" onCancel={onClose}>
+  const apply = () => {
+    if (running || !answer.trim() || stale()) return;
+    editor.dispatch({ changes: { from, to, insert: answer }, annotations: isolateHistory.of("full"), scrollIntoView: true });
+    close();
+  };
+  return <dialog className="ai-suggestion" ref={dialog} aria-label="AI 제안" onCancel={event => { event.preventDefault(); close(); }}>
     <h2>AI 제안</h2>
     <div className="copilot-comparison"><section><h3>보낼 원문</h3><pre>{original}</pre></section>
       {answer && <section><h3>수정 제안</h3><pre>{answer}</pre></section>}</div>
@@ -82,12 +99,12 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
     {action === "직접 요청" && <label className="ai-custom-prompt">요청 내용 <input value={custom} disabled={running} maxLength={2000}
       placeholder="예: 정중한 메일 문체로 바꿔 줘" onChange={e => { setCustom(e.target.value); setAnswer(""); }} /></label>}
     <p>제안을 요청하면 위 원문과 작업 지시가 GitHub Copilot으로 전송됩니다.</p>
-    {running && <p role="status">Copilot이 제안을 작성하고 있습니다…</p>}
+    {running && <p role="status">Copilot이 제안을 작성하고 있습니다… (Esc로 취소)</p>}
     {(invalid || error) && <p role="alert">{invalid || error}</p>}
     <footer>
       <button type="button" disabled={running || !model || !prompt || !!invalid} onClick={send}>{answer ? "다시 제안" : "제안 받기"}</button>
-      {answer && <button type="button" disabled={!!invalid} onClick={apply}>원문에 적용</button>}
-      <button type="button" onClick={onClose}>{running ? "요청 취소" : answer ? "버리기" : "닫기"}</button>
+      {answer && <button type="button" disabled={running || !!invalid} onClick={apply}>원문에 적용</button>}
+      <button type="button" onClick={close}>{running ? "요청 취소" : answer ? "버리기" : "닫기"}</button>
     </footer>
   </dialog>;
 }

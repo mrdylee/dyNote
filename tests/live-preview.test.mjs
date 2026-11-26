@@ -209,3 +209,11 @@ test("checkbox widget clicks are undoable, position-safe after edits, and respec
     globals.forEach((name, i) => original[i] ? Object.defineProperty(globalThis, name, original[i]) : delete globalThis[name]);
   }
 });
+
+test("callout titles stay literal and highlights render on the body", () => {
+  const raw = '<span style="background-color:#ffe58a">';
+  const doc = '> [!NOTE] **제목**\n> ' + raw + '확인할 사항</span>\n\n끝';
+  const marked = ranges(state(doc));
+  assert.deepEqual(marked.filter(r => r.spec.class === "cm-live-background-color").map(r => r.text), ["확인할 사항"]);
+  assert.ok(!marked.some(r => r.from < doc.indexOf("\n")));
+});

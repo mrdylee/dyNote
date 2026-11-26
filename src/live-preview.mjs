@@ -1,4 +1,5 @@
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
+import { startsCallout } from "../core/callout.mjs";
 import { textStyleParser, readStyleSpan } from "../core/text-color.mjs";
 import { Facet, RangeSet, RangeValue, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
@@ -157,11 +158,18 @@ function decorate(state) {
   const ranges = [], reveals = [], options = state.facet(config), context = options.getContext?.() ?? {};
   const source = state.doc.toString();
   const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(source)?.[0].length ?? 0;
+  let calloutTitleEnd = 0;
   const fenceBodies = new Map();
   const mark = (from, to, name, attributes) => { if (to > from) ranges.push(Decoration.mark({ class: `cm-live-${name}`, attributes }).range(from, to)); };
   syntaxTree(state).iterate({ enter(ref) {
     const node = ref.node, { name, from, to } = node;
-    if (to <= frontmatter) return false;
+    if (to <= frontmatter || to <= calloutTitleEnd) return false;
+    if (name === "Paragraph" && node.parent?.name === "Blockquote") {
+      const end = state.doc.lineAt(from).to;
+      if (startsCallout(node, state.sliceDoc(from, end))) calloutTitleEnd = end;
+    }
+    // Title text is displayed literally; its paragraph may also contain styled body lines.
+    if (from < calloutTitleEnd) return;
     if (name === "FencedCode" || name === "CodeBlock") {
       const opening = state.doc.lineAt(from);
       const last = state.doc.lineAt(Math.max(from, to - 1)).number;
@@ -191,7 +199,6 @@ function decorate(state) {
       return false;
     }
     if (literal.has(name)) return false;
-    if (name === "Blockquote" && /^>\s*\[!/.test(state.sliceDoc(from, to))) return false;
     const replacements = [];
     const hide = (from, to, widget) => { if (to > from) replacements.push(Decoration.replace({ widget }).range(from, to)); };
     const finish = (skipChildren = false) => {
