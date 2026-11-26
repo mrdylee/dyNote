@@ -545,6 +545,7 @@ test("controller coalesces overlapping ticks and reports edits made during an up
   await writeFile(path.join(f.root, "Home.md"), "edit during upload"); controller.markDirty("one");
   unblock(); await first;
   assert.equal(pushes, 1); assert.equal(controller.status().phase, "pending");
+  assert.equal(controller.status().message, "새 변경사항 저장 대기 중");
   assert.equal(f.git(f.bare, "show", "main:Home.md"), "before upload");
   await controller.sync("one");
   assert.equal(f.git(f.bare, "show", "main:Home.md"), "edit during upload");

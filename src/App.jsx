@@ -2789,10 +2789,10 @@ export default function App() {
               </span>
             </div>
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
-            {connectedSpaces.filter(scope => scope.id !== vault.id && scope.purpose === "personal" && gitStates[scope.id]?.phase === "saving").map(scope =>
-              <button key={scope.id} className="git-status saving" title={spaceLabel(scope)} onClick={() => openPanelSettings(scope.id)}>
-                {scope.name} · {gitStates[scope.id].message}
-              </button>)}
+            {connectedSpaces.filter(scope => scope.id !== vault.id && scope.purpose === "personal" && gitStates[scope.id]?.phase === "saving").map(scope => {
+              const label = `${gitStates[scope.id].message} · ${scope.name}`;
+              return <button key={scope.id} className="git-status saving" title={label} onClick={() => openPanelSettings(scope.id)}>{label}</button>;
+            })}
             <div>
               {showingBoard ? null : externalDocument ? <span>{externalDocument.kind.toUpperCase()}</span> : showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
                 {note && <span>{statistics.words.toLocaleString()}단어</span>}

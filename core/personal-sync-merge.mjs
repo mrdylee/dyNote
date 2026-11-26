@@ -47,8 +47,8 @@ export async function integrate(store, remote, local, device, config) {
   const incomingState = await store.metadata(incoming);
   const updates = new Map();
   let mergedTree = local;
-  const conflicts = new Set(),
-    decisionSources = new Map();
+  const conflicts = new Set();
+  const decisionConflicts = new Set();
   if (base !== remote) {
     const merge = await store.git(
       ["-c", "merge.renames=false", "merge-tree", "--write-tree", "--no-messages", "-z", remote, local],
@@ -64,19 +64,34 @@ export async function integrate(store, remote, local, device, config) {
     }
     if (merge.code && !conflicts.size) throw new Error("경로 충돌을 먼저 검토해 주세요.");
   }
+  const merged = await store.tree(mergedTree);
   if (base !== remote) {
-    for (const [name, group] of groups) {
-      const left = group.choices.filter((c) => !ancestor.has(c.key));
-      const right = (incomingState.groups.get(name)?.choices ?? []).filter((c) => !ancestor.has(c.key));
-      const a = left.at(-1),
-        b = right.at(-1);
-      if (a && b && a.blob !== b.blob && a.basis.some((id) => b.basis.includes(id))) {
-        conflicts.add(name);
-        decisionSources.set(name, [a.key, b.key]);
+    for (const [ref, ownGroups, peers, peerTree] of [
+      [remote, groups, incomingState.groups, incoming],
+      [local, incomingState.groups, groups, published],
+    ]) {
+      for (const [name, group] of ownGroups) {
+        const peer = peers.get(name);
+        const unseen = peer?.pending.some(id => !group.versions.has(id));
+        const peerBlob = peerTree.get(name)?.oid ?? null;
+        const peerEdited = !same(peerTree.get(name), ancestor.get(name));
+        const decisions = peer?.choices.filter(choice => !ancestor.has(choice.key)) ?? [];
+        for (const choice of group.choices) {
+          if (ancestor.has(choice.key)) continue;
+          const competing = decisions.some(other => other.blob !== choice.blob && other.basis.some(id => choice.basis.includes(id)));
+          const newEdit = peerEdited && peerBlob !== choice.blob && !choice.basis.some(id => group.versions.get(id).blob === peerBlob);
+          if (!unseen && !competing && !newEdit) continue;
+          // A choice may leave the file unchanged, or a later edit may change it again.
+          // Record the decision's own commit and bytes; the tip is preserved separately below.
+          const source = await store.attribution(ref, choice.key);
+          const entry = (await store.tree(source.commit, name)).get(name);
+          await store.preserve(updates, merged, ref, name, entry, source);
+          conflicts.add(name);
+          decisionConflicts.add(name);
+        }
       }
     }
   }
-  const merged = await store.tree(mergedTree);
   for (const name of incomingChanges) {
     if (name.startsWith(syncPrefix)) continue;
     if (
@@ -114,7 +129,7 @@ export async function integrate(store, remote, local, device, config) {
     }
     assertSyncEntry(name, before);
     assertSyncEntry(name, after);
-    if (/\.md$/i.test(name) && before && after && !groups.get(name)?.pending.length) {
+    if (/\.md$/i.test(name) && before && after && !decisionConflicts.has(name) && !groups.get(name)?.pending.length) {
       const decode = (bytes) => {
         try {
           return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -133,9 +148,8 @@ export async function integrate(store, remote, local, device, config) {
         }
       }
     }
-    const [left, right] = decisionSources.get(name) ?? [name, name];
-    await store.preserve(updates, merged, remote, name, before, left);
-    await store.preserve(updates, merged, local, name, after, right);
+    await store.preserve(updates, merged, remote, name, before);
+    await store.preserve(updates, merged, local, name, after);
     updates.set(name, before ?? null);
   }
   if (base === remote && !updates.size) return local;
@@ -154,6 +168,17 @@ export async function normalizePublished(store, head, device, config) {
     updates = new Map();
   for (const [name, group] of state.groups) {
     if (!group.pending.length) continue;
+    // Older merges could cover the visible choice and leave just the later edit in review.
+    const current = files.get(name);
+    if (group.pending.length === 1 && group.versions.get(group.pending[0]).blob !== (current?.oid ?? null)) {
+      for (const choice of group.choices) {
+        if (choice.blob !== (current?.oid ?? null)) continue;
+        const source = await store.attribution(head, choice.key);
+        if (group.versions.has(source.commit) || !same((await store.tree(source.commit, name)).get(name), current)) continue;
+        await store.preserve(updates, files, head, name, current, source);
+        break;
+      }
+    }
     const keys = group.pending.map((id) => conflictFolder(name) + id + ".json");
     const first = (
       await store.git(["log", "--first-parent", "--reverse", "--format=%H", head, "--", ...keys])

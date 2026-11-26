@@ -67,6 +67,7 @@ export class GitController {
     Object.assign(this, { settingsFile, secretStorage, fetcher, checkRemote, run, onStatus, isPersonal, setTimer, clearTimer, now });
     this.githubLogin = new GitHubLogin({fetcher, openExternal, now:() => now().getTime()});
     this.records = {}; this.tail = Promise.resolve(); this.timer = null; this.generation = 0;
+    this.remoteQueries = new AbortController();
     this.revision = 0; this.pendingSync = null; this.retryAfter = 0;
     this.current = { enabled: false, phase: "off", message: "Git 백업 미설정", config: null };
   }
@@ -80,7 +81,7 @@ export class GitController {
     if (id !== this.vault?.id) return;
     this.revision++;
     if (this.current.enabled && this.current.config?.mode==="personal-sync" && this.personal) this.scheduleBatch();
-    if (this.current.enabled && !["saving", "error"].includes(this.current.phase)) this.publish({ phase: "pending", message: "Git 자동 저장 대기 중" });
+    if (this.current.enabled && !["saving", "error"].includes(this.current.phase)) this.publish({ phase: "pending", message: "자동 저장 대기 중" });
   }
   scheduleBatch(since = this.personal?.firstDirty ?? this.now().getTime()) {
     if(!this.personal || this.batchTimer || !this.due())return;
@@ -140,6 +141,11 @@ export class GitController {
     }
   }
   async personalAction(id,args) {
+    if (args.action === "resolve" && id === this.vault?.id && this.current.config?.mode === "personal-sync") {
+      // Yield read-only remote lookups. Local writes and pushes still finish under the same queue.
+      this.remoteQueries.abort();
+      this.remoteQueries = new AbortController();
+    }
     return this.enqueue(async()=>{
       this.check(id);
       if (!this.current.enabled || this.current.config?.mode!=="personal-sync") throw new Error("개인 동기화를 먼저 연결해 주세요.");
@@ -395,14 +401,15 @@ export class GitController {
     return !previous || (previous < today && (now.getHours() >= 23 || previous < dayKey(yesterday)));
   }
   sync(id, { automatic = false, force = !automatic, personalOnly = false } = {}) {
-    if (this.pendingSync?.id === id && this.pendingSync.personalOnly === personalOnly &&
+    const querySignal = this.remoteQueries.signal;
+    if (this.pendingSync?.id === id && this.pendingSync.querySignal === querySignal && this.pendingSync.personalOnly === personalOnly &&
         (automatic || !this.pendingSync.automatic) && (!force || this.pendingSync.force)) return this.pendingSync.promise;
     const promise = this.enqueue(async () => {
       this.check(id);
       if (!this.current.enabled || (personalOnly && !["personal-sync","github-api"].includes(this.current.config?.mode)) || (automatic && !this.due())) return this.status();
-      return this.perform({ force, manual:!automatic });
+      return this.perform({ force, manual:!automatic, querySignal });
     });
-    const pending = { id, promise, automatic, force, personalOnly }; this.pendingSync = pending;
+    const pending = { id, promise, automatic, force, personalOnly, querySignal }; this.pendingSync = pending;
     promise.finally(() => { if (this.pendingSync === pending) this.pendingSync = null; }).catch(() => {});
     return promise;
   }
@@ -443,7 +450,7 @@ export class GitController {
     catch { status.message += " 이 기기에 동기화 상태를 저장하지 못했습니다."; }
     return this.publish({ ...progress.completed, ...progress.times, ...status });
   }
-  async perform({ force=true, manual=false, progress=this.current.config?.mode === "personal-sync" ? personalProgress(this.now) : null } = {}) {
+  async perform({ force=true, manual=false, querySignal=this.remoteQueries.signal, progress=this.current.config?.mode === "personal-sync" ? personalProgress(this.now) : null } = {}) {
     const revision = this.revision;
     const generation = this.generation;
     const day = dayKey(this.now());
@@ -472,13 +479,13 @@ export class GitController {
       if (progress) {
         const service=await this.startPersonal();
         const record=this.records[this.vault.id],register=record.registerPending===true;
-        let result=await service.sync(this.current.config,{force,register,onStage:progress.onStage});
-        if (manual && result.pendingFiles.some(file => file.oid && file.message === "복사 완료 대기")) {
+        let result=await service.sync(this.current.config,{force,register,querySignal,onStage:progress.onStage});
+        if (manual && !querySignal.aborted && result.pendingFiles.some(file => file.oid && file.message === "복사 완료 대기")) {
           progress.completed = result;
           await new Promise(resolve => setTimeout(resolve, copyStabilityMs));
           if (generation === this.generation) {
             const stillRegistering = register && !result.devices.some(d=>d.id===result.deviceId && d.name===this.current.config.deviceName);
-            const next = await service.sync(this.current.config,{force,register:stillRegistering,onStage:progress.onStage});
+            const next = await service.sync(this.current.config,{force,register:stillRegistering,querySignal,onStage:progress.onStage});
             result = { ...result, ...next, changed: [...new Set([...result.changed, ...next.changed])] };
           }
         }
@@ -501,7 +508,7 @@ export class GitController {
       }
       await this.persist();
       this.retryAfter = 0;
-      return this.publish({ ...result, ...(revision !== this.revision ? { phase: "pending", message: "새 변경사항 Git 저장 대기 중" } : {}) });
+      return this.publish({ ...result, ...(revision !== this.revision ? { phase: "pending", message: "새 변경사항 저장 대기 중" } : {}) });
     } catch (error) {
       if (progress) return this.personalError(error,progress);
       this.retryAfter = this.now().getTime() + 10 * 60 * 1000;

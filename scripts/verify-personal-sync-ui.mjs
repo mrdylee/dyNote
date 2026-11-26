@@ -16,8 +16,8 @@ execFileSync("git", ["init", "--bare", "--initial-branch=main", bare], { stdio: 
 const cfg = path.join(temp, "gitconfig");
 execFileSync("git", ["config", "--file", cfg, "url." + bare.replaceAll("\\", "/") + ".insteadOf", remote]);
 const cmd = process.platform === "darwin" ? "Meta" : "Control";
-async function launch(name, seed) {
-  const root = path.join(temp, name),
+async function launch(name, seed, vaultName = name) {
+  const root = path.join(temp, vaultName),
     profile = path.join(temp, name + "-profile");
   const team = path.join(temp, name + "-team");
   await mkdir(root);
@@ -44,7 +44,7 @@ async function launch(name, seed) {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.waitForFunction(() => typeof window.notes?.connectGit === "function");
-  const tree = page.getByRole("region", { name: "개인 노트 · " + name, exact: true });
+  const tree = page.getByRole("region", { name: "개인 노트 · " + vaultName, exact: true });
   if (seed) {
     const teamTree = page.getByRole("region", { name: "팀 공유 노트 · " + name + "-team", exact: true });
     await teamTree.getByRole("heading").click({ button: "right" });
@@ -126,16 +126,18 @@ async function editor(pc) {
   await pc.page.getByRole("button", { name: "편집 보기", exact: true }).click();
   return pc.page.getByRole("textbox", { name: "Markdown 편집기" });
 }
-async function verifySavingLocation(pc) {
+async function verifySavingLocation(pc, background = false) {
+  const message = "변경사항 저장 중…";
+  const label = background ? message + " · " + path.basename(pc.root) : message;
   const [sample] = await Promise.all([
-    pc.page.waitForFunction(() => {
-      const message = "변경사항 저장 중…";
-      const footer = [...document.querySelectorAll(".statusbar button")].filter(button => button.textContent.split(" · ").at(-1) === message);
-      if (footer.length) return { count: footer.length, inTree: document.querySelector(".space-trees").textContent.includes(message) };
-    }),
+    pc.page.waitForFunction(message => {
+      const buttons = [...document.querySelectorAll(".statusbar button")].filter(button => button.textContent.includes(message));
+      if (buttons.length) return { count: buttons.length, text: buttons[0].textContent, title: buttons[0].title,
+        inTree: document.querySelector(".space-trees").textContent.includes(message) };
+    }, message),
     pc.sync(),
   ]);
-  assert.deepEqual(await sample.jsonValue(), { count: 1, inTree: false });
+  assert.deepEqual(await sample.jsonValue(), { count: 1, text: label, title: label, inTree: false });
   await pc.page.locator(".statusbar button").filter({ hasText: "변경사항 저장 중…" }).waitFor({ state: "hidden" });
 }
 async function verifyJournalConflict(a, b) {
@@ -271,7 +273,7 @@ async function verifyJournalConflict(a, b) {
   await today(b).getByRole("button", {name:/버전 확인/}).waitFor({state:"hidden"});
 }
 try {
-  const a = await launch("Cloud", true),
+  const a = await launch("Cloud", true, "개인 노트 장기 보관함 ".repeat(4).trim()),
     b = await launch("Local", false);
   await writeFile(path.join(a.root, "보내기.md"), "Cloud에서 보냄\n");
   await writeFile(path.join(b.root, "받기.md"), "Local에서 보냄\n");
@@ -290,7 +292,7 @@ try {
   assert.equal(execFileSync("git", ["--git-dir", bare, "show", "main:보내기.md"], { encoding: "utf8" }), "Cloud에서 보냄\n");
   await syncFromPanel(a);
   await syncFromPanel(b, b.tree.getByTitle("회의록.md", { exact: true }));
-  await verifySavingLocation(a);
+  await verifySavingLocation(a, true);
   await verifySavingLocation(b);
   assert.equal(await readFile(path.join(b.root, "보내기.md"), "utf8"), "Cloud에서 보냄\n");
   const view = await editor(b);
@@ -316,11 +318,13 @@ try {
   await view.press(cmd + "+End");
   await b.page.keyboard.insertText(" 창을 떠날 때 보냄");
   await b.page.waitForFunction(() => document.querySelector(".cm-content")?.textContent.includes("창을 떠날 때 보냄"));
+  await b.page.locator(".statusbar").getByRole("button", { name: "자동 저장 대기 중", exact: true }).waitFor();
   await b.page.evaluate(() => window.dispatchEvent(new Event("blur")));
   const publishedNote = () => execFileSync("git", ["--git-dir", bare, "show", "main:회의록.md"], { encoding:"utf8" });
   const deadline = Date.now() + 10000;
   while (!publishedNote().includes("창을 떠날 때 보냄") && Date.now() < deadline) await delay(100);
   assert.match(publishedNote(), /창을 떠날 때 보냄/);
+  await b.page.locator(".statusbar .git-status.synced").filter({ hasText: "동기화됨" }).waitFor();
   const third = await launch("Laptop", false);
   await a.sync();
   await b.sync();

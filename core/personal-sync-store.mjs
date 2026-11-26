@@ -199,8 +199,8 @@ export class PersonalSyncStore extends GitBackup {
     return { commit, time, author, device: device?.trim() || "", id: id?.trim() || "" };
   }
 
-  async preserve(updates, files, ref, name, entry, sourcePath = name) {
-    const source = await this.attribution(ref, sourcePath);
+  async preserve(updates, files, ref, name, entry, source) {
+    source ??= await this.attribution(ref, name);
     const folder = conflictFolder(name),
       key = folder + source.commit + ".json";
     if (files.has(key) || updates.has(key)) return;
