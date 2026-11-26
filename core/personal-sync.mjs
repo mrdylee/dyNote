@@ -587,8 +587,11 @@ export class PersonalSync {
   async versions(name, skip = 0) {
     if (!validPersonalFilePath(name) || !Number.isSafeInteger(skip) || skip < 0)
       throw new Error("잘못된 파일 경로입니다.");
-    const files = await this.store.tree(await this.disk.head()),
-      group = (await this.store.metadata(files)).groups.get(name);
+    const head = await this.disk.head();
+    const [files, records] = await Promise.all([
+      this.store.tree(head, name), this.store.tree(head, conflictFolder(name)),
+    ]);
+    const group = (await this.store.metadata(records)).groups.get(name);
     const basis = group?.pending ?? [];
     return {
       basis,
@@ -637,7 +640,7 @@ export class PersonalSync {
     return blocked;
   }
   async comparison(name) {
-    const files = await this.store.tree(await this.disk.head()),
+    const files = await this.store.tree(await this.disk.head(), conflictFolder(name)),
       group = (await this.store.metadata(files)).groups.get(name);
     const basis = group?.pending ?? [];
     const parts = group ? await textChoices(this.store, name, basis.map(id => group.versions.get(id))) : null;
@@ -669,17 +672,19 @@ export class PersonalSync {
     if (!version) throw new Error("검토할 버전이 없습니다.");
     return version.blob ? await this.store.blob(version.blob) : null;
   }
-  async resolve(config, name, basis, id, options, onStage) {
+  async resolve(config, name, basis, id, options) {
     const device = deviceRecord(this.deviceId, config.deviceName);
-    const state = await this.sync(config, { onStage });
-    if ((await this.disk.job()) || this.waiting.has(name))
-      throw new Error("파일 수신이 완료되면 다시 적용해 주세요.");
+    if (!validPersonalFilePath(name)) throw new Error("잘못된 파일 경로입니다.");
+    if (await this.disk.job()) throw new Error("파일 수신이 완료되면 다시 적용해 주세요.");
+    await this.store.assertReady(config);
+    const head = await this.disk.head(), repairs = [];
+    if ((await this.dirty(head, repairs)).includes(name) || repairs.some(row => row.name === name))
+      throw new Error("이 파일에 새 편집이 있습니다. 지금 동기화한 뒤 버전을 다시 확인해 주세요.");
     for (const copy of Object.values(options?.copies ?? {}))
       if (await this.disk.read(copy)) throw new Error("이미 사용 중인 사본 경로입니다: " + copy);
-    const head = await this.disk.head(),
-      next = await chooseVersion(this.store, head, name, basis, id, device, config, options);
+    const next = await chooseVersion(this.store, head, name, basis, id, device, config, options);
     await this.disk.begin(config.branch, head, next);
-    this.changed.push(...state.changed);
-    return this.sync(config, { onStage });
+    if (!(await this.resume(device, config))) throw new Error("파일 적용 중입니다. 동기화가 끝난 뒤 확인해 주세요.");
+    return this.changed.splice(0);
   }
 }

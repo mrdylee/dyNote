@@ -224,7 +224,17 @@ test("remote receive retains a displaced open writer and publishes the late byte
   const { versions, basis } = await a.service.versions("time.md");
   const picked = versions.find((v) => v.device === "Local");
   assert(picked);
-  await a.service.resolve(a.cfg, "time.md", basis, picked.commit);
+  const offline = t.mock.method(a.service.store, "remoteHead", () => { throw new Error("offline"); });
+  const changed = await a.service.resolve(a.cfg, "time.md", basis, picked.commit);
+  assert(changed.includes("time.md"));
+  assert.equal((await a.read("time.md")).toString(), "3시\n");
+  assert.deepEqual((await a.service.versions("time.md")).basis, []);
+  assert.equal(offline.mock.callCount(), 0);
+  assert.equal((await b.read("time.md")).toString(), "2시\n");
+  await assert.rejects(a.sync(), /offline/);
+  assert.equal((await a.read("time.md")).toString(), "3시\n");
+  offline.mock.restore();
+  await a.sync();
   await b.sync();
   assert.equal((await b.read("time.md")).toString(), "3시\n");
 });

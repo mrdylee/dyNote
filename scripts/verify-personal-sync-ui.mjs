@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, mkdir, writeFile, realpath, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, writeFile, realpath, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -106,7 +106,7 @@ async function launch(name, seed) {
   });
   if (status.phase === "pending") status = await invoke("syncGit");
   assert.equal(status.phase, "synced", status.message);
-  return { page, root, tree, invoke, sync: () => invoke("syncGit") };
+  return { app, page, root, tree, invoke, sync: () => invoke("syncGit") };
 }
 async function syncFromPanel(pc, target = pc.tree.getByRole("heading")) {
   await target.click({ button: "right" });
@@ -192,7 +192,10 @@ async function verifyJournalConflict(a, b) {
     assert.equal(await editor(pc).innerText(), body("0"));
     assert.equal(await readFile(path.join(pc.root, journal), "utf8"), body("0"));
   }
+  const previousStatus = await b.invoke("gitStatus");
+  const loading = b.page.getByText("버전 4개 불러오는 중…", {exact:true}).waitFor();
   await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
+  await loading;
   const review = b.page.getByRole("dialog", { name: "버전 확인" });
   await review.getByText("버전별 선택 및 저장 · 4개").waitFor();
   const pane = label => review.getByRole("region", { name: label, exact: true });
@@ -241,13 +244,31 @@ async function verifyJournalConflict(a, b) {
       assert(await apply.isDisabled());
     }
   }
-  await apply.click();
-  await review.waitFor({ state: "hidden" });
+  await rename(bare, bare + ".offline");
+  try {
+    await apply.click();
+    await review.waitFor({ state: "hidden" });
+    await editor(b).getByText("a", {exact:true}).waitFor();
+    assert.equal(await readFile(path.join(b.root, journal), "utf8"), body("a"));
+    assert.equal(await readFile(path.join(a.root, journal), "utf8"), body("0"));
+  } finally {
+    await rename(bare + ".offline", bare);
+  }
+  await sync(b);
   await sync(a);
   for (const pc of [a, b]) {
     await today(pc).getByRole("button", { name: /버전 확인/ }).waitFor({ state: "hidden" });
     assert.equal(await readFile(path.join(pc.root, journal), "utf8"), body("a"));
   }
+  // Replay a badge that was painted before the other PC's resolution arrived.
+  await b.app.evaluate(({BrowserWindow}, status) => {
+    BrowserWindow.getAllWindows()[0].webContents.send("notes:git-status", {...status, changed:[]});
+  }, previousStatus);
+  await today(b).getByRole("button", {name:"버전 확인 · 4개"}).click();
+  await review.getByText("이 노트에 남은 충돌이 없습니다.").waitFor();
+  assert.equal(await review.getByText("검토할 버전 0개").count(), 0);
+  await b.page.keyboard.press("Escape");
+  await today(b).getByRole("button", {name:/버전 확인/}).waitFor({state:"hidden"});
 }
 try {
   const a = await launch("Cloud", true),
@@ -323,6 +344,7 @@ try {
   assert(await selection.isChecked());
   await dialog.getByRole("button", { name: "선택한 내용 반영" }).click();
   await dialog.waitFor({ state: "hidden" });
+  await b.sync();
   await a.sync();
   assert.equal(await readFile(path.join(a.root, "회의록.md"), "utf8"), "회의 3시\n");
   await verifyJournalConflict(a, b);
