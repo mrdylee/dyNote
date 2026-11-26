@@ -67,11 +67,14 @@ export class StickyNotes {
       state.content = content;
       this.#schedule(state);
     });
-    ipcMain.on("sticky:received", (event,token) => {
-      const state=this.#sender(event), update=state?.received;
-      if (!update || update.token!==token || state.saved!==update.before || state.content!==update.before) return;
-      state.content=state.saved=update.content;
-      state.revision=update.revision;state.received=null;
+    ipcMain.on("sticky:received", (event, token, applied) => {
+      const state = this.#sender(event), update = state?.received;
+      if (!update || update.token !== token) return;
+      state.received = null;
+      if (!applied || state.saved !== update.before || state.content !== update.before) return;
+      state.content = state.saved = update.content;
+      state.revision = update.revision;
+      if (update.nextFile !== undefined) this.#receiveFile(state, update.nextFile);
     });
     ipcMain.on("sticky:open-link", (event, target, kind, moveVersion) => {
       const state = this.#sender(event);
@@ -176,12 +179,23 @@ export class StickyNotes {
       for(const state of this.#windows.values()) {
         if(state.record.root!==vault.root || !paths.includes(state.record.path) || state.content!==state.saved)continue;
         const file=await vault.readNote(state.record.path).catch(error=>{if(error.code!=="ENOENT")throw error;return null;});
-        if (file?.revision===state.revision || state.content!==state.saved || state.window.isDestroyed())continue;
-        state.received={before:state.saved,content:file?.content ?? "",revision:file?.revision,token:randomUUID()};
-        state.window.webContents.send("sticky:receive",state.received);
+        this.#receiveFile(state, file);
       }
     });
   }
+
+  #receiveFile(state, file) {
+    if (state.content !== state.saved || state.window.isDestroyed()) return;
+    if (state.received) {
+      // The next update must use the content the editor actually accepted as its base.
+      state.received.nextFile = file;
+      return;
+    }
+    if (file?.revision === state.revision) return;
+    state.received = { before: state.saved, content: file?.content ?? "", revision: file?.revision, token: randomUUID() };
+    state.window.webContents.send("sticky:receive", state.received);
+  }
+
   hasNotesWithin(vault, folder) {
     return [...this.#records.values()].some(record => record.root === vault.root && record.path.startsWith(folder + '/'));
   }
@@ -189,6 +203,11 @@ export class StickyNotes {
   async #open(record, relative = record?.path) {
     const existing = record && this.#windows.get(record.id);
     if (existing) {
+      if (!existing.window.isVisible() && existing.content === existing.saved) {
+        const file = await this.readNote(record.root, relative);
+        if (existing.window.isDestroyed()) return;
+        this.#receiveFile(existing, file);
+      }
       existing.window.show();
       existing.window.focus();
       return;

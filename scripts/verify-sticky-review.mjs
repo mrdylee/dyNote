@@ -392,7 +392,7 @@ test("synced sticky picker opens the original file and both plus buttons create 
   }, { withTeam: true });
 });
 
-test("a hidden blank sticky stays available from the board and accepts received edits", async () => {
+test("a hidden sticky restores the main editor's saved text and keeps its new line endings", async () => {
   await fixture(["- 다른 메모"], async ({ app, main, vault, records: [record] }) => {
     const other = await openCard(app, record);
     const [card] = await Promise.all([app.waitForEvent("window"), other.getByRole("button", { name: "새 스티키 노트" }).click()]);
@@ -408,15 +408,42 @@ test("a hidden blank sticky stays available from the board and accepts received 
     assert.equal(await readFile(file, "utf8"), "");
     await main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트" }).click();
     await main.getByRole("button", { name: "전체 보기" }).click();
-    const blank = main.getByRole("region", { name: "포스트잇 보드" }).getByRole("button", { name: "Sticky Note", exact: true });
-    await blank.waitFor();
-    await native.evaluate(win => win.webContents.send("sticky:receive", {
-      before: "", content: "동기화된 메모", token: "test-hidden-receive",
-    }));
-    await blank.click();
+    const relative = "포스트잇/" + files[0];
+    const boardCard = main.getByRole("region", { name: "포스트잇 보드" }).getByTitle(relative, { exact: true });
+    await boardCard.waitFor();
+    assert.equal(await boardCard.getAttribute("aria-label"), "Sticky Note");
+    const body = "갱신된 메모\r\n둘째 줄";
+    const saved = await main.evaluate(async ({ relative, body }) => {
+      const { value: snapshot } = await window.notes.snapshot();
+      const { revision } = snapshot.notes.find(note => note.path === relative);
+      return window.notes.saveNote({ vaultId: snapshot.id, path: relative, revision, content: body });
+    }, { relative, body });
+    assert.equal(saved.ok, true, saved.error);
+    await boardCard.click();
     await until(() => native.evaluate(win => win.isVisible()), Boolean, "board restores the same window");
-    assert.equal(await markdown(card), "동기화된 메모");
+    assert.equal(await markdown(card), body.replace("\r\n", "\n"));
     assert.equal(await memo(card).evaluate(field => field === document.activeElement), true);
+    await memo(card).press("ControlOrMeta+End");
+    await card.keyboard.insertText("!");
+    await hide.click();
+    await until(() => native.evaluate(win => win.isVisible()), visible => !visible, "edits saved before hiding");
+    assert.equal(await readFile(file, "utf8"), body + "!");
+  });
+});
+
+test("renaming a hidden empty sticky preserves its empty Markdown file", async () => {
+  await fixture([""], async ({ app, main, vault, records: [record] }) => {
+    const card = await openCard(app, record);
+    const native = await app.browserWindow(card);
+    await card.locator("#hide").click();
+    await until(() => native.evaluate(win => win.isVisible()), visible => !visible, "blank sticky is hidden");
+    const renamed = "포스트잇/새 이름.md";
+    const result = await move(main, record.path, renamed);
+    assert.equal(result.ok, true, result.error);
+    await click(app, "sticky-recent-" + record.id);
+    await until(() => native.evaluate(win => win.isVisible()), Boolean, "tray restores renamed sticky");
+    await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
+    assert.equal(await readFile(path.join(vault, renamed), "utf8"), "");
   });
 });
 

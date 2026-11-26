@@ -11,6 +11,6 @@ contextBridge.exposeInMainWorld("sticky", Object.freeze({
   onPinned: callback => { ipcRenderer.on("sticky:pinned", (_event, pinned) => callback(pinned)); },
   onStatus: callback => { ipcRenderer.on("sticky:status", (_event, status) => callback(status)); },
   onReceive: callback => { ipcRenderer.on("sticky:receive", (_event, update) => callback(update)); },
-  received: token => ipcRenderer.send("sticky:received",token),
+  received: (token, applied) => ipcRenderer.send("sticky:received", token, applied),
   onMoved: callback => { ipcRenderer.on("sticky:moved", (_event, move) => callback(move)); },
 }));

@@ -33,7 +33,7 @@ document.body.dataset.color = initial.color;
 updatePin(initial.pinned === true);
 updateTitle(initial.content);
 
-const lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
+let lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
 let moveVersion = 0, receiving=false;
 const publish = state => {
   const content = state.doc.sliceString(0, state.doc.length, lineBreak);
@@ -64,14 +64,18 @@ document.querySelector("#hide").addEventListener("click", () => {
 });
 window.sticky.onReceive(({before,content,token})=>{
   const local = showingStarterBullet ? "" : view.state.doc.toString();
-  if(local!==before.replace(/\r\n?/g,"\n"))return;
+  if (local !== before.replace(/\r\n?/g, "\n")) {
+    window.sticky.received(token, false);
+    return;
+  }
   receiving=true;
   try {
     const previous=view.state.doc.toString(),after=content.replace(/\r\n?/g,"\n");
     const change=changedRange(previous,after);
     if(change) view.dispatch({changes:{from:change.from,to:previous.length-after.length+change.to,insert:after.slice(change.from,change.to)},annotations:Transaction.addToHistory.of(false)});
     showingStarterBullet=false;
-    updateTitle(content);window.sticky.received(token);
+    lineBreak = content.match(/\r\n|\r|\n/)?.[0] ?? lineBreak;
+    updateTitle(content);window.sticky.received(token, true);
   } finally {receiving=false;}
 });
 window.sticky.onMoved(({ from, to, files, version }) => {
@@ -85,7 +89,7 @@ window.sticky.onMoved(({ from, to, files, version }) => {
       changes: { from: change.from, to: before.length - tail, insert: after.slice(change.from, change.to) },
       annotations: Transaction.addToHistory.of(false),
     });
-  } else publish(view.state);
+  } else if (!showingStarterBullet) publish(view.state);
 });
 view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
 view.focus();
