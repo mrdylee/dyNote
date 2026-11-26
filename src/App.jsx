@@ -159,6 +159,8 @@ const colorThemes = [
 const documentPromptsKey = "dynote.document-prompts";
 const draftKey = draft => documentKey(draft.vaultId, `tmp/${draft.id}.md`);
 
+const parentFolder = path => path.split("/").slice(0, -1).join("/");
+
 function IconButton({ label, children, onClick, active = false, ...props }) {
   return (
     <button
@@ -189,10 +191,9 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
   useEffect(() => {
     if (!reveal?.folder) return;
     setClosed(old => {
-      if (!old.has(reveal.folder)) return old;
       const next = new Set(old);
-      next.delete(reveal.folder);
-      return next;
+      for (let folder = reveal.folder; folder; folder = parentFolder(folder)) next.delete(folder);
+      return next.size === old.size ? old : next;
     });
   }, [reveal]);
   const tree = Object.create(null);
@@ -408,7 +409,6 @@ export default function App() {
   const documents = vault?.documents ?? emptyFiles;
   const setVault = transform => updateVault(vault.id, old => old && transform(old));
   const setRaw = transform => updateVault(vault.id, old => old && ({ ...old, notes: transform(old.notes) }));
-  const setDocuments = transform => updateVault(vault.id, old => old && ({ ...old, documents: transform(old.documents) }));
   const revisions = { current: revisionMap(vault?.id) };
   const [updateState,setUpdateState]=useState(null);
   const [dismissedUpdate,setDismissedUpdate]=useState(null);
@@ -541,6 +541,7 @@ export default function App() {
   }, [selectedVaultId]);
   useEffect(() => api?.onOpenSettings(tab => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) { if (tab === "fonts") setSettingsTab("fonts"); setModal("settings"); } }), [busy]);
   const [newName, setNewName] = useState("");
+  const [newDocumentTarget, setNewDocumentTarget] = useState(null);
   const [switchQuery, setSwitchQuery] = useState("");
   const [commandQuery, setCommandQuery] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
@@ -708,6 +709,9 @@ export default function App() {
   const visibleSpaces = connectedSpaces.filter(scope => together
     ? (filter === "all" || scope.id === filter || (filter === "personal" && scope.purpose === "personal"))
     : scope.id === vault?.id);
+  const showSidebarFilter = together && !showCalendar && !["recent", "bookmarks"].includes(section);
+  const sidebarCreateVault = showSidebarFilter && filter !== "all"
+    ? visibleSpaces.find(scope => scope.id === vault?.id) ?? visibleSpaces[0] : vault;
   const searchAcross = query => searchNotes(visibleSpaces.flatMap(scope =>
     [...models.get(scope.id).notes, ...(scope.wordDocuments ?? emptyFiles)].map(file => ({
       ...file, vaultId: scope.id, key: documentKey(scope.id, file.path), scopeLabel: spaceLabel(scope),
@@ -1277,19 +1281,34 @@ export default function App() {
     timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
   };
 
+  const openNewDocument = useCallback((name = "", target = { vaultId: vault?.id }) => {
+    if (!target.vaultId) return;
+    setNewDocumentTarget(target);
+    setNewName(name);
+    setError("");
+    setModal("new");
+  }, [vault?.id]);
+  const newSidebarDocument = useCallback((name = "") => {
+    openNewDocument(name, { vaultId: sidebarCreateVault?.id });
+  }, [sidebarCreateVault?.id, openNewDocument]);
+  const destination = modal === "new" ? newDocumentTarget : null;
   const createNote = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const path = /\.(md|canvas|base)$/i.test(newName.trim())
+      const vaultId = destination?.vaultId ?? vault.id;
+      const name = /\.(md|canvas|base)$/i.test(newName.trim())
         ? newName.trim()
         : newName.trim() + ".md";
+      const path = destination?.folder ? `${destination.folder}/${name}` : name;
       const content = modal === "newMap" ? "---\nmindmap-plugin: basic\n---\n# 새 마인드맵\n\n## 생각\n" : undefined;
-      const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId: vault.id, path, content }));
-      revisions.current.set(created.path, created.revision);
-      if (documentKind(path)) setDocuments((old) => [...old, created]);
-      else setRaw((old) => [...old, created]);
-      openNote(created.path);
+      const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId, path, content }));
+      if (!vaultsRef.current[vaultId]) return;
+      revisionMap(vaultId).set(created.path, created.revision);
+      const field = documentKind(path) ? "documents" : "notes";
+      updateVault(vaultId, old => ({ ...old, [field]: [...old[field], created] }));
+      setTreeReveal({ vaultId, folder: parentFolder(created.path) });
+      openNote(created.path, vaultId);
       setMode(modal === "newMap" ? "mindmap" : documentKind(path) ? "edit" : "live");
       setNewName("");
       setError("");
@@ -1345,8 +1364,9 @@ export default function App() {
         const key = event.key.toLowerCase();
         if (key === "s") flush(true).catch(() => {});
         else if (key === "n") {
-          setNewName("");
-          setModal("new");
+          if (modal === "new" || modal === "newMap") return;
+          if (event.target.closest?.(".navigator")) newSidebarDocument();
+          else openNewDocument();
         } else if (key === "p") {
           setCommandQuery(""); setCommandIndex(0); setModal("commands");
         } else {
@@ -1364,7 +1384,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [flush, busy, dismissModal]);
+  }, [flush, busy, modal, dismissModal, openNewDocument, newSidebarDocument]);
 
   const importFiles = async (files, id = vault.id) => {
     try {
@@ -1749,7 +1769,7 @@ export default function App() {
     void prepareFile(target.path, "trash", target.folder, vaultId, origin);
   };
   const newTreeFolder = (target, vaultId) => {
-    const parent = target.folder ? target.path : target.path.split("/").slice(0, -1).join("/");
+    const parent = target.folder ? target.path : parentFolder(target.path);
     setNewFolder({ vaultId, parent, name: "", error: "" });
     setTreeMenu(null);
     setModal("new-folder");
@@ -1924,8 +1944,7 @@ export default function App() {
     } else if (resolved.status === "ambiguous") {
       setError("같은 이름의 문서가 여러 개 있습니다. 링크에 폴더 경로를 적어 주세요.");
     } else {
-      setNewName(target.split(/[\#^]/)[0]);
-      setModal("new");
+      openNewDocument(target.split(/[\#^]/)[0], { vaultId, folder: "" });
     }
   };
 
@@ -1992,8 +2011,7 @@ export default function App() {
           "같은 이름의 문서가 여러 개 있습니다. 링크에 폴더 경로를 적어 주세요.",
         );
       else {
-        setNewName(target.split(/[\#^]/)[0]);
-        setModal("new");
+        openNewDocument(target.split(/[\#^]/)[0], { vaultId, folder: "" });
       }
     } else
       invoke(api.openExternal(anchor.href)).catch((err) =>
@@ -2063,7 +2081,7 @@ export default function App() {
   }), [modal === "commands", model.notes, journalPreferences, active, openNote]);
   const commands = [
     ...pluginData.entries.flatMap(entry => entry.commands?.map(command => ({ id: command.id, label: command.name, run: async () => { setModal(null); await invoke(api.pluginCommand({ vaultId: vault.id, id: entry.id, command: command.id })); } })) || []),
-    { id: "new", label: "새 문서 만들기", run: () => { setNewName(""); setModal("new"); } },
+    { id: "new", label: "새 문서 만들기", run: () => openNewDocument() },
     { id: "switch", label: "문서로 이동", run: () => { setSwitchQuery(""); setModal("switch"); } },
     { id: "open-journal", label: "저널 열기 (Open Journal)", run: () => { setJournalCalendar(false); setSection("journal"); setModal(null); } },
     { id: "journal", label: "달력과 일지", run: () => { setJournalCalendar(true); setSection("journal"); setModal(null); } },
@@ -2353,19 +2371,12 @@ export default function App() {
               >
                 <FolderOpen size={14} />
               </IconButton>
-              <IconButton
-                label="새 문서"
-                onClick={() => {
-                  setNewName("");
-                  setModal("new");
-                }}
-                disabled={busy}
-              >
-                <Plus size={16} />
-              </IconButton>
+              <button className="create-document-action" aria-label="새 문서" disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument()}>
+                <Plus size={15} />새 문서
+              </button>
             </div>
           </div>
-          {!showCalendar && !["recent", "bookmarks"].includes(section) && spaceSelector("문서 공간 범위")}
+          {showSidebarFilter && spaceSelector("문서 공간 범위")}
           {spaceWarnings.map(warning => <p key={warning} className="space-warning" role="status">{warning}</p>)}
           {showCalendar ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
           : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
@@ -2407,8 +2418,8 @@ export default function App() {
               onSyncDetails={id => openPanelSettings(id, panelSyncs[id]?.teamResult?.phase === "setup")}/>
           )}
           <div className="structured-create-actions">
-            <button disabled={busy} onClick={() => { setNewName("새 Canvas.canvas"); setModal("new"); }}>+ Canvas</button>
-            <button disabled={busy} onClick={() => { setNewName("새 Bases.base"); setModal("new"); }}>+ Bases</button>
+            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Canvas.canvas")}>+ Canvas</button>
+            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Bases.base")}>+ Bases</button>
           </div>
           <div className="attachments-list">
             <div className="nav-section-title">
@@ -2444,11 +2455,8 @@ export default function App() {
           </div>
           <button
             className="new-note-button"
-            onClick={() => {
-              setNewName("");
-              setModal("new");
-            }}
-            disabled={busy}
+            onClick={() => newSidebarDocument()}
+            disabled={busy || !sidebarCreateVault}
           >
             <Plus size={16} />새 문서 만들기<span>{shortcut} N</span>
           </button>
@@ -2470,15 +2478,9 @@ export default function App() {
                 </div>
               )}
             </div>
-            <IconButton
-              label="새 문서"
-              onClick={() => {
-                setNewName("");
-                setModal("new");
-              }}
-            >
-              <Plus size={16} />
-            </IconButton>
+            <button className="create-document-action" aria-label="새 문서" disabled={busy} onClick={() => openNewDocument()}>
+              <Plus size={15} />새 문서
+            </button>
           </div>
           {!showingBoard && <div className="document-toolbar">
             <div className="breadcrumbs">
@@ -2752,10 +2754,7 @@ export default function App() {
                 <p>왼쪽에서 문서를 열거나 새 문서를 만드세요.</p>
                 <button
                   className="primary-button"
-                  onClick={() => {
-                    setNewName("");
-                    setModal("new");
-                  }}
+                  onClick={() => openNewDocument()}
                 >
                   새 문서 만들기
                 </button>
@@ -3025,6 +3024,11 @@ export default function App() {
             items[(items.indexOf(event.target) + step + items.length) % items.length]?.focus();
           }
         }}>
+        <button role="menuitem" tabIndex={-1} disabled={!tabVaultId || busy} onClick={() => {
+          const savedTab = tabPath && !externalFile.documents[tabMenu.key] && !documentDrafts.some(draft => draftKey(draft) === tabMenu.key);
+          setTabMenu(null);
+          openNewDocument("", { vaultId: tabVaultId, folder: savedTab ? parentFolder(tabPath) : "" });
+        }}>{isWindows && <Plus />}새 문서</button>
         <button role="menuitem" tabIndex={-1} disabled={!tabVaultId || busy || panelSyncs[tabVaultId]?.working} onClick={() => {
           setTabMenu(null);
           tabMenu.origin.focus();
@@ -3060,6 +3064,10 @@ export default function App() {
         }}>{isWindows && <FolderOpen />}파일 위치 열기</button>}
         {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
         {isWindows && (personalMenu || teamMenu || !treeMenu.folder && canRevealFile(treeMenu.vaultId, treeMenu.path)) && <hr />}
+        <button role="menuitem" disabled={busy} onClick={() => {
+          setTreeMenu(null);
+          openNewDocument("", { vaultId: treeMenu.vaultId, folder: treeMenu.folder ? treeMenu.path : parentFolder(treeMenu.path) });
+        }}>{isWindows && <Plus />}새 문서</button>
         <button role="menuitem" aria-keyshortcuts={isMac ? "Meta+Shift+N" : "Control+Shift+N"} onClick={() => newTreeFolder(treeMenu, treeMenu.vaultId)}>{isWindows && <FolderPlus />}폴더 추가 <kbd aria-hidden="true">{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd></button>
         {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>{isWindows && <PencilLine />}이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
         {treeMenu.path && !treeMenu.other && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
@@ -3273,9 +3281,11 @@ export default function App() {
       {(modal === "new" || modal === "newMap") && (
         <Modal title="새로운 생각 기록하기" onClose={() => setModal(null)}>
           <form onSubmit={createNote}>
+            <p className="muted">{spaceLabel(vaults[destination?.vaultId] ?? vault)}{destination?.folder && ` / ${destination.folder}`}</p>
             <label htmlFor="new-note-name">문서 이름</label>
             <input
               id="new-note-name"
+              disabled={busy}
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -3284,6 +3294,7 @@ export default function App() {
             <p className="muted">
               폴더/문서 이름으로 입력하면 폴더도 함께 만듭니다. .canvas 또는 .base 확장자로 해당 문서를 만들 수 있습니다.
             </p>
+            {error && <p role="alert">{error}</p>}
             <div className="modal-actions">
               <button
                 type="button"

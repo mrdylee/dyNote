@@ -441,7 +441,16 @@ kbd {
 .tab-close:hover {
   color: var(--accent-ink);
 }
-.tabbar > .icon-button {
+.create-document-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tabbar > .create-document-action {
   margin-left: 8px;
 }
 .document-toolbar {
