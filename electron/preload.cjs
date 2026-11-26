@@ -3,6 +3,7 @@ const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
 contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
+    revealFile: key => call("reveal-file", key),
     startupStage: stage => ipcRenderer.send("notes:startup-stage", stage),
     snapshot: args => call("snapshot", args),
     workspaceSnapshots: () => call("workspace-snapshots"),

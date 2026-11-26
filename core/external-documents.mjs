@@ -100,6 +100,11 @@ export class ExternalDocuments {
     });
   }
 
+  async fileLocation(id) {
+    await this.#tail;
+    return sourcePath(this.#entry(id).source);
+  }
+
   async sourcePath(id) {
     await this.#tail;
     const source = this.#entry(id).source;

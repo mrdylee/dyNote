@@ -26,6 +26,7 @@ test("opens Markdown and UTF-8 text without changing source bytes or interpretin
     assert.equal(opened.content, content);
     assert.deepEqual(await readFile(file), bytes);
     assert.equal(opened.canOpenSource, /\.(md|json)$/i.test(name));
+    assert.equal(await documents.fileLocation(opened.id), file);
     if (opened.canOpenSource) assert.equal(await documents.sourcePath(opened.id), file);
     else await assert.rejects(documents.sourcePath(opened.id), /편집기/);
   }

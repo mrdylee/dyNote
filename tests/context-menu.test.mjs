@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileForElement, fileLocationRef } from "../src/file-location.mjs";
 import { contextMenuTemplate } from "../electron/context-menu.mjs";
 test("contenteditable menu uses editor history and formatting; form fields retain native roles", () => {
   const actions=[];
@@ -23,6 +24,15 @@ test("reading menu cannot cut or paste and offers copy only when available", () 
   assert.equal(menu.find(item=>item.role==="copy").enabled,true);
   assert.ok(!menu.some(item=>item.label==="서식"));
 });
+test("file location is offered only for a file and keeps the edit menu", () => {
+  const params = { isEditable: true, formControlType: "none" };
+  let clicks = 0;
+  const menu = contextMenuTemplate(params, () => {}, () => {}, () => {}, () => clicks++);
+  assert.ok(menu.some(item => item.role === "copy"));
+  menu.find(item => item.label === "파일 위치 열기").click();
+  assert.equal(clicks, 1);
+  assert.ok(!contextMenuTemplate(params).some(item => item.label === "파일 위치 열기"));
+});
 test("workspace sync is available in the editor, form fields and reading view", () => {
   for (const params of [
     { isEditable: true, formControlType: "none" },
@@ -36,4 +46,14 @@ test("workspace sync is available in the editor, form fields and reading view", 
     sync.click();
     assert.equal(calls, 1);
   }
+});
+
+test("only file views registered by the app identify the clicked document", () => {
+  const pane = {};
+  const content = { parentElement: pane, dataset: { fileLocation: "other.md" } };
+  assert.equal(fileForElement(content), null);
+  fileLocationRef("original.md")(pane);
+  assert.equal(fileForElement(content), "original.md");
+  fileLocationRef(null)(pane);
+  assert.equal(fileForElement(content), null);
 });

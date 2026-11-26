@@ -1,7 +1,9 @@
+import { fileLocationRef } from "./file-location.mjs";
 import {useEffect,useMemo,useRef,useState} from 'react';
 import DOMPurify from 'dompurify';
 import {periodicNote,periodicContent,periodicEntries} from '../core/periodic-notes.mjs';
 import {renderMarkdown} from '../core/knowledge.mjs';
+import {documentKey} from '../core/document-workspace.mjs';
 import DiagramPreview from './DiagramPreview.jsx';
 import Editor from './Editor.jsx';
 import CopilotJournalEntries,{CopilotJournalToolbar} from './CopilotJournalEntries.jsx';
@@ -53,7 +55,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
   return <section className="journal-feed" aria-label="저널 피드"><header><h1>저널</h1><p>오늘의 기록을 남기고, 나중에 폴더별로 정리하세요.</p></header>
     {capture&&<CopilotJournalToolbar {...capture} disabled={disabled}/>}
     {(error||templateError)&&<p role="alert">{error||templateError}</p>}
-    {current&&<article className="journal-entry" data-document-path={current.path} data-vault-id={vault.id}
+    {current&&<article className="journal-entry" ref={fileLocationRef(todayNote?.revision ? documentKey(vault.id,current.path) : undefined)} data-document-path={current.path} data-vault-id={vault.id}
       onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setEditingDate(null);}}>
       <header><h2>{today}</h2></header>
       {conflictNotice(current.path)}
@@ -64,7 +66,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
         onImportFiles={onImportFiles} onLink={(target,kind)=>onLink(target,kind,current.path,vault.id)}
         jump={jump} fontSettings={fonts} onFontSettings={onFontSettings} readOnly={readOnly}/>
     </article>}
-    {entries.slice(0,count).map(note=><article className="journal-entry" key={note.path} data-document-path={note.path} data-vault-id={vault.id}>
+    {entries.slice(0,count).map(note=><article className="journal-entry" key={note.path} ref={fileLocationRef(note.revision ? documentKey(vault.id,note.path) : undefined)} data-document-path={note.path} data-vault-id={vault.id}>
       <header><h2><button className="journal-date" disabled={disabled} onClick={()=>onOpen(note.path)}>{note.date}</button></h2></header>
       {conflictNotice(note.path)}
       <ReceivedLinks note={note} notes={notes} records={capture?.state?.records} onOpen={onOpen}/>

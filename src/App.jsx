@@ -1,3 +1,4 @@
+import { fileLocationRef } from "./file-location.mjs";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { captureDateHeading } from "../core/copilot-journal-links.mjs";
 import {
@@ -418,7 +419,7 @@ export default function App() {
   const [tabCloseRequest, setTabCloseRequest] = useState(null);
   const [tabMenu, setTabMenu] = useState(null);
   const tabMenuRef = useRef(null);
-  const tabVaultId = documentRef(tabMenu?.key, vault?.id).vaultId;
+  const { vaultId: tabVaultId, path: tabPath } = documentRef(tabMenu?.key, vault?.id);
   const tabMenuIndex = tabs.indexOf(tabMenu?.key);
   useEffect(() => {
     if (tabMenuIndex < 0) return;
@@ -1109,6 +1110,9 @@ export default function App() {
     }
     return true;
   };
+  const canRevealFile = (id, path) => !!path && (!/\.md$/i.test(path) ||
+    vaults[id]?.notes.some(note => note.path === path && note.revision));
+  const revealFile = key => invoke(api.revealFile(key)).catch(error => setError(error.message));
   const showTabMenu = (event, key) => {
     event.preventDefault();
     if (busy || (macCopyDrag.current && event.ctrlKey)) return;
@@ -1677,7 +1681,7 @@ export default function App() {
   };
   const showTreeMenu = (origin, x, y, target, vaultId) => {
     const scope = vaultsRef.current[vaultId];
-    if (!scope || busy || target.other && !scope.purpose) {
+    if (!scope || busy) {
       setTreeMenu(null);
       return;
     }
@@ -2005,7 +2009,7 @@ export default function App() {
     Promise.resolve().then(command.run).catch(err => setError(err.message));
   };
 
-  const externalPreview = externalDocument && <section className="external-file-preview" aria-label={externalDocument.name}>
+  const externalPreview = externalDocument && <section className="external-file-preview" ref={fileLocationRef(externalKey)} aria-label={externalDocument.name}>
     {isOfficeKind(externalDocument.kind) ? <OfficePreview key={externalDocument.id} document={externalDocument} position={externalFile.current.position}
       onEdit={externalFile.openSource} onRefresh={externalFile.refresh} error={externalFile.current.error}/> : <>
       <div className="word-preview-actions">
@@ -2016,6 +2020,9 @@ export default function App() {
       <ExternalFilePreview key={externalDocument.id} document={externalDocument} onExternal={openExternal}/>
     </>}
   </section>;
+  const singleViewPath = !["journal", "graph", "planner"].includes(section) && !showingExternal
+    ? attachment?.path ?? structured?.path ?? (mode === "mindmap" && note?.revision ? note.path : null)
+    : null;
   const documentTabs = tabs.map(key => {
     const external = externalFile.documents[key];
     const { vaultId, path: vaultPath } = documentRef(key);
@@ -2024,10 +2031,10 @@ export default function App() {
     if (!scope && !external) return null;
     const draft = documentDrafts.find(item => draftKey(item) === key);
     const label = external ? "임시 미리보기" : together ? spaceLabel(scope) : null;
-    return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && (external ? showingExternal : section !== "graph") ? "active" : ""}`} key={key}
-      onContextMenu={event => showTabMenu(event, key)}
+    return <div data-tab-key={key} ref={fileLocationRef(!vault && external ? key : undefined)} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && (external ? showingExternal : section !== "graph") ? "active" : ""}`} key={key}
+      onContextMenu={vault ? event => showTabMenu(event, key) : undefined}
       onKeyDown={event => {
-        if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
+        if (vault && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) showTabMenu(event, key);
       }}>
       <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
         draggable={!busy && (!!external || /\.md$/i.test(path))}
@@ -2525,7 +2532,7 @@ export default function App() {
             <CopilotJournalEntries records={captureState?.records?.filter(record=>record.journalPath===note.path)} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>
           </>}
           {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
-          <div className="document-area" hidden={!!activeDocumentDraft && section === "files" && !attachment} onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
+          <div className="document-area" ref={fileLocationRef(documentKey(attachment?.vaultId ?? vault.id, singleViewPath))} hidden={!!activeDocumentDraft && section === "files" && !attachment} onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
               <NotebookPen size={40} />
               <h2>저널은 개인 노트에 저장됩니다</h2>
@@ -2925,6 +2932,11 @@ export default function App() {
           tabMenu.origin.focus();
           void syncVault(tabVaultId);
         }}>{panelSyncs[tabVaultId]?.working ? "동기화 중…" : "지금 동기화"}</button>
+        {(externalFile.documents[tabMenu.key] || (!documentDrafts.some(draft => draftKey(draft) === tabMenu.key) && canRevealFile(tabVaultId, tabPath))) && <button role="menuitem" tabIndex={-1} onClick={() => {
+          setTabMenu(null);
+          tabMenu.origin.focus();
+          void revealFile(tabMenu.key);
+        }}>파일 위치 열기</button>}
         {[
           ["이 탭 닫기", [tabMenu.key]],
           ["다른 탭 모두 닫기", tabs.filter(key => key !== tabMenu.key)],
@@ -2943,6 +2955,11 @@ export default function App() {
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
         {(personalMenu || teamMenu) && <button role="menuitem" disabled={panelWorking || personalMenu && !menuGit}
           onClick={() => { setTreeMenu(null); treeMenu.origin.focus(); void syncVault(treeMenu.vaultId); }}>{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
+        {!treeMenu.folder && canRevealFile(treeMenu.vaultId, treeMenu.path) && <button role="menuitem" onClick={() => {
+          setTreeMenu(null);
+          treeMenu.origin.focus();
+          void revealFile(documentKey(treeMenu.vaultId, treeMenu.path));
+        }}>파일 위치 열기</button>}
         {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
         <button role="menuitem" onClick={() => {
           const parent = treeMenu.folder ? treeMenu.path : treeMenu.path.split("/").slice(0, -1).join("/");

@@ -434,6 +434,13 @@ export class Vault {
     return { id: this.id, name: this.name, notes, documents, wordDocuments, attachments, otherFiles, folders, warnings };
   }
 
+  async fileLocation(relative) {
+    await this.#tail;
+    const file = await this.#file(relative, false, validRelativePath);
+    if (await realpath(file) !== file) throw new Error("파일 위치가 변경되었습니다.");
+    return file;
+  }
+
   async officeFilePath(relative) {
     await this.#tail;
     if (!officeKind(relative)) throw new Error("Excel 또는 PowerPoint 파일을 선택해 주세요.");

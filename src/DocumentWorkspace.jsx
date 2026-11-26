@@ -1,3 +1,4 @@
+import { fileLocationRef } from "./file-location.mjs";
 import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
 import DOMPurify from 'dompurify';
 import {renderMarkdown} from '../core/knowledge.mjs';
@@ -11,7 +12,7 @@ function Pane({note, docKey, vault, scopeLabel, active, mode, onFocus, onClose, 
   useEffect(()=>{const clear=()=>setEdge(null);window.addEventListener('dragend',clear);window.addEventListener('drop',clear);return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);};},[]);
   const side=e=>e.clientX < e.currentTarget.getBoundingClientRect().x + e.currentTarget.clientWidth / 2 ? 'left' : 'right';
   const bodyDrop=e=>e.dataTransfer.types.includes(TAB_DRAG) && !!e.target.closest('.document-content');
-  return <section className={`document-pane ${active?'focused':''}`} role="region" aria-label={`문서 ${note.path}`} aria-description={scopeLabel} data-document-path={note.path} data-vault-id={vault.id}
+  return <section className={`document-pane ${active?'focused':''}`} role="region" aria-label={`문서 ${note.path}`} aria-description={scopeLabel} ref={fileLocationRef(note.revision ? docKey : undefined)} data-document-path={note.path} data-vault-id={vault.id}
     onFocusCapture={onFocus} onPointerDownCapture={onFocus}
     onDragOverCapture={e=>{if(!e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();const link=bodyDrop(e);const blocked=disabled||(link?(captureLocked||edits.working):limited);e.dataTransfer.dropEffect=blocked?'none':'copy';setEdge(blocked?null:link?'link':side(e));}}
     onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setEdge(null);}}

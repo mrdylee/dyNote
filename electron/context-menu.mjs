@@ -1,4 +1,4 @@
-export function contextMenuTemplate(params, onFormat, onFonts, onSync) {
+export function contextMenuTemplate(params, onFormat, onFonts, onSync, onReveal) {
   const flags = params.editFlags ?? {};
   const editor = params.isEditable && params.formControlType === "none";
   const edit = (role, label, enabled) => ({ role, label, enabled: Boolean(enabled) });
@@ -20,5 +20,6 @@ export function contextMenuTemplate(params, onFormat, onFonts, onSync) {
   );
   template.push({ type: "separator" }, { id: "font-settings", label: "글꼴 설정…", click: onFonts });
   template.push({ id: "sync-vault", label: "지금 동기화", click: onSync });
+  if (onReveal) template.push({ id: "reveal-file", label: "파일 위치 열기", click: onReveal });
   return template;
 }

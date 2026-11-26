@@ -25,6 +25,17 @@ async function fixture(t) {
   return { dir, root, recovery, store: await Vault.open(root, recovery) };
 }
 
+test("file location resolves the existing file within the requested vault", async t => {
+  const { store, root, dir } = await fixture(t);
+  await mkdir(join(root, "자료"));
+  await writeFile(join(root, "자료", "한글 메모.md"), "");
+  assert.equal(await store.fileLocation("자료/한글 메모.md"), join(store.root, "자료", "한글 메모.md"));
+  await assert.rejects(store.fileLocation("없는 파일.md"));
+  await assert.rejects(store.fileLocation("../한글.md"));
+  await symlink(dir, join(root, "링크"), "junction");
+  await assert.rejects(store.fileLocation("링크/vault/한글.md"));
+});
+
 test("personal and team vaults start with an empty File Storage folder and preserve its files on reopen", async t => {
   const { root, recovery, dir, store } = await fixture(t);
   assert.ok(!(await store.snapshot()).folders.includes("File Storage"));
