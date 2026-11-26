@@ -19,6 +19,7 @@ const updateTitle = content => {
   if (title.textContent !== text) title.textContent = text;
 };
 
+document.querySelector("#new-sticky").addEventListener("click", () => window.sticky.create());
 document.querySelector("#close").addEventListener("click", () => window.sticky.close());
 pin.addEventListener("click", () => window.sticky.pin());
 window.sticky.onPinned(updatePin);

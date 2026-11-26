@@ -16,7 +16,7 @@ import { PersonalSync } from "../core/personal-sync.mjs";
 import { runGit } from "../core/git-backup.mjs";
 import { localOnlyFiles } from "../core/git-file-status.mjs";
 import { validFilePath, validPersonalFilePath } from "../core/vault.mjs";
-import { mergeCaptureBlocks } from "../core/personal-sync-text.mjs";
+import { mergeCaptureBlocks, textChoices } from "../core/personal-sync-text.mjs";
 import { integrate, chooseVersion, checkTreeChanges, normalizePublished } from "../core/personal-sync-merge.mjs";
 
 async function fixture(t) {
@@ -325,18 +325,23 @@ test("personal sync path validation separates ZIP and built-in metadata from unr
 test("each conflicting Markdown hunk can be chosen independently while clean edits are retained", async (t) => {
   const { store, config, cloud, local, checkpoint } = await fixture(t);
   const path = "meeting.md",
-    base = await checkpoint(null, cloud, { [path]: "first\nx\na\nb\nc\ny\nlast\n" });
-  const a = await checkpoint(base, cloud, { [path]: "CLOUD INTRO\nx2\na\nb\nc\ny2\nlast\n" });
-  const b = await checkpoint(base, local, { [path]: "first\nx3\na\nb\nc\ny3\nLOCAL END\n" });
+    base = await checkpoint(null, cloud, { [path]: "first\nx\na\nb\nc\ny\nlast\nspacer\nend\n" });
+  const a = await checkpoint(base, cloud, { [path]: "CLOUD INTRO\nx2\na\nb\nc\ny2\nlast\nspacer\nCLOUD END\n" });
+  const b = await checkpoint(base, local, { [path]: "first\nx3\na\nb\nc\ny3\nLOCAL END\nspacer\nend\n" });
   const head = await integrate(store, a, b, local, config),
     files = await store.tree(head);
   const group = (await store.metadata(files)).groups.get(path);
+  const parts = await textChoices(store, path, [...group.versions.values()]);
+  for (const [side, ref] of [["original", base], [a, a], [b, b]]) {
+    const document = parts.map(part => typeof part === "string" ? part : part.alternatives[side] ?? part.original).join("");
+    assert.equal(document, (await store.blob((await store.tree(ref)).get(path).oid)).toString());
+  }
   const final = await chooseVersion(store, head, path, group.pending, b, local, config, { hunks: [a, b] });
   const blob = (await store.tree(final)).get(path);
-  assert.equal((await store.blob(blob.oid)).toString(), "CLOUD INTRO\nx2\na\nb\nc\ny3\nLOCAL END\n");
+  assert.equal((await store.blob(blob.oid)).toString(), "CLOUD INTRO\nx2\na\nb\nc\ny3\nLOCAL END\nspacer\nCLOUD END\n");
   const original = await chooseVersion(store, head, path, group.pending, b, local, config, { hunks: ["original", b] });
   const mixed = (await store.tree(original)).get(path);
-  assert.equal((await store.blob(mixed.oid)).toString(), "first\nx\na\nb\nc\ny3\nLOCAL END\n");
+  assert.equal((await store.blob(mixed.oid)).toString(), "first\nx\na\nb\nc\ny3\nLOCAL END\nspacer\nCLOUD END\n");
 });
 
 test("simultaneous decisions survive even if one chooses the already published contents", async (t) => {

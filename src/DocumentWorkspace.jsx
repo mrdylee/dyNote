@@ -70,26 +70,32 @@ function DocumentPane(props) {
   </Pane>;
 }
 
-export default function DocumentWorkspace({workspace,resolveDocument,onOpen,onAdd,onContext,...props}) {
+export function DocumentPanes({panes,renderPane}) {
   const [widths,setWidths]=useState({});
   const drag=useRef(null);
+  return <div className="document-workspace">
+    {panes.map((pane,index)=><Fragment key={pane.key}>
+      {index>0&&<div className="document-separator" role="separator" aria-label="문서 영역 너비" aria-orientation="vertical" tabIndex={0}
+        onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const previous=e.currentTarget.previousElementSibling;drag.current={x:e.clientX,width:previous.getBoundingClientRect().width,key:panes[index-1].key};}}
+        onPointerMove={e=>{const start=drag.current;if(start)setWidths(old=>({...old,[start.key]:Math.max(180,Math.min(900,start.width+e.clientX-start.x))}));}}
+        onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}
+        onKeyDown={e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const key=panes[index-1].key;setWidths(old=>({...old,[key]:Math.max(180,Math.min(900,(old[key]??300)+(e.key==='ArrowRight'?30:-30)))}));}}/>}
+      <div className="pane-slot" style={{flexBasis:widths[pane.key]??0,flexGrow:widths[pane.key]?0:1}}>
+        {renderPane(pane)}
+      </div>
+    </Fragment>)}
+  </div>;
+}
+
+export default function DocumentWorkspace({workspace,resolveDocument,onOpen,onAdd,onContext,...props}) {
   const visible=workspace.paths.flatMap(key=>{
     const doc=resolveDocument(key);
     return doc ? [{...doc,key}] : [];
   });
-  return <div className="document-workspace">
-    {visible.map(({key,...doc},index)=><Fragment key={key}>
-      {index>0&&<div className="document-separator" role="separator" aria-label="문서 영역 너비" aria-orientation="vertical" tabIndex={0}
-        onPointerDown={e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const previous=e.currentTarget.previousElementSibling;drag.current={x:e.clientX,width:previous.getBoundingClientRect().width,key:visible[index-1].key};}}
-        onPointerMove={e=>{const start=drag.current;if(start)setWidths(old=>({...old,[start.key]:Math.max(180,Math.min(900,start.width+e.clientX-start.x))}));}}
-        onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}
-        onKeyDown={e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const key=visible[index-1].key;setWidths(old=>({...old,[key]:Math.max(180,Math.min(900,(old[key]??300)+(e.key==='ArrowRight'?30:-30)))}));}}/>}
-      <div className="pane-slot" style={{flexBasis:widths[key]??0,flexGrow:widths[key]?0:1}}>
-        <DocumentPane {...props} {...doc} docKey={key} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
+  return <DocumentPanes panes={visible} renderPane={({key,...doc})=>(
+    <DocumentPane {...props} {...doc} docKey={key} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
           onFocus={()=>{if(workspace.active!==key)onOpen(key);}} onContext={onContext}
           onClose={()=>workspace.dispatch({type:'close',path:key})} onDrop={(path,side)=>onAdd(path,side,key)}
           onEdit={()=>workspace.dispatch({type:'mode',path:key,mode:'live'})} pending={doc.edits.drafts.find(d=>d.path===doc.note.path)}/>
-      </div>
-    </Fragment>)}
-  </div>;
+  )}/>;
 }

@@ -1,0 +1,31 @@
+.sticky-board {
+  min-height: 100%; padding: clamp(20px, 3vw, 44px);
+  color: #342f31; background-color: #faf9f6;
+  background-image: radial-gradient(#dedbd4 0.7px, transparent 0.8px);
+  background-size: 12px 12px;
+}
+.sticky-board-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.sticky-board-header h1 { margin: 0; font-size: clamp(21px, 2vw, 29px); letter-spacing: -.04em; }
+.sticky-board-header p { margin: 5px 0 0; color: #69656d; font-size: 12px; }
+.sticky-board-new { display: inline-flex; align-items: center; gap: 5px; padding: 9px 13px; border-radius: 8px; background: var(--accent-ink); color: white; font-weight: 600; }
+.sticky-board-new:hover { background: var(--accent); }
+.sticky-board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(175px, 100%), 1fr)); align-items: stretch; gap: 16px; }
+.sticky-board-card {
+  --paper: #fff1bd; --fold: #e6ce85;
+  position: relative; display: flex; flex-direction: column; align-items: stretch;
+  min-width: 0; min-height: 174px; padding: 18px 17px 13px; border-radius: 3px;
+  color: #383539; text-align: left; overflow-wrap: anywhere;
+  background: linear-gradient(225deg, transparent 10px, var(--fold) 10.5px, var(--fold) 20px, var(--paper) 20.5px) top right / 15px 15px no-repeat,
+    linear-gradient(225deg, transparent 10px, var(--paper) 10.5px);
+  filter: drop-shadow(0 2px 2px #40331d22);
+}
+.sticky-board-card[data-paper=mint] { --paper: #e0f0df; --fold: #b4cfb4; }
+.sticky-board-card[data-paper=lavender] { --paper: #eee5f8; --fold: #cfc0df; }
+.sticky-board-card[data-paper=sky] { --paper: #e0eef8; --fold: #b7cfdc; }
+.sticky-board-card[data-paper=peach] { --paper: #fae5d9; --fold: #dfc0ad; }
+.sticky-board-card:hover { filter: drop-shadow(0 4px 4px #40331d33); }
+.sticky-board-card strong, .sticky-board-preview { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.sticky-board-card strong { -webkit-line-clamp: 2; font-size: 16px; line-height: 1.4; }
+.sticky-board-preview { -webkit-line-clamp: 4; margin: 9px 0 12px; white-space: pre-wrap; line-height: 1.55; font-size: 13px; }
+.sticky-board-card small { margin-top: auto; font-size: 10px; color: #615a59; }
+.sticky-board-empty { padding: 45px 10px; text-align: center; color: #73695c; }

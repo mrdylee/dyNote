@@ -84,7 +84,7 @@ export async function textChoices(store, name, versions) {
     const distinct = [...new Set(Object.values(alternatives))];
     parts.push(
       distinct.length === 1
-        ? distinct[0]
+        ? { merged: distinct[0], original: originalText, alternatives }
         : { key: [base.oid, group.start, group.end].join("/"), original: originalText, alternatives }
     );
     at = group.end;
@@ -98,6 +98,7 @@ export function resolveText(parts, choices, defaultId) {
   return parts
     .map((part) => {
       if (typeof part === "string") return part;
+      if (Object.hasOwn(part, "merged")) return part.merged;
       const id = choices?.[n++] ?? defaultId;
       if (id === "original") return part.original;
       if (!Object.hasOwn(part.alternatives, id)) throw new Error("겹친 구간마다 남길 문장을 선택해 주세요.");

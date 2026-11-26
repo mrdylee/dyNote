@@ -554,7 +554,7 @@ app
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
     const scopedActions = new Set([
-      "create-folder", "move-across-vaults",
+      "open-sticky", "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
@@ -564,6 +564,11 @@ app
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
     for (const [name, action] of Object.entries({
+      "open-sticky": (args, target) => {
+        checkVault(args, target);
+        if (!stickyNotes) throw new Error("스티키 노트를 준비하는 중입니다. 잠시 후 다시 열어 주세요.");
+        return stickyNotes.openFromVault(target.root, args.path);
+      },
       "document-drafts": () => documentDrafts.list(),
       "write-document-draft": args => documentDrafts.write(args),
       "remove-document-draft": args => documentDrafts.remove(args.id),

@@ -6,17 +6,16 @@ import { fileURLToPath } from "node:url";
 import { rewriteLinks } from "../core/links.mjs";
 import { stickyTitle } from "../core/sticky-title.mjs";
 import { validNotePath } from "../core/vault.mjs";
-import { fitStickyBounds, nextStickyPlacement, STICKY_COLORS, STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
+import { fitStickyBounds, nextStickyPlacement, isStickyPath, STICKY_FOLDER, STICKY_COLORS, STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
 
 const url = "notes://app/sticky.html";
 const preload = fileURLToPath(new URL("./sticky-preload.cjs", import.meta.url));
 const icon = fileURLToPath(new URL("./sticky-trayTemplate.png", import.meta.url));
 const saveDelay = 550;
-const stickyFolder = "포스트잇/";
 
 function notePath(id, title) {
   const name = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, " ").replace(/^\.+/, "").trim().slice(0, 36);
-  return `${stickyFolder}${name || "메모"}-${id.slice(0, 13)}.md`;
+  return `${STICKY_FOLDER}${name || "메모"}-${id.slice(0, 13)}.md`;
 }
 
 export class StickyNotes {
@@ -80,7 +79,7 @@ export class StickyNotes {
         || /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(target.trim()) || !["markdown", "wiki"].includes(kind)
         || !Number.isInteger(moveVersion) || moveVersion < 0 || moveVersion > state.moveVersion) return;
       const pendingMove = state.pendingMoves.find(move => move.version > moveVersion);
-      const sourcePath = pendingMove?.from ?? state.record.path ?? stickyFolder;
+      const sourcePath = pendingMove?.from ?? state.record.path ?? STICKY_FOLDER;
       void this.openLink(state.record.root, sourcePath, target, kind)
         .catch(error => dialog.showErrorBox("Dynote Sticky Note", error.message));
     });
@@ -93,6 +92,7 @@ export class StickyNotes {
       state.window.webContents.send("sticky:pinned", pinned);
       this.#schedule(state);
     });
+    ipcMain.on("sticky:new", event => { if (this.#sender(event)) this.open(); });
     ipcMain.on("sticky:close", event => this.#sender(event)?.window.close());
 
     const trayImage = nativeImage.createFromPath(icon);
@@ -114,6 +114,16 @@ export class StickyNotes {
       const record = this.#records.get(id);
       if (this.canOpen() && (!id || record)) return this.#open(record);
     }).catch(error => dialog.showErrorBox("Dynote Sticky Note", error.message));
+  }
+
+  openFromVault(root, relative) {
+    return this.#enqueue(() => {
+      if (!this.canOpen() || root !== this.selectRoot()) throw new Error("스티키 노트의 개인 보관함을 다시 확인해 주세요.");
+      if (relative === undefined) return this.#open();
+      if (!validNotePath(relative) || !isStickyPath(relative)) throw new Error("포스트잇 폴더의 Markdown 메모를 선택해 주세요.");
+      const record = [...this.#records.values()].find(item => item.root === root && item.path === relative);
+      return this.#open(record, relative);
+    });
   }
 
   moveFile(vault, from, to, revision) {
@@ -166,24 +176,29 @@ export class StickyNotes {
     return [...this.#records.values()].some(record => record.root === vault.root && record.path.startsWith(folder + '/'));
   }
 
-  async #open(record) {
+  async #open(record, relative = record?.path) {
     const existing = record && this.#windows.get(record.id);
     if (existing) {
       existing.window.show();
       existing.window.focus();
       return;
     }
-    const file = record && await this.readNote(record.root, record.path);
+    const root = record?.root ?? this.selectRoot();
+    if (!root) throw new Error("Dynote 설정에서 개인 노트 보관함을 연결해 주세요.");
+    const file = relative && await this.readNote(root, relative);
     const display = record ? screen.getDisplayMatching(record.bounds)
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     if (!record) {
-      const root = this.selectRoot();
-      if (!root) throw new Error("Dynote 설정에서 개인 노트 보관함을 연결해 주세요.");
       const openCards = [...this.#windows.values()].map(state => state.record);
       record = {
         id: randomUUID(), root, pinned: false, createdAt: Date.now(),
         ...nextStickyPlacement(display.workArea, openCards, this.#lastPlacement),
       };
+      if (file) {
+        Object.assign(record, { path: file.path, title: stickyTitle(file.content).slice(0, 54), updatedAt: file.metadata.mtime });
+        await this.#remember(record);
+        this.#records.set(record.id, record);
+      }
       this.#lastPlacement = record;
     }
     const bounds = fitStickyBounds(record.bounds, display.workArea);

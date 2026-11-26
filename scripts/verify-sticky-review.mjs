@@ -17,14 +17,21 @@ async function until(read, check, label) {
   assert.fail(label);
 }
 
-async function fixture(bodies, run) {
+async function fixture(bodies, run, { withTeam = false } = {}) {
   const root = await mkdtemp(path.join(await realpath(tmpdir()), "dynote-sticky-review-"));
   const profile = path.join(root, "profile");
   const vault = path.join(root, "vault");
   const stateDir = path.join(profile, "sticky-notes");
   await mkdir(stateDir, { recursive: true });
   await mkdir(path.join(vault, "포스트잇"), { recursive: true });
-  await writeFile(path.join(profile, "settings.json"), JSON.stringify({ vaultRoot: vault }));
+  const settings = { vaultRoot: vault };
+  if (withTeam) {
+    const team = path.join(root, "team");
+    await mkdir(path.join(team, "포스트잇"), { recursive: true });
+    await writeFile(path.join(team, "포스트잇", "team.md"), "팀 전용 메모");
+    Object.assign(settings, { vaultRoot: team, vaults: [team, vault], vaultPurposes: { [vault]: "personal", [team]: "team" } });
+  }
+  await writeFile(path.join(profile, "settings.json"), JSON.stringify(settings));
   await writeFile(path.join(vault, "Reference.md"), "# 참고 문서\n");
   const records = [];
   for (const [index, body] of bodies.entries()) {
@@ -317,4 +324,145 @@ test("Enter starts a bullet in an existing plain-text sticky and preserves its b
     assert.equal(await markdown(card), "이전 버전의 일반 문단\n\n- 새 불릿");
     await until(() => readFile(file, "utf8"), text => text === existing + "\r\n- 새 불릿", "original CRLF is preserved");
   });
+});
+
+test("synced sticky picker opens the original file and both plus buttons create cards", async () => {
+  await fixture([], async ({ app, main, vault }) => {
+    const panel = main.getByRole("region", { name: "스티키 노트" });
+    const rail = main.getByRole("navigation", { name: "주 메뉴" });
+    const toggle = rail.getByRole("button", { name: "스티키 노트", exact: true });
+    const mainWindow = await app.browserWindow(main);
+    await mainWindow.evaluate(win => win.setSize(win.getSize()[0], win.getMinimumSize()[1]));
+    assert.ok(await rail.evaluate(nav => nav.lastElementChild.getBoundingClientRect().bottom <= innerHeight),
+      "the bottom icons fit at the minimum window height");
+    assert.equal(await panel.isVisible(), false);
+    await toggle.click();
+    await panel.waitFor();
+    await main.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden" });
+    await toggle.click();
+    const entries = await main.evaluate(async () => (await window.notes.workspaceSnapshots()).value);
+    const personal = entries.find(entry => entry.purpose === "personal");
+    const relative = "포스트잇/cloud.md";
+    const title = "제품 검토 회의";
+    const content = "- " + title + "\n  - 금요일까지 시안 공유";
+    await writeFile(path.join(vault, relative), content);
+    await app.evaluate(({ BrowserWindow }, status) => {
+      BrowserWindow.getAllWindows()[0].webContents.send("notes:git-status", status);
+    }, { vaultId: personal.snapshot.id, changed: [relative] });
+    const row = panel.getByRole("button", { name: title, exact: true });
+    await row.waitFor();
+    assert.equal(await panel.getByText("팀 전용 메모").count(), 0);
+    assert.equal(app.windows().length, 1);
+    const anchor = await toggle.boundingBox();
+    const list = await panel.boundingBox();
+    assert.ok(list.x >= anchor.x + anchor.width && list.y <= anchor.y);
+    await mkdir("output/playwright", { recursive: true });
+    await main.screenshot({ path: "output/playwright/sticky-picker-rail.png", clip: {
+      x: 0, y: Math.max(0, Math.floor(list.y - 48)), width: Math.ceil(list.x + list.width + 18),
+      height: Math.ceil(anchor.y + anchor.height - list.y + 120),
+    } });
+    const [card] = await Promise.all([app.waitForEvent("window"), row.click()]);
+    await panel.waitFor({ state: "hidden" });
+    assert.equal(await markdown(card), content);
+    const nativeCard = await app.browserWindow(card);
+    await nativeCard.evaluate(win => win.hide());
+    await toggle.click();
+    await row.click();
+    await until(() => nativeCard.evaluate(win => win.isVisible()), Boolean, "the existing card returns");
+    assert.equal(app.windows().length, 2);
+    const updated = content + "\n- 검토 완료";
+    await memo(card).fill(updated);
+    for (const page of [card, panel]) {
+      if (page === panel) await toggle.click();
+      const [blank] = await Promise.all([app.waitForEvent("window"), page.getByRole("button", { name: "새 스티키 노트" }).click()]);
+      assert.equal(await markdown(blank), "- ");
+      await Promise.all([blank.waitForEvent("close"), blank.locator("#close").click()]);
+    }
+    await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
+    assert.deepEqual(await readdir(path.join(vault, "포스트잇")), ["cloud.md"]);
+    assert.equal(await readFile(path.join(vault, relative), "utf8"), updated);
+    await toggle.click();
+    const [reopened] = await Promise.all([app.waitForEvent("window"), row.click()]);
+    assert.equal(await markdown(reopened), updated);
+  }, { withTeam: true });
+});
+
+test("sticky board shows all personal cards, previews and saves a new card without replacing document tabs", async () => {
+  const bodies = [
+    "- 주간 회의\n- [x] 일정 확인\n- [ ] 결과 정리",
+    "# 다음 읽을 책\n서점에서 목차 다시 보기",
+    "검토할 아이디어\n- 손으로 그린 레이아웃",
+    "점심 산책\n공원에서 20분 걷기",
+    "다음 배포\n- 변경 사항 확인\n- 테스트 결과 공유",
+    "기억할 문장\n노트에 담아 둘 한 줄",
+  ];
+  await fixture(bodies, async ({ app, main }) => {
+    const toggle = main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트", exact: true });
+    const reference = main.locator(".file-row").filter({ hasText: "Reference" }).first();
+    await reference.click();
+    const docTab = main.locator(".tabs .tab-label").filter({ hasText: "Reference" });
+    const openBoard = async () => {
+      await toggle.click();
+      await main.getByRole("button", { name: "전체 보기", exact: true }).click();
+    };
+    await openBoard();
+    const board = main.getByRole("region", { name: "포스트잇 보드" });
+    await board.waitFor();
+    const boardTab = main.locator(".tabs .tab-label").filter({ hasText: "포스트잇 보드" });
+    assert.equal(await board.locator(".sticky-board-card").count(), bodies.length);
+    assert.equal(await board.getByText("팀 전용 메모").count(), 0);
+    await board.getByText("☑ 일정 확인").waitFor();
+    const clickedFile = node => {
+      node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      return window.dynoteContextFile(false);
+    };
+    assert.match(await board.locator(".sticky-board-card").first().evaluate(clickedFile), /^[a-f0-9]{16}:포스트잇\/.+\.md$/);
+    assert.equal(await board.locator("h1").evaluate(clickedFile), null);
+    await openBoard();
+    assert.equal(await boardTab.count(), 1);
+    await docTab.click();
+    assert.equal(await board.isVisible(), false);
+    await boardTab.click();
+    await mkdir("output/playwright", { recursive: true });
+    await board.screenshot({ path: "output/playwright/sticky-board.png" });
+    const window = await app.browserWindow(main);
+    const wideColumns = await board.locator(".sticky-board-grid").evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length);
+    await window.evaluate(win => win.setSize(win.getMinimumSize()[0], win.getSize()[1]));
+    await until(() => board.locator(".sticky-board-grid").evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length),
+      count => count < wideColumns, "narrower board uses fewer columns");
+    const [existing] = await Promise.all([app.waitForEvent("window"), board.getByRole("button", { name: "주간 회의", exact: true }).click()]);
+    assert.equal(await markdown(existing), bodies[0]);
+    await Promise.all([existing.waitForEvent("close"), existing.locator("#close").click()]);
+    const [card] = await Promise.all([app.waitForEvent("window"), board.getByRole("button", { name: "새 포스트잇" }).click()]);
+    await memo(card).fill("새 보드 메모\n기존 보드에서 바로 확인");
+    await board.getByText("기존 보드에서 바로 확인").waitFor();
+    assert.equal(await board.locator(".sticky-board-card").first().getAttribute("aria-label"), "새 보드 메모");
+    await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
+    await main.getByRole("button", { name: "포스트잇 보드 탭 닫기" }).click();
+    assert.equal(await boardTab.count(), 0);
+    assert.equal(await main.locator(".tab.active .tab-label").textContent(), await docTab.textContent());
+  }, { withTeam: true });
+});
+
+test("board menu targets personal sync when opened from a team document", async () => {
+  await fixture([], async ({ main }) => {
+    await main.locator(".file-row").filter({ hasText: "team" }).first().click();
+    const teamTab = main.locator(".tabs .tab.active .tab-label");
+    assert.match(await teamTab.innerText(), /팀 공유 노트/);
+    await main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트", exact: true }).click();
+    await main.getByRole("button", { name: "전체 보기", exact: true }).click();
+    const boardTab = main.locator(".tabs .tab-label").filter({ hasText: "포스트잇 보드" });
+    await boardTab.click({ button: "right" });
+    const menu = main.getByRole("menu", { name: "문서 탭 작업" });
+    await menu.waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "파일 위치 열기" }).count(), 0);
+    await menu.getByRole("menuitem", { name: "지금 동기화" }).click();
+    await main.getByRole("dialog").getByRole("heading", { name: "개인 노트 동기화" }).waitFor();
+    await main.keyboard.press("Escape");
+    await main.getByRole("button", { name: "포스트잇 보드 탭 닫기" }).click();
+    assert.match(await teamTab.innerText(), /팀 공유 노트/);
+    await teamTab.click({ button: "right" });
+    await menu.getByRole("menuitem", { name: "파일 위치 열기" }).waitFor();
+  }, { withTeam: true });
 });
