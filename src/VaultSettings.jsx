@@ -25,7 +25,7 @@ function SpaceGitInfo({ vaultId, onReadGit }) {
   </div>;
 }
 
-export default function VaultSettings({ openSpaces, gitStates, currentId, teamSetup, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
+export default function VaultSettings({ openSpaces, gitStates, currentId, switching, teamSetup, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [teamRows, setTeamRows] = useState(() => teamSetup ? [{id:0, remote:"", branch:"main", folder:"", error:""}] : []);
@@ -83,6 +83,15 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, teamSe
     setSection(next); setError(""); setMessage(""); setImporting(false);
     if (next === "team" && !teams.length && !teamRows.length) addTeamRow();
   }
+  async function selectEntry(action) {
+    setError(""); setMessage("");
+    try {
+      const opened = await action();
+      // A picked folder can gain a purpose without changing the active vault.
+      if (opened && opened === currentId) setData(await onList());
+    }
+    catch (error) { setError(error.message); }
+  }
   function openSettings(entry, id) {
     return run(async () => {
       const target = id ?? await onSelect(entry.root);
@@ -101,7 +110,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, teamSe
     </div>
     {section === "personal" && !personalSpaces.length && <p>이 PC에 노트가 있으면 폴더를 연결하세요. 다른 PC에서 동기화한 노트는 Git 저장소에서 가져올 수 있습니다.</p>}
     {section === "personal" && <div className="settings-actions">
-      <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("personal"))}>개인 노트 폴더 연결</button>
+      <button className="secondary-button" disabled={pending} onClick={() => selectEntry(() => onPick("personal"))}>개인 노트 폴더 연결</button>
       <button className="secondary-button" aria-expanded={importing} disabled={pending} onClick={() => setImporting(!importing)}>기존 Git 저장소에서 가져오기</button>
     </div>}
     {section === "personal" && importing && <form aria-label="개인 노트 가져오기" onSubmit={event => {
@@ -116,7 +125,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, teamSe
     </form>}
     {section === "team" && <div className="settings-actions">
       {!teamRows.length && <button className="primary-button" disabled={pending} onClick={addTeamRow}>모델 추가</button>}
-      <button className="secondary-button" disabled={pending} onClick={() => run(() => onPick("team"))}>팀 공유 폴더 연결</button>
+      <button className="secondary-button" disabled={pending} onClick={() => selectEntry(() => onPick("team"))}>팀 공유 폴더 연결</button>
     </div>}
     {section === "team" && teamRows.length > 0 && <form className="team-repositories" onSubmit={connectTeams} aria-label="팀 저장소 연결">
       <h4>팀 저장소 연결</h4>
@@ -157,7 +166,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, teamSe
             }}><option value="" disabled>용도 선택</option><option value="personal">개인 노트</option><option value="team">팀 공유 노트</option></select></label>
           </div>
           <div className="settings-actions">
-            <button className="secondary-button" disabled={pending || entry.root === data.current} onClick={() => run(() => onSelect(entry.root))}>열기</button>
+            <button className="secondary-button" disabled={pending || (!switching && entry.root === data.current)} onClick={() => selectEntry(() => onSelect(entry.root))}>열기</button>
             {!purpose && vaultId && <button className="secondary-button" disabled={pending} onClick={() => onOpenGit(vaultId)}>이 공간의 Git 설정</button>}
             <button className="secondary-button" disabled={pending || entry.active} onClick={() => run(() => onForget(entry.root))}>목록에서 제거</button>
           </div>

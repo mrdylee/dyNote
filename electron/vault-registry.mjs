@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir, realpath, stat } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -26,8 +26,13 @@ export class VaultRegistry {
     purposes = Object.fromEntries(Object.entries(purposes).filter(([root]) => roots.includes(root)));
     await mkdir(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify({ vaultRoot: selected, vaults: roots, vaultPurposes: purposes }), { mode: 0o600 });
-    await rename(temporary, this.file);
+    try {
+      await writeFile(temporary, JSON.stringify({ vaultRoot: selected, vaults: roots, vaultPurposes: purposes }), { mode: 0o600 });
+      await rename(temporary, this.file);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
     this.selected = selected; this.roots = roots; this.purposes = purposes;
   }
   async checkPurpose(root, purpose) {

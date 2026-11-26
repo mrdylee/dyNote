@@ -77,6 +77,10 @@ let recovery;
 let registry;
 let vaultError = "";
 const vaultOperations = new VaultOperations();
+const activeVaultResource = Symbol("active vault");
+const selectionPreparation = Symbol("vault preparation");
+let selectionNumber = 0, preparedSelection, activating = false;
+let activationTail = Promise.resolve();
 let gitBackup;
 const openedVaults = new Map();
 let copilot;
@@ -274,29 +278,86 @@ async function changeAiExtensions(action) {
 }
 
 function sendAi(controller, args) {
+  if (activating) throw new Error("보관함 전환을 마친 뒤 AI 요청을 보내 주세요.");
   checkVault(args, args?.workspace === true ? workspaceVault(args.vaultId) : vault);
   if (aiExtensionsChanging) throw new Error("MCP·스킬 연결을 변경 중입니다. 잠시 후 다시 보내 주세요.");
   return controller.send(args);
 }
 
-async function selectVault(root, purpose) {
+function retiringVault(selected, purpose) {
+  if (!vault || selected.id === vault.id) return null;
+  return registry.purposes[vault.root] && (purpose === "personal" || togetherEntries().length) ? null : vault;
+}
+
+async function prepareVaultSelection(request, root, purpose, registered) {
   const canonical = await registry.checkConnection(root, purpose);
+  if (registered && !registry.roots.includes(canonical)) throw new Error("등록된 보관함을 선택해 주세요.");
   if (cloudBridge?.checkNoteRemote && !registry.roots.includes(canonical))
     for (const remote of await noteFolderRemotes(canonical)) cloudBridge.checkNoteRemote(remote);
-  await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel()]);
   const existing = [...openedVaults.values()].find(entry => entry.vault.root === canonical);
   const selected = existing?.vault ?? await Vault.open(canonical, recovery, purpose ?? registry.purposes[canonical]);
   if (existing && purpose && !registry.purposes[canonical]) await selected.prepareFileStorage();
   const snapshot = await selected.snapshot();
-  await plugins?.close();
-  await registry.select(selected.root, purpose);
-  vault = selected; vaultError = "";
-  const entry = openVaultController(vault, true);
-  gitBackup = entry.git;
-  await entry.ready;
-  pruneVaultControllers();
-  await plugins?.activate(vault);
-  return snapshot;
+  await activationTail;
+  if (request !== selectionNumber) return null;
+  const retiring = retiringVault(selected, purpose)?.id ?? null;
+  preparedSelection = { request, selected, purpose, registered, retiring };
+  return { request, snapshot, retiring };
+}
+
+function activateVaultSelection(request) {
+  const result = activationTail.then(async () => {
+    const next = preparedSelection;
+    if (!next || request !== selectionNumber || request !== next.request) return null;
+    preparedSelection = null;
+    const { selected, purpose, registered, retiring } = next;
+    const warnings = [];
+    const release = vaultOperations.begin([registry.file, activeVaultResource], true);
+    let releaseOutgoing;
+    try {
+      const outgoing = retiringVault(selected, purpose);
+      if ((outgoing?.id ?? null) !== retiring || (registered && !registry.roots.includes(selected.root)) || await realpath(selected.root) !== selected.root)
+        throw new Error("보관함 위치가 변경되었습니다. 다시 선택해 주세요.");
+      if (request !== selectionNumber) return null;
+      if (outgoing) releaseOutgoing = vaultOperations.begin([outgoing.root], true);
+      const purposeChanged = purpose && purpose !== registry.purposes[selected.root];
+      await registry.select(selected.root, purpose);
+      if (vault?.id === selected.id && !purposeChanged) return warnings;
+      activating = true;
+      // Persist the selection before disturbing the previous AI sessions and plug-ins.
+      await Promise.all([copilot?.cancel(), codex?.cancel(), claude?.cancel(), plugins?.close()]
+        .map(action => Promise.resolve(action).catch(error => warnings.push(error.message))));
+      vault = openedVaults.get(selected.id)?.vault ?? selected; vaultError = "";
+      const entry = openVaultController(vault, purposeChanged);
+      gitBackup = entry.git;
+      pruneVaultControllers();
+      try { await entry.ready; await plugins?.activate(vault); }
+      catch (error) { warnings.push(error.message); }
+      return warnings;
+    } finally { activating = false; releaseOutgoing?.(); release(); }
+  });
+  activationTail = result.catch(() => {});
+  return result;
+}
+
+async function selectVault(args, pick) {
+  const request = ++selectionNumber;
+  preparedSelection = null;
+  let root = args?.root;
+  if (pick) {
+    const result = await dialog.showOpenDialog(window, {
+      properties: ["openDirectory", "createDirectory"],
+      title: args?.purpose === "personal" ? "개인 노트 폴더 선택" : args?.purpose === "team" ? "팀 공유 노트 폴더 선택" : "Markdown 보관함 선택",
+    });
+    if (result.canceled || request !== selectionNumber) return null;
+    root = result.filePaths[0];
+  } else if (!registry.roots.includes(root)) throw new Error("등록된 보관함을 선택해 주세요.");
+  const prepared = await prepareVaultSelection(request, root, pick ? args?.purpose : undefined, !pick);
+  if (!prepared || args?.prepareOnly === true) return prepared;
+  const warnings = await activateVaultSelection(request);
+  if (!warnings) return null;
+  prepared.snapshot.warnings.push(...warnings);
+  return prepared.snapshot;
 }
 
 async function initialVault() {
@@ -563,7 +624,7 @@ app
       directory: path.join(app.getPath("userData"), "plugins"), BrowserWindow, ipcMain,
       getVault: () => vault,
       onStatus: value => { if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-status", value); },
-      onOpen: value => { if (value.created) gitBackup.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
+      onOpen: value => { if (value.created) openedVaults.get(value.vaultId)?.git.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
@@ -725,7 +786,7 @@ app
       },
       snapshot: (args, vault) => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "workspace-snapshots": () => startup.run("vault.read-workspaces", workspaceSnapshots),
-      "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, error: vaultError }),
+      "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, currentId: vault?.id ?? null, error: vaultError }),
       "set-vault-purpose": async (args) => {
         await registry.setPurpose(args?.root, args?.purpose);
         const entry = [...openedVaults.values()].find(entry => entry.vault.root === args.root);
@@ -735,10 +796,8 @@ app
         pruneVaultControllers();
         return true;
       },
-      "select-vault": (args) => {
-        if (!registry.roots.includes(args?.root)) throw new Error("등록된 보관함을 선택해 주세요.");
-        return selectVault(args.root);
-      },
+      "select-vault": args => selectVault(args, false),
+      "activate-vault": args => activateVaultSelection(args?.request),
       "forget-vault": async (args) => { await registry.forget(args?.root); pruneVaultControllers(); return { entries: registry.list(), current: vault?.root ?? null, error: vaultError }; },
       "git-history": (args, vault) => {
         checkVault(args, vault);
@@ -807,14 +866,7 @@ app
           return result;
         });
       },
-      "pick-vault": async (args) => {
-        const result = await dialog.showOpenDialog(window, {
-          properties: ["openDirectory", "createDirectory"],
-          title: args?.purpose === "personal" ? "개인 노트 폴더 선택" : args?.purpose === "team" ? "팀 공유 노트 폴더 선택" : "Markdown 보관함 선택",
-        });
-        if (result.canceled) return null;
-        return selectVault(result.filePaths[0], args?.purpose);
-      },
+      "pick-vault": args => selectVault(args, true),
       "pick-team-repository-folder": async () => {
         const result = await dialog.showOpenDialog(window, {
           title: "팀 저장소 폴더 선택", properties: ["openDirectory", "createDirectory"],
@@ -1112,7 +1164,8 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const globalOperation = ["pick-vault", "select-vault", "forget-vault", "set-vault-purpose"].includes(name);
+        const selecting = ["pick-vault", "select-vault", "activate-vault"].includes(name);
+        const globalOperation = ["forget-vault", "set-vault-purpose"].includes(name);
         const registering = name === "git-clone" || name === "connect-team-repositories";
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
@@ -1126,9 +1179,11 @@ app
           if (scoped) checkVault(args, target);
           if (!readOnly) {
             const roots = [];
-            if (registering) roots.push(registry.file);
+            if (selecting) roots.push(selectionPreparation);
+            else if (registering) roots.push(registry.file);
             else if (target && !globalOperation) {
               const metadataOnly = name === "git-workspace-action" && ["fetch", "commit", "unstage", "delete-branch"].includes(args?.action?.kind);
+              if (!scoped) roots.push(activeVaultResource);
               if (!metadataOnly) roots.push(target.root);
               if (metadataOnly || (exclusive && !transfer)) roots.push(path.join(target.root, ".git"));
             }
@@ -1141,7 +1196,7 @@ app
                 if (args.source.startsWith(source.root + path.sep)) roots.push(source.root);
               }
             }
-            release = vaultOperations.begin(roots, exclusive, exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry");
+            release = vaultOperations.begin(roots, exclusive, selecting || exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry");
           }
           const entry = openedVaults.get(target?.id);
           if (entry && scoped) {

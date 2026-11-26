@@ -1,6 +1,7 @@
 import WindowsEditorMenu, { positionMenu } from "./WindowsEditorMenu.jsx";
 import { fileLocationRef } from "./file-location.mjs";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { captureDateHeading } from "../core/copilot-journal-links.mjs";
 import {
   BookOpen,
@@ -362,6 +363,9 @@ export default function App() {
   const { vaults, current: vaultsRef, revisionMap, update: updateVault, remove: removeVault, queue, install: installVault } = useVaultDocuments(api, invoke);
   const [selectedVaultId, setSelectedVaultId] = useState(null);
   const selectedVault = useRef(null);
+  const selectionRequest = useRef(0);
+  const [switchingVault, setSwitchingVault] = useState(false);
+  const [retiringVault, setRetiringVault] = useState(null);
   const workspace = useDocumentWorkspace();
   const [section, setSection] = useState("files");
   const [journalCalendar, setJournalCalendar] = useState(false);
@@ -588,7 +592,7 @@ export default function App() {
   const [captureImportResult, setCaptureImportResult] = useState(null);
   const [captureWritingId, setCaptureWritingId] = useState(null);
   const [restoringVaults, setRestoringVaults] = useState([]);
-  const vaultWriteLocked = id => !!id && (captureWritingId === id || restoringVaults.includes(id));
+  const vaultWriteLocked = id => !!id && (captureWritingId === id || retiringVault?.id === id || restoringVaults.includes(id));
   const captureLocked = vaultWriteLocked(vault?.id);
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
@@ -771,6 +775,44 @@ export default function App() {
     }
     if (!queue.dirty) setStatus("saved");
   }, [acceptSnapshot, queue, workspace.dispatch]);
+  const switchVault = async (method, args) => {
+    const request = ++selectionRequest.current;
+    const previousScopes = vaultsRef.current;
+    setSwitchingVault(true); setError("");
+    try {
+      const prepared = await invoke(method({ ...args, prepareOnly: true }));
+      if (!prepared || request !== selectionRequest.current) return null;
+      if (prepared.retiring) flushSync(() => setRetiringVault({ request, id: prepared.retiring }));
+      await flush();
+      if (request !== selectionRequest.current) return null;
+      const warnings = await invoke(api.activateVault({ request: prepared.request }));
+      if (!warnings) return null;
+      const result = prepared.snapshot;
+      result.warnings.push(...warnings);
+      const existing = vaultsRef.current[result.id];
+      const changed = existing && existing !== previousScopes[result.id];
+      const snapshot = changed ? { ...existing, warnings: result.warnings } : result;
+      const navigate = request === selectionRequest.current && currentSettingsView.current === settingsView;
+      if (navigate || (prepared.retiring && currentVault.current === prepared.retiring) || !selectedVault.current) {
+        install(snapshot, true);
+        if (navigate) setSpaceFilter("all");
+      } else {
+        acceptSnapshot(snapshot);
+        if (result.warnings.length) setError(result.warnings.join(" · "));
+        selectedVault.current = result.id;
+        setSelectedVaultId(result.id);
+      }
+      if (changed) void refreshSyncedVault(result.id, acceptSnapshot).catch(error => setError(error.message));
+      return navigate ? result.id : null;
+    } catch (error) {
+      if (request !== selectionRequest.current) return null;
+      setError(error.message);
+      throw error;
+    } finally {
+      setRetiringVault(old => old?.request === request ? null : old);
+      if (request === selectionRequest.current) setSwitchingVault(false);
+    }
+  };
   const importGit = async (args) => {
     try {
       const imported = await invoke(api.cloneGit(args));
@@ -780,15 +822,11 @@ export default function App() {
         if (imported.importError) setError(imported.importError);
         return;
       }
-      setBusy(true);
-      try {
-        await flush();
-        const snapshot = await invoke(api.selectVault({ root: imported.root }));
-        install(snapshot, true); setSpaceFilter("all");
-        if (imported.importError) {
-          setGitSettingsId(snapshot.id); setSettingsTab("personal-sync"); setError(imported.importError);
-        } else setModal(null);
-      } finally { setBusy(false); }
+      const id = await switchVault(api.selectVault, { root: imported.root });
+      if (!id) return;
+      if (imported.importError) {
+        setGitSettingsId(id); setSettingsTab("personal-sync"); setError(imported.importError);
+      } else setModal(null);
     } catch (error) {
       if (currentSettingsView.current !== settingsView) setError(error.message);
       throw error;
@@ -798,7 +836,7 @@ export default function App() {
     const selectedId = selectedVault.current;
     const load = ++spaceLoad.current;
     const data = await invoke(api.vaults());
-    if (selectedId !== selectedVault.current || load !== spaceLoad.current) return data;
+    if (data.currentId !== selectedId || selectedId !== selectedVault.current || load !== spaceLoad.current) return data;
     const primary = data.entries.find(entry => entry.root === data.current);
     if (primary) updateVault(selectedId, old => old && ({ ...old, root: primary.root, purpose: primary.purpose }));
     setSpaces(data);
@@ -956,7 +994,7 @@ export default function App() {
   },[]);
   const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
   const updateComposing = useRef(false);
-  updateContext.current = { treeWriting: treeWrites.length > 0 || restoringVaults.length > 0 || !!captureWritingId, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
+  updateContext.current = { treeWriting: switchingVault || treeWrites.length > 0 || restoringVaults.length > 0 || !!captureWritingId, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
   const installUpdate = async (automatic = false) => {
     if (updateRequest.current) return;
     if (updateContext.current.treeWriting || updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
@@ -2837,6 +2875,7 @@ export default function App() {
             session={aiSession} prompts={documentPrompts} folders={vaults[draft.vaultId].folders ?? []}
             onUpdate={updateDocumentDraft} onPersist={persistDocumentDraft} onSave={saveCopilotDocument} />)}
           <footer className="statusbar">
+            {switchingVault && <span role="status">보관함 전환 중…</span>}
             <div
               className={`save-status ${status}`}
               onClick={() => flush(true).catch(() => {})}
@@ -3522,16 +3561,9 @@ export default function App() {
               }
               return results;
             }}
-            onPick={async (purpose) => {
-              setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.pickVault({ purpose })); if (snapshot) { setSpaceFilter("all"); install(snapshot, true); } return snapshot?.id; }
-              finally { setBusy(false); }
-            }}
-            onSelect={async (root) => {
-              setBusy(true);
-              try { await flush(); const snapshot = await invoke(api.selectVault({ root })); setSpaceFilter("all"); install(snapshot, true); return snapshot.id; }
-              finally { setBusy(false); }
-            }}
+            switching={switchingVault}
+            onPick={purpose => switchVault(api.pickVault, { purpose })}
+            onSelect={root => switchVault(api.selectVault, { root })}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
             destination={captureVault?.root ?? captureVault?.name} importNotice={captureImportNotice} disabled={busy || captureWritingId === captureVaultId}

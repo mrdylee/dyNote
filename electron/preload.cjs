@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld(
     connectTeamRepositories: (args) => call("connect-team-repositories", args),
     vaults: () => call("vaults"),
     setVaultPurpose: (args) => call("set-vault-purpose", args),
+    activateVault: (args) => call("activate-vault", args),
     selectVault: (args) => call("select-vault", args),
     forgetVault: (args) => call("forget-vault", args),
     gitHistory: (args) => call("git-history", args),
