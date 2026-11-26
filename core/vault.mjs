@@ -26,6 +26,7 @@ import { readSource, decodePreviewText } from "./file-source.mjs";
 import { readWordContent } from "./word-documents.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
+export const vaultIdForRoot = root => digest(root).slice(0, 16);
 const MAX_BYTES = 8 * 1024 * 1024;
 const sameEntry = (a, b) => a.dev === b.dev && a.ino === b.ino;
 // macOS O_NOFOLLOW_ANY from sys/fcntl.h rejects symlinks in ancestor directories too.
@@ -98,7 +99,7 @@ export class Vault {
 
   constructor(root, recoveryRoot) {
     this.root = root;
-    this.id = digest(root).slice(0, 16);
+    this.id = vaultIdForRoot(root);
     this.name = path.basename(root);
     this.recoveryRoot = path.join(recoveryRoot, this.id);
   }

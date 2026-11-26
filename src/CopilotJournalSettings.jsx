@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-export default function CopilotJournalSettings({state,destination,importNotice,pendingEdits=[],importBlocked,onReviewEdit,onRefresh,onSource,onSave,onImport,onManageSpaces,disabled}){
+export default function CopilotJournalSettings({state,destination,importNotice,pendingEdits=[],importBlocked,onReviewEdit,onReconnect,onRefresh,onSource,onSave,onImport,onManageSpaces,disabled}){
  const [enabled,setEnabled]=useState(state?.enabled??false);
  const [selected,setSelected]=useState(()=>state?.projects.filter(project=>project.selected).map(project=>project.id)??[]);
  const [pending,setPending]=useState(false),[error,setError]=useState('');
@@ -22,6 +22,14 @@ export default function CopilotJournalSettings({state,destination,importNotice,p
   {destination ? <p>개인 노트 저장 위치 <strong>{destination}</strong></p> :
    <p role="status">대화를 저장할 개인 노트 폴더를 연결해 주세요. <button onClick={onManageSpaces}>보관함 설정 열기</button></p>}
   {destination&&<>
+  {personal&&state?.canReconnect&&<details>
+   <summary>이동한 개인 노트의 이전 기록 연결</summary>
+   <form onSubmit={event=>{event.preventDefault();const root=new FormData(event.currentTarget).get('previousRoot');run(()=>onReconnect(root));}}>
+    <label>이동 전 개인 노트 폴더의 전체 경로<input name="previousRoot" required disabled={busy}/></label>
+    <p>이 PC에서 위 경로에 저장한 Copilot 기록을 현재 개인 노트에 연결합니다. 연결 후 가져올 프로젝트를 선택하세요.</p>
+    <button disabled={busy||importBlocked}>이전 기록 연결</button>
+   </form>
+  </details>}
   <label>VS Code 기록 폴더<code className="capture-source-path">{state?.sourceRoot||'불러오는 중…'}</code></label>
   {state?.sessionRoot&&<label>로컬 Copilot Agent Host 기록 폴더<code className="capture-source-path">{state.sessionRoot}</code></label>}
   <div className="settings-actions"><button disabled={busy||!personal} onClick={()=>run(()=>onSource(false))}>기록 폴더 선택</button><button disabled={busy} onClick={()=>run(onRefresh)}>기록 새로고침</button></div>
@@ -40,7 +48,7 @@ export default function CopilotJournalSettings({state,destination,importNotice,p
    {!projects.length&&<p className="muted">로컬 프로젝트 기록이 없습니다. VS Code의 workspaceStorage 폴더를 선택해 주세요.</p>}
    {projects.map(project=><label className="capture-project" key={project.id}>
     <input type="checkbox" checked={selected.includes(project.id)} onChange={e=>setSelected(old=>e.target.checked?[...old,project.id]:old.filter(id=>id!==project.id))}/>
-    <span>{project.label}<small>{project.path}</small></span>
+    <span>{project.label}<small>{project.cached&&'Dynote 저장 기록 · '}{project.path}</small></span>
    </label>)}
   </fieldset>
   <label className="capture-toggle"><input type="checkbox" checked={autoEnabled} disabled={busy||!personal||!projectIds.length} onChange={e=>setEnabled(e.target.checked)}/>대화 자동 저장</label>

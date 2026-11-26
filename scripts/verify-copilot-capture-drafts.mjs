@@ -71,6 +71,12 @@ try{
  await invoke('syncGit');
  assert.equal((await runGit(bare,['ls-tree','--name-only','main','--',name])).stdout.trim(),'');
  await rm(path.join(source,'project/chatSessions/session.json'));
+ await rm(path.join(source,'project/workspace.json'));
+ await mkdir(path.join(source,'damaged'));
+ await writeFile(path.join(source,'damaged/workspace.json'),'{');
+ await settings().getByRole('button',{name:'기록 새로고침',exact:true}).click();
+ await settings().getByRole('alert').filter({hasText:'표시된 프로젝트는 가져올 수 있습니다.'}).waitFor();
+ await settings().getByRole('checkbox',{name:/Dynote 저장 기록/}).check();
  await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
  await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true,disabled:false}).waitFor();
  await settings().getByText('대화를 개인 노트에 가져왔습니다.',{exact:true}).waitFor();

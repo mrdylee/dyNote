@@ -1120,7 +1120,7 @@ export default function App() {
           ? "대화를 개인 노트에 가져왔습니다." : result.noConversationHistory
             ? "선택한 프로젝트에서 완료된 원본 대화나 Dynote에 저장된 이전 기록을 찾지 못했습니다. 위의 기록 폴더를 확인해 주세요."
             : "새로 가져올 완료된 대화가 없습니다.";
-        setCaptureImportResult({ vaultId: id, notice });
+        setCaptureImportResult({ vaultId: id, notice: result.importWarning ? [result.changed && notice, result.importWarning].filter(Boolean).join(" ") : notice });
       }
       updateCaptureState(id, () => result.status);
       if (result.snapshot) acceptSnapshot(result.snapshot);
@@ -3583,6 +3583,12 @@ export default function App() {
                 setCaptureImportResult(null);
                 updateCaptureState(captureVaultId, () => state);
               }
+              return state;
+            }}
+            onReconnect={async previousRoot => {
+              const state = await invoke(api.reconnectCapture({ vaultId: captureVaultId, previousRoot }));
+              updateCaptureState(captureVaultId, () => state);
+              setCaptureImportResult({ vaultId: captureVaultId, notice: "이전 보관함의 저장 기록을 연결했습니다. 가져올 프로젝트를 선택해 주세요." });
               return state;
             }}
             onSave={async input => { const state = await invoke(api.configureCapture({ vaultId: captureVaultId, input })); updateCaptureState(captureVaultId, () => state); return state; }}

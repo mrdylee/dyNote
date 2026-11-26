@@ -2,10 +2,11 @@ import {readFile,writeFile,mkdir,rename,readdir,lstat,stat,realpath,open} from '
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {homedir} from 'node:os';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {parseDocument} from 'yaml';
 import {COPILOT_NOTE_FOLDER,parseChatSource,captureId,captureSessionHeading,renderSessionCapture,captureLink,removeCaptureLink} from '../core/copilot-journal.mjs';
+import {vaultIdForRoot} from '../core/vault.mjs';
 import {localDate,periodicNote} from '../core/periodic-notes.mjs';
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
 const directoryName=value=>/^[\w-]{1,128}$/.test(value);
@@ -16,7 +17,17 @@ const wslDistro=value=>{
  return /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)\\/i.exec(unc)?.[1].toLowerCase();
 };
 const clone=value=>structuredClone(value);
-const legacyLayout=config=>!config.sessionLayout&&Object.keys(config.records).length>0;
+const usesDailyFile=(config,record)=>!config.sessionLayout||record.legacyDaily===true;
+const legacyLayout=config=>Object.values(config.records).some(record=>usesDailyFile(config,record));
+const conflictNotice=count=>`Git 충돌이 남은 파일 ${count}개가 있어 관련 대화의 가져오기를 보류했습니다. 개인 노트 동기화 설정의 ‘버전 확인’에서 충돌을 해결한 뒤 다시 가져와 주세요.`;
+const hasHistory=config=>!!config&&(Object.keys(config.records).length>0||!!config.pendingCapture);
+const recordProjectKey=record=>path.posix.basename(path.posix.dirname(record.path));
+function selectionFor(config,project){
+ const byId=Object.hasOwn(config.projects,project.id)?config.projects[project.id]:undefined;
+ if(byId&&(!byId.key||byId.key===project.key))return byId;
+ return Object.values(config.projects).find(selection=>selection.key===project.key);
+}
+const sessionDocuments=config=>sessionRecords(Object.fromEntries(Object.entries(config.records).filter(([,r])=>!usesDailyFile(config,r))));
 const sessionPath=(record,id)=>`${path.posix.dirname(record.path)}/${id}.md`;
 function sessionRecords(records){
  const result=new Map();
@@ -67,7 +78,7 @@ async function sourceFile(root,relative,maxBytes=64*1024*1024){
  }finally{await handle.close();}
 }
 export class CopilotJournal{
- constructor({file,sourceRoot,sessionRoot=path.join(process.env.COPILOT_HOME||path.join(homedir(),'.copilot'),'session-state'),now=()=>Date.now()}){Object.assign(this,{file,sourceRoot,sessionRoot,now});this.data={vaults:{}};this.failure='';}
+ constructor({file,sourceRoot,sessionRoot=path.join(process.env.COPILOT_HOME||path.join(homedir(),'.copilot'),'session-state'),now=()=>Date.now()}){Object.assign(this,{file,sourceRoot,sessionRoot,now});this.data={vaults:{}};this.saving=Promise.resolve();this.failure='';}
  async load(){
   this.sourceRoot=await realpath(this.sourceRoot).catch(error=>{if(error.code==='ENOENT')return this.sourceRoot;throw error;});
   this.sessionRoot=await realpath(this.sessionRoot).catch(()=>this.sessionRoot);
@@ -78,22 +89,47 @@ export class CopilotJournal{
   if(this.failure)throw new Error(this.failure);
   return this.data.vaults[vault.id]??{sourceRoot:this.sourceRoot,enabled:false,projects:{},records:{},blocked:[]};
  }
- async persist(vault,config){const next={...this.data,vaults:{...this.data.vaults,[vault.id]:config}};await atomic(this.file,next);this.data=next;}
- async projects(root){
+ persist(vault,config){
+  const saved=this.saving.then(async()=>{
+   const next={...this.data,vaults:{...this.data.vaults,[vault.id]:config}};
+   await atomic(this.file,next);this.data=next;
+  });
+  this.saving=saved.catch(()=>{});
+  return saved;
+ }
+ async reconnect(vault,oldRoot,personal){
+  if(!personal)throw new Error('개인 노트에서 이전 기록을 연결해 주세요.');
+  if(typeof oldRoot!=='string'||!path.isAbsolute(oldRoot))throw new Error('이전 개인 노트의 전체 폴더 경로를 입력해 주세요.');
+  const previousRoot=path.resolve(oldRoot),current=this.config(vault);
+  if(Object.keys(current.records).length||current.pendingCapture||current.blocked.length)throw new Error('이 개인 노트에는 이미 대화 기록 또는 삭제 기록이 있습니다.');
+  const old=this.data.vaults[vaultIdForRoot(previousRoot)];
+  if(!hasHistory(old))throw new Error('그 경로에 저장된 이전 대화 기록을 찾지 못했습니다.');
+  if(await lstat(previousRoot).catch(error=>{if(error.code!=='ENOENT')throw error;}))throw new Error('이전 폴더가 아직 존재합니다. 이동 전 경로를 확인해 주세요.');
+  await this.persist(vault,{...current,sourceRoot:old.sourceRoot,wslSource:old.wslSource,enabled:false,allProjects:false,projects:{},projectKeys:old.projectKeys,
+   sessionLayout:old.sessionLayout,records:clone(old.records),pendingCapture:clone(old.pendingCapture),blocked:[...old.blocked]});
+  return this.status(vault);
+ }
+ async projects(config,warnings=[]){
+  const root=config.sourceRoot,records=Object.values({...config.records,...config.pendingCapture?.records});
+  const saved=new Map(records.map(r=>[recordProjectKey(r),r]));
   let canonical;
-  try{canonical=await realpath(root);}catch(error){if(error.code==='ENOENT')return [];throw error;}
-  if(canonical!==root)throw new Error('VS Code 기록 경로가 바뀌었습니다. 폴더를 다시 선택해 주세요.');
-  const result=[];
-  for(const entry of await readdir(root,{withFileTypes:true})){
+  try{canonical=await realpath(root);}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(canonical&&canonical!==root)throw new Error('VS Code 기록 경로가 바뀌었습니다. 폴더를 다시 선택해 주세요.');
+  const result=[],keysByIdentity=new Map(Object.entries(config.projectKeys??{}));
+  for(const entry of canonical?await readdir(root,{withFileTypes:true}):[]){
    if(!entry.isDirectory()||!directoryName(entry.name))continue;
    let data;
-   try{data=JSON.parse(await sourceFile(root,`${entry.name}/workspace.json`));}catch(error){if(error.code==='ENOENT')continue;throw error;}
-   const uri=data.folder??data.workspace;
+   try{data=JSON.parse(await sourceFile(root,`${entry.name}/workspace.json`));}catch(error){if(error.code==='ENOENT')continue;
+    warnings.push(entry.name);continue;
+   }
+   const uri=data?.folder??data?.workspace;
    if(typeof uri!=='string')continue;
-   let projectPath,label,wsl;
+   let projectPath,label,wsl,canonicalUri;
    try{
     if(uri.startsWith('file:')){
      projectPath=fileURLToPath(uri);label=path.basename(projectPath);
+     const resolved=path.resolve(projectPath);
+     canonicalUri=pathToFileURL(process.platform==='win32'?resolved.replace(/^[a-z]:/i,drive=>drive.toUpperCase()):resolved).href;
     }else{
      const remote=new URL(uri);
      if(remote.protocol!=='vscode-remote:'||!remote.pathname)continue;
@@ -103,22 +139,37 @@ export class CopilotJournal{
      projectPath=`WSL (${distro}) · ${folder}`;
      label=path.posix.basename(folder)||distro;
      wsl={distro:distro.toLowerCase(),folder:linuxFolder(folder)};
+     canonicalUri=`vscode-remote://wsl+${wsl.distro}${encodeURI(wsl.folder)}`;
     }
    }catch{continue;}
-   result.push({id:entry.name,key:captureId(uri),label:label.replace(/\.code-workspace$/i,''),path:projectPath,...(wsl?{wsl}:{})});
+   const identity=captureId(canonicalUri),raw=captureId(uri);
+   // Preserve historical filenames. VS Code on Windows also writes the drive colon as %3A.
+   const candidates=[raw,identity];
+   if(process.platform==='win32'&&!wsl){
+    const decoded=pathToFileURL(projectPath).href;
+    candidates.push(captureId(decoded),captureId(decoded.replace(/^file:\/\/\/([a-z]):/i,(_,drive)=>'file:///'+drive.toLowerCase()+'%3A')));
+   }
+   const key=candidates.find(candidate=>saved.has(candidate))??keysByIdentity.get(identity)??raw;
+   keysByIdentity.set(identity,key);
+   result.push({id:entry.name,key,identity,label:label.replace(/\.code-workspace$/i,''),path:projectPath,...(wsl?{wsl}:{})});
+  }
+  const live=new Set(result.map(p=>p.key));
+  for(const [key,record] of saved)if(!live.has(key)){
+   result.push({id:'cached:'+key,key,label:record.label,path:record.projectPath??key,cached:true});
   }
   return result.sort((a,b)=>a.label.localeCompare(b.label));
  }
  async status(vault){
-  const config=this.config(vault);let projects=[],error='';
-  try{projects=await this.projects(config.sourceRoot);}catch(e){error=e.message;}
-  return {sourceRoot:config.sourceRoot,sessionRoot:this.sessionRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,allProjects:config.allProjects===true,projects:projects.map(p=>({...p,selected:config.allProjects===true||Object.hasOwn(config.projects,p.id)})),error,
+  const config=this.config(vault),warnings=[];let projects=[],error='';
+  try{projects=await this.projects(config,warnings);if(warnings.length)error=`프로젝트 정보 파일 ${warnings.length}개를 읽지 못했습니다. 표시된 프로젝트는 가져올 수 있습니다.`;}catch(e){error=e.message;}
+  return {sourceRoot:config.sourceRoot,sessionRoot:this.sessionRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,allProjects:config.allProjects===true,projects:projects.map(p=>({...p,selected:config.allProjects===true||!!selectionFor(config,p)})),error,
+   canReconnect:!hasHistory(config)&&!config.blocked.length&&Object.entries(this.data.vaults).some(([id,c])=>id!==vault.id&&hasHistory(c)),
    needsMigration:legacyLayout(config),pendingCapture:!!config.pendingCapture,
    records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,journalPath:r.journalPath,
     projectKey:path.posix.basename(path.posix.dirname(r.path)),projectFolder:path.posix.dirname(r.path),
     sessions:Object.entries(r.sessions).map(([id,s])=>({id,title:s.title,
-     path:config.sessionLayout?sessionPath(r,id):r.path,
-     heading:config.sessionLayout?r.date:captureSessionHeading(s.title).trim(),
+     path:!usesDailyFile(config,r)?sessionPath(r,id):r.path,
+     heading:!usesDailyFile(config,r)?r.date:captureSessionHeading(s.title).trim(),
      lastActivity:s.messages.at(-1).at,
     })),
    })),trashId:config.trashId??null};
@@ -135,13 +186,17 @@ export class CopilotJournal{
  }
  async configure(vault,input,personal){
   if(!personal)throw new Error('Copilot 대화 자동 저장은 개인 노트 공간에서 설정해 주세요.');
-  const previous=this.config(vault),projects=await this.projects(previous.sourceRoot);
+  const previous=this.config(vault),projects=await this.projects(previous);
   const allProjects=input?.allProjects===true,projectIds=allProjects?projects.map(project=>project.id):input?.projects;
   if(typeof input?.enabled!=='boolean'||!Array.isArray(projectIds)||projectIds.some(id=>!projects.some(p=>p.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
   if(input.enabled&&!allProjects&&!projectIds.length)throw new Error('자동 기록할 프로젝트를 선택해 주세요.');
   const config=clone(previous);config.enabled=input.enabled;config.allProjects=allProjects;
   if(allProjects)config.since=input.enabled&&(!previous.enabled||!previous.allProjects)?this.now():previous.since??this.now();
-  config.projects=Object.fromEntries(projectIds.map(id=>[id,{since:allProjects?config.since:input.enabled&&!previous.enabled?this.now():previous.projects[id]?.since??(previous.allProjects?previous.since:undefined)??this.now()}]));
+  config.projectKeys={...previous.projectKeys,...Object.fromEntries(projects.filter(p=>p.identity&&projectIds.includes(p.id)).map(p=>[p.identity,p.key]))};
+  config.projects=Object.fromEntries(projects.filter(p=>projectIds.includes(p.id)).map(project=>{
+   const since=allProjects?config.since:input.enabled&&!previous.enabled?this.now():selectionFor(previous,project)?.since??(previous.allProjects?previous.since:undefined)??this.now();
+   return [project.id,{key:project.key,since}];
+  }));
   await this.persist(vault,config);return this.status(vault);
  }
  async sources(root,workspace,errors){
@@ -199,6 +254,7 @@ export class CopilotJournal{
   return {sessions,error};
  }
  async projectSessions(config,projects,isolateErrors=false){
+  projects=projects.filter(project=>!project.cached);
   const localAgent=await this.agentSources({root:this.sessionRoot},projects);
   const wsl=await this.agentSources(config.wslSource,projects),sessions=[];
   const errors=isolateErrors?[]:undefined;
@@ -224,7 +280,7 @@ export class CopilotJournal{
   return {sessions,error};
  }
  async listSessions(vault,projectIds){
-  const config=this.config(vault),available=await this.projects(config.sourceRoot);
+  const config=this.config(vault),available=await this.projects(config);
   if(!Array.isArray(projectIds)||projectIds.some(id=>!available.some(project=>project.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
   const projects=available.filter(project=>projectIds.includes(project.id));
   const sources=await this.projectSessions(config,projects,true),sessions=new Map();
@@ -245,41 +301,51 @@ export class CopilotJournal{
   }
   return {sessions:[...sessions.values()].sort((a,b)=>b.lastActivity-a.lastActivity),error:sources.error??''};
  }
- async commit(vault,previous,next,recreate=new Set()){
+ async commit(vault,previous,next,recreate=new Set(),protectedPaths){
   if(await realpath(vault.root)!==vault.root)throw new Error('보관함 경로가 바뀌었습니다. 다시 열어 주세요.');
   next.sessionLayout=true;
-  const migrating=legacyLayout(previous);
+  let migrating=false;
   const snapshot=await vault.documentSnapshot(),notes=new Map(snapshot.notes.map(n=>[n.path,n])),edits=new Map();
   const touched=new Set(recreate);
   const journalContent=name=>edits.has(name)?edits.get(name):notes.get(name)?.content??`# ${path.basename(name,'.md')}\n\n`;
   for(const id of new Set([...Object.keys(previous.records),...Object.keys(next.records)])){
-   const before=previous.records[id],after=next.records[id],unchanged=JSON.stringify(before)===JSON.stringify(after);
-   if(!migrating&&unchanged)continue;
-   if(migrating&&before&&after&&!notes.has(before.path))throw new Error('이관할 대화 문서가 삭제되거나 이동되었습니다. 자동 기록 제목에서 상태를 정리해 주세요.');
+   const before=previous.records[id],after=next.records[id];
+   const unchanged=JSON.stringify(before?.sessions)===JSON.stringify(after?.sessions);
+   if(after?.legacyDaily){
+    if(unchanged)continue;
+    delete after.legacyDaily;
+   }
+   const converting=before&&usesDailyFile(previous,before);
+   if(!converting&&unchanged)continue;
+   if(converting)migrating=true;
    for(const session of Object.keys(before?.sessions??{}))touched.add(session);
    for(const session of Object.keys(after?.sessions??{}))touched.add(session);
-   const oldLinks=before?(previous.sessionLayout?sessionLinks(before):[before]):[];
+   const oldLinks=before?(converting?[before]:sessionLinks(before)):[];
    const newLinks=after?sessionLinks(after):[];
    const oldIds=new Set(oldLinks.map(link=>link.id)),newIds=new Set(newLinks.map(link=>link.id));
    const removed=oldLinks.filter(link=>!newIds.has(link.id)),added=newLinks.filter(link=>!oldIds.has(link.id));
    if(!removed.length&&!added.length)continue;
    const name=(after??before).journalPath;
-   if((!after||(migrating&&unchanged))&&!notes.has(name)&&!edits.has(name))continue;
+   if((!after||(converting&&unchanged))&&!notes.has(name)&&!edits.has(name))continue;
    let content=journalContent(name);
    const currentLinks=new Set(captureLinkRanges(content).map(group=>group.id));
-   if(migrating&&unchanged&&!currentLinks.has(id))continue;
+   if(converting&&unchanged&&!currentLinks.has(id))continue;
    for(const link of removed)content=removeCaptureLink(content,link.id);
    for(const link of added){
     if(!currentLinks.has(link.id))content+=(content.endsWith('\n\n')?'':'\n')+captureLink(link);
    }
    if(content!==notes.get(name)?.content)edits.set(name,content);
   }
-  const previousSessions=previous.sessionLayout?sessionRecords(previous.records):new Map();
-  const nextSessions=sessionRecords(next.records);
+  const previousSessions=sessionDocuments(previous);
+  const nextSessions=sessionDocuments(next);
   for(const id of touched){
    const before=previousSessions.get(id),after=nextSessions.get(id);
+   if(!before&&!after)continue;
    const oldText=before?renderSessionCapture(before):null,newText=after?renderSessionCapture(after):null;
    const name=(after??before).path,current=notes.get(name);
+   if(protectedPaths?.has(name)&&(recreate.has(id)||oldText!==newText)){
+    return {changed:false,importWarning:conflictNotice(1),status:await this.status(vault)};
+   }
    if(!current&&after&&recreate.has(id)){edits.set(name,newText);continue;}
    if(oldText===newText)continue;
    if(current&&current.content!==oldText&&current.content!==newText&&
@@ -288,20 +354,22 @@ export class CopilotJournal{
    if(current?.content!==newText&&(current||after))edits.set(name,newText);
   }
   const changes=[...edits].filter(([name,content])=>content!==notes.get(name)?.content).map(([path,content])=>({path,content}));
+  const conflicts=changes.filter(change=>protectedPaths?.has(change.path));
+  if(conflicts.length)return {changed:false,importWarning:conflictNotice(conflicts.length),status:await this.status(vault)};
   if(changes.length&&!previous.pendingCapture){
    // Replay the same records on retry, even if the original transcript has changed since this batch.
-   const {records,sessionLayout,blocked,trashId}=next;
-   await this.persist(vault,{...previous,pendingCapture:{records,sessionLayout,blocked,trashId,recreate:[...recreate]}});
+   const {records,sessionLayout,blocked,trashId,projectKeys}=next;
+   await this.persist(vault,{...previous,pendingCapture:{records,sessionLayout,blocked,trashId,projectKeys,recreate:[...recreate]}});
   }
   const result=changes.length?await vault.applyDocumentChanges(changes,snapshot.revision):previous.pendingCapture?{snapshot}:{};
   await this.persist(vault,next);
   return {changed:changes.length>0||!!previous.pendingCapture,migrated:migrating,...result,status:await this.status(vault)};
  }
- async finishPending(vault){
+ async finishPending(vault,protectedPaths){
   const previous=this.config(vault),{pendingCapture,...config}=previous;
   if(pendingCapture){
    const {recreate,...pending}=pendingCapture;
-   return this.commit(vault,previous,{...config,...pending},new Set(recreate));
+   return this.commit(vault,previous,{...config,...pending},new Set(recreate),protectedPaths);
   }
  }
  async sync(vault,daily={},manual=false,{checkOnly=false,sessionIds,allSessions=false,projectIds,protectedPaths}={}){
@@ -309,7 +377,7 @@ export class CopilotJournal{
   const migrating=legacyLayout(previous),importAll=manual&&allSessions===true;
   let available,requested;
   if(importAll&&projectIds!==undefined){
-   available=await this.projects(previous.sourceRoot);
+   available=await this.projects(previous);
    if(!Array.isArray(projectIds)||!projectIds.length||projectIds.some(id=>!available.some(project=>project.id===id)))throw new Error('가져올 프로젝트를 선택해 주세요.');
    requested=new Set(projectIds);
   }
@@ -319,36 +387,54 @@ export class CopilotJournal{
   const selected=manual&&sessionIds!==undefined?new Set(sessionIds):null;
   if(previous.pendingCapture){
    if(checkOnly)return {pending:true};
-   const recovered=await this.finishPending(vault);
-   if(!selected&&!importAll)return recovered;
+   const recovered=await this.finishPending(vault,protectedPaths);
+   if(recovered.importWarning||(!selected&&!importAll))return recovered;
    const imported=await this.sync(vault,daily,manual,{sessionIds,allSessions,projectIds,protectedPaths});
    return {...imported,changed:recovered.changed||imported.changed,migrated:recovered.migrated||imported.migrated,snapshot:imported.snapshot??recovered.snapshot};
   }
-  if(manual&&migrating&&!selected&&!importAll)return this.commit(vault,previous,clone(previous));
+  const migrateOnly=manual&&migrating&&!selected&&!importAll;
   const next=clone(previous);
   // Keep sessions in the same folder across dates until their saved paths are moved.
   const folder=Object.values(previous.records).some(record=>record.path.startsWith('AI Conversations/'))?'AI Conversations':COPILOT_NOTE_FOLDER;
   const sessions=sessionRecords(next.records),updated=new Set(),recreate=new Set();
   const sourceKeys=new Map([...sessions].map(([id,session])=>[session.sourceKey??id,id]));
   let incompatible=false;
-  const projects=(available??await this.projects(previous.sourceRoot)).filter(project=>requested?requested.has(project.id):importAll||previous.allProjects||Object.hasOwn(previous.projects,project.id));
+  const projects=(available??await this.projects(previous)).filter(project=>requested?requested.has(project.id):importAll||previous.allProjects||selectionFor(previous,project));
+  next.projectKeys={...previous.projectKeys,...Object.fromEntries(projects.filter(p=>p.identity).map(p=>[p.identity,p.key]))};
+  const selectedKeys=new Set(projects.map(p=>p.key));
+  const conflicts=new Set(),deferredKeys=new Set();
+  let converting=false;
+  if(migrating){
+   const dailyRecords=Object.values(next.records).filter(record=>usesDailyFile(previous,record));
+   for(const record of dailyRecords){
+    const key=recordProjectKey(record);
+    if(!migrateOnly&&!selectedKeys.has(key)){deferredKeys.add(key);continue;}
+    for(const name of [record.path,record.journalPath,...Object.keys(record.sessions).map(id=>sessionPath(record,id))]){
+     if(protectedPaths?.has(name)){deferredKeys.add(key);conflicts.add(name);}
+    }
+    if(!manual&&!await lstat(path.join(vault.root,record.path)).catch(error=>{if(error.code!=='ENOENT')throw error;}))deferredKeys.add(key);
+   }
+   for(const record of dailyRecords){
+    if(deferredKeys.has(recordProjectKey(record)))record.legacyDaily=true;
+    else{delete record.legacyDaily;converting=true;}
+   }
+  }
   const matched=new Set();
   let cachedInScope=0;
   if(previous.sessionLayout&&(importAll||selected)){
-   const projectKeys=new Set(projects.map(project=>project.key));
    for(const [id,session] of sessions){
     const projectKey=path.posix.basename(path.posix.dirname(session.path));
     const key=session.sourceKey??id;
-    if(!projectKeys.has(projectKey)||(selected&&!selected.has(key)))continue;
+    if(!selectedKeys.has(projectKey)||deferredKeys.has(projectKey)||(selected&&!selected.has(key)))continue;
     if(next.blocked.includes(`s:${id}`)||next.blocked.includes(`s:${key}`))continue;
     cachedInScope++;
     matched.add(key);
-    if(protectedPaths?.has(session.path))continue;
+    if(protectedPaths?.has(session.path)){conflicts.add(session.path);continue;}
     try{await lstat(path.join(vault.root,session.path));}
     catch(error){if(error.code!=='ENOENT')throw error;recreate.add(id);}
    }
   }
-  const sources=await this.projectSessions(previous,projects,selected!==null||importAll);
+  const sources=await this.projectSessions(previous,migrateOnly?[]:projects.filter(p=>!deferredKeys.has(p.key)),selected!==null||importAll);
   const nativeKeys=new Set(sources.sessions.map(({project,source})=>captureId(project.key,source.sessionId)));
   for(const session of sessions.values())if(session.sourceKey)nativeKeys.add(session.sourceKey);
   for(const {project,source} of sources.sessions){
@@ -361,7 +447,7 @@ export class CopilotJournal{
     if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
     const documentPath=existing?.path ?? `${folder}/${project.key}/${sessionId}.md`;
-    if(protectedPaths?.has(documentPath))continue;
+    if(protectedPaths?.has(documentPath)){conflicts.add(documentPath);continue;}
     if(protectedPaths) {
       const received=await vault.readNote(documentPath).catch(error=>{if(error.code!=="ENOENT")throw error;return null;});
       if(received && (!existing || (received.content!==renderSessionCapture(existing) && received.content!==renderSessionCapture(existing,{legacy:true}))))continue;
@@ -376,13 +462,14 @@ export class CopilotJournal{
       for(const entry of existing.entries){entry.sourceKey=sourceKey;updated.add(entry);}
      }
     }
+    const since=selectionFor(previous,project)?.since??previous.since??this.now();
     for(const message of source.messages){
-     if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<(previous.projects[project.id]?.since??previous.since??this.now())))continue;
+     if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<since))continue;
      const date=localDate(message.at);if(manual&&!selected&&!importAll&&date!==today)continue;
      const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      compatible??=compatibleSource(existing,source);
      if(!compatible){incompatible=true;break;}
-     const record=next.records[id]??={id,date,label:project.label,path:`${folder}/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
+     const record=next.records[id]??={id,date,label:project.label,projectPath:project.path,path:`${folder}/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
      let session=record.sessions[sessionId];
      if(!session){
       session=record.sessions[sessionId]={title:source.title||'대화',messages:[]};
@@ -403,12 +490,16 @@ export class CopilotJournal{
   }
   if(selected&&[...selected].some(id=>!matched.has(id)))throw new Error('선택한 세션을 읽을 수 없습니다. 세션 목록을 새로 불러와 주세요.');
   for(const session of updated)session.messages.sort((a,b)=>a.at-b.at);
-  const changed=migrating||updated.size>0||recreate.size>0;
+  const changed=converting||updated.size>0||recreate.size>0;
   if(checkOnly&&changed)return {pending:true};
-  const result=changed?await this.commit(vault,previous,next,recreate):{changed:false,status:await this.status(vault)};
-  if(importAll&&!result.changed&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length)){
+  const result=changed?await this.commit(vault,previous,next,recreate,protectedPaths):{changed:false,status:await this.status(vault)};
+  if(importAll&&!result.changed&&!conflicts.size&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length)){
    result.noConversationHistory=true;
    if(requested){
+    const labels=new Set(projects.map(project=>project.label));
+    if(available.some(project=>project.cached&&labels.has(project.label)&&!requested.has(project.id))){
+     result.importWarning='같은 이름의 저장 기록이 있습니다. 이전 대화를 복구하려면 프로젝트 목록에서 ‘Dynote 저장 기록’ 항목을 선택해 가져와 주세요.';
+    }
     const snapshot=await vault.snapshot();
     if(snapshot.folders.includes(COPILOT_NOTE_FOLDER))result.snapshot=snapshot;
     else{
@@ -417,7 +508,8 @@ export class CopilotJournal{
     }
    }
   }
-  if(sources.error||incompatible)result.status.error=[sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
+  if(manual&&conflicts.size)result.importWarning=conflictNotice(conflicts.size);
+  if(sources.error||incompatible)result.status.error=[result.status.error,sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }
  async trash(vault,{id,sessionId}){

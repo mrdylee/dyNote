@@ -631,7 +631,7 @@ app
     const pickedTeamFolders = new Set();
     const scopedActions = new Set([
       "open-sticky", "create-folder", "move-across-vaults",
-      "capture-status", "capture-sessions", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
+      "capture-status", "capture-sessions", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "github-login", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
@@ -765,6 +765,10 @@ app
         checkVault(args, vault);
         if(registry.purposes[vault.root]!=="personal")throw new Error("개인 노트 공간에서 가져와 주세요.");
         return copilotJournal.listSessions(vault,args.projects);
+      },
+      "capture-reconnect": (args,vault)=>{
+        checkVault(args,vault);
+        return copilotJournal.reconnect(vault,args.previousRoot,registry.purposes[vault.root]==="personal");
       },
       "capture-configure": (args, vault) => { checkVault(args, vault); return copilotJournal.configure(vault,args.input,registry.purposes[vault.root]==="personal"); },
       "capture-source": async (args, vault) => {
@@ -1179,7 +1183,7 @@ app
         const registering = name === "git-clone" || name === "connect-team-repositories";
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
-        const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
+        const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let release;
         try {

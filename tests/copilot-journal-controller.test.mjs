@@ -717,3 +717,94 @@ test('a literal link example does not prevent the actual journal link from being
  const content=await readFile(path.join(f.vault.root,f.journal),'utf8');
  assert.ok(content.includes(example));assert.equal(captureLinkRanges(content).length,1);
 });
+
+async function deletedProject(t){
+ const f=await fixture(t);await f.put();await f.configure(false);
+ const importProject=(id='project',extra={})=>f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:[id],...extra});
+ const saved=await importProject(),relative=saved.status.records[0].sessions[0].path;
+ const file=path.join(f.vault.root,relative),original=await readFile(file,'utf8');
+ await rename(path.join(f.vault.root,'Copilot Note'),path.join(f.root,'trash'));
+ await rm(f.sourceFile);
+ return {...f,importProject,relative,file,original};
+}
+test('reimport matches equivalent project URIs without duplicating records',async t=>{
+ const f=await deletedProject(t),metadata=path.join(f.source,'project/workspace.json');
+ const {folder}=JSON.parse(await readFile(metadata,'utf8'));
+ await writeFile(metadata,JSON.stringify({folder:folder.replace(/Work$/,'%57ork')}));
+ await rename(path.dirname(metadata),path.join(f.source,'reopened'));
+ assert.equal((await f.controller.status(f.vault)).projects.find(p=>p.id==='reopened').selected,true);
+ const result=await f.importProject('reopened');assert.equal(result.changed,true);
+ assert.equal(await readFile(f.file,'utf8'),f.original);assert.equal(result.status.records.length,1);
+});
+test('missing workspace metadata leaves a selectable cached project after restart',async t=>{
+ const f=await deletedProject(t);await rm(path.join(f.source,'project'),{recursive:true});
+ const controller=new CopilotJournal({file:f.controller.file,sourceRoot:f.source,sessionRoot:f.controller.sessionRoot});await controller.load();
+ const saved=(await controller.status(f.vault)).projects.find(p=>p.cached);
+ assert.equal(saved.label,'Work');assert.equal(saved.selected,true);
+ await controller.configure(f.vault,{enabled:false,projects:[saved.id]},true);
+ await controller.sync(f.vault,{},true,{allSessions:true,projectIds:[saved.id]});
+ assert.equal(await readFile(f.file,'utf8'),f.original);
+});
+test('an unrelated malformed workspace is reported without blocking a healthy project',async t=>{
+ const f=await deletedProject(t);await writeFile(path.join(f.source,'other/workspace.json'),'{');
+ const status=await f.controller.status(f.vault);
+ assert.match(status.error,/프로젝트/);assert.ok(status.projects.some(p=>p.id==='project'));
+ assert.equal((await f.importProject()).changed,true);assert.equal(await readFile(f.file,'utf8'),f.original);
+});
+test('a moved personal vault can explicitly reconnect its old cache without mixing vaults',async t=>{
+ const f=await deletedProject(t),old=f.vault.root,moved=path.join(f.root,'moved');
+ await rename(old,moved);const vault=await Vault.open(moved,f.profile);
+ assert.equal((await f.controller.status(vault)).records.length,0);
+ await assert.rejects(f.controller.reconnect(vault,old,false),/개인/);
+ await assert.rejects(f.controller.reconnect(vault,path.join(f.root,'wrong'),true),/기록/);
+ await f.controller.setSource(vault,f.root);
+ const status=await f.controller.reconnect(vault,old,true);assert.equal(status.sourceRoot,f.source);
+ assert.equal(status.enabled,false);assert.equal(status.records.length,1);
+ const project=status.projects.find(p=>p.label==='Work');
+ await f.controller.sync(vault,{},true,{allSessions:true,projectIds:[project.id]});
+ assert.equal(await readFile(path.join(moved,f.relative),'utf8'),f.original);
+ await assert.rejects(f.controller.reconnect(vault,old,true),/이미/);
+});
+test('selected missing legacy daily notes migrate from cache and preserve other projects and journal text',async t=>{
+ const f=await fixture(t);await f.configure(false);
+ const records={};
+ for(const p of (await f.controller.status(f.vault)).projects){
+  const id=captureId(p.key,f.date),sid=captureId(p.key,'old');
+  records[id]={id,date:f.date,label:p.label,path:`AI Conversations/${p.key}/${f.date}.md`,journalPath:f.journal,
+   sessions:{[sid]:{title:p.label,messages:[{id:'q',role:'user',at:f.now(),text:p.label+' old question'}]}}};
+ }
+ await writeFile(path.join(f.vault.root,f.journal),'내 메모\n\n'+Object.values(records).map(r=>captureLink(r)).join('\n'));
+ await f.controller.persist(f.vault,{...f.controller.config(f.vault),records});
+ const work=Object.values(records).find(r=>r.label==='Work');
+ const conflicted=await f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:['project'],protectedPaths:new Set([work.journalPath])});
+ assert.match(conflicted.importWarning,/충돌/);assert.equal(conflicted.changed,false);
+ for(const [i,id] of ['project','other'].entries()){
+  await f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:[id]});
+  const snap=await f.vault.snapshot();
+  assert.equal(snap.notes.filter(n=>n.path.startsWith('AI Conversations/')).length,i+1);
+  assert.match(snap.notes.find(n=>n.path===f.journal).content,/내 메모/);
+  const rec=Object.values(records).find(r=>r.label===(i?'Other':'Work'));
+  const sid=Object.keys(rec.sessions)[0],savedPath=path.posix.join(path.posix.dirname(rec.path),sid+'.md');
+  assert.match(await readFile(path.join(f.vault.root,savedPath),'utf8'),/old question/);
+  assert.match(await readFile(path.join(f.vault.root,f.journal),'utf8'),new RegExp(sid));
+ }
+});
+test('manual reimport explains a pending Git conflict and succeeds after resolution',async t=>{
+ const f=await deletedProject(t);
+ const result=await f.importProject('project',{protectedPaths:new Set([f.relative])});
+ assert.equal(result.changed,false);assert.match(result.importWarning,/충돌/);
+ await assert.rejects(readFile(f.file),{code:'ENOENT'});
+ assert.equal((await f.importProject()).changed,true);assert.equal(await readFile(f.file,'utf8'),f.original);
+});
+
+test('a pending reimport waits for Git conflict resolution before replaying its writes',async t=>{
+ const f=await deletedProject(t),apply=f.vault.applyDocumentChanges.bind(f.vault);
+ f.vault.applyDocumentChanges=async()=>{throw new Error('interrupted');};
+ await assert.rejects(f.importProject(),/interrupted/);
+ f.vault.applyDocumentChanges=apply;
+ const waiting=await f.importProject('project',{protectedPaths:new Set([f.relative])});
+ assert.match(waiting.importWarning,/버전 확인/);
+ await assert.rejects(readFile(f.file),{code:'ENOENT'});
+ assert.equal((await f.importProject()).changed,true);
+ assert.equal(await readFile(f.file,'utf8'),f.original);
+});
