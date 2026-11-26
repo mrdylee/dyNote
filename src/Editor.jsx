@@ -35,7 +35,7 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
-import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runHighlight, runBulletFormat } from "./editorCommands.mjs";
+import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runHighlight, runBulletFormat, contextSelectionContains } from "./editorCommands.mjs";
 import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
 
@@ -283,7 +283,7 @@ export default function Editor({
       const saved = beforeContextMenu.current;
       beforeContextMenu.current = null;
       const selection = saved?.doc === view.state.doc ? saved.selection : view.state.selection;
-      const inside = selection.ranges.some(range => range.from <= position && position <= range.to);
+      const inside = selection.ranges.some(range => contextSelectionContains(view.state.doc, range, position));
       if (!inside) view.dispatch({ selection: { anchor: position } });
       else if (!selection.eq(view.state.selection)) view.dispatch({ selection });
     }

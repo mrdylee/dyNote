@@ -27,12 +27,14 @@ export default function WindowsEditorMenu() {
     pending.current = null;
     flushSync(() => { setRequest(null); setSubmenu(null); });
     if (restore && current.origin.isConnected) current.origin.focus({ preventScroll: true });
-    current.resolve(choice);
+    current.resolve(current.origin.isConnected ? choice : null);
   }
   useEffect(() => {
     window.dynoteShowEditorMenu = (items, point) => new Promise(resolve => {
       close(null, false);
-      const origin = document.activeElement;
+      const target = point ? document.elementFromPoint(point.x, point.y) : document.activeElement;
+      const origin = target?.closest(".code-editor .cm-content");
+      if (!origin) { resolve(null); return; }
       const selection = window.getSelection();
       const rect = !point && selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : origin.getBoundingClientRect();
       const next = { items, origin, resolve, point: point ?? { x: rect.left, y: rect.bottom } };
@@ -52,11 +54,13 @@ export default function WindowsEditorMenu() {
     const outside = event => { if (!panel.current?.contains(event.target)) close(null, false); };
     const dismiss = () => close(null, false);
     document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("focusin", outside, true);
     window.addEventListener("blur", dismiss);
     window.addEventListener("resize", dismiss);
     document.addEventListener("scroll", outside, true);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("focusin", outside, true);
       window.removeEventListener("blur", dismiss);
       window.removeEventListener("resize", dismiss);
       document.removeEventListener("scroll", outside, true);

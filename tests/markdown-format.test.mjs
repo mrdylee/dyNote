@@ -157,3 +157,14 @@ test("right-click conversion choices follow the targeted block or selected block
   assert.deepEqual(availableBulletFormats(editor("", 0)), ["bullet-list"]);
   assert.equal(view.state.doc.toString(), doc);
 });
+
+test("right-clicking the first unselected line converts that line only", () => {
+  const doc = "plain\n- item";
+  const marker = doc.indexOf("-");
+  for (const [anchor, head] of [[0, marker], [marker, 0]]) {
+    const view = editor(doc, anchor, head);
+    assert.deepEqual(availableBulletFormats(view, marker), ["paragraph"]);
+    assert.ok(runBulletFormat(view, "paragraph", marker));
+    assert.equal(view.state.doc.toString(), "plain\n\nitem");
+  }
+});

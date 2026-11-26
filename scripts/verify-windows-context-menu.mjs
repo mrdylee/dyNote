@@ -64,6 +64,10 @@ try {
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   assert.equal(await editor.evaluate(el => el === document.activeElement), true);
+  await open(1);
+  await file.focus();
+  await menu.waitFor({ state: "hidden" });
+  assert.equal(await file.evaluate(el => el === document.activeElement), true);
   await select(0, 2);
   // Observe native copy in this fixture without replacing the user's system clipboard.
   await editor.evaluate(el => el.addEventListener("copy", event => {

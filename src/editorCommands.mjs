@@ -132,11 +132,17 @@ export function runMarkdownFormat(view, format) {
 
 const taskLikeText = /^\[[xX ]\](?:[ \t]|$)/;
 
+export function contextSelectionContains(doc, range, position) {
+  if (position < range.from || position > range.to) return false;
+  // A selection ending at column zero excludes the following line.
+  return range.empty || position < range.to || position !== doc.lineAt(position).from;
+}
+
 function bulletFormatPlan(view, format, position) {
   if (!view || view.state.readOnly || view.composing || view.state.selection.ranges.length !== 1) return false;
   const { state } = view, { doc } = state;
   const selection = state.selection.main;
-  const range = position == null || (selection.from <= position && position <= selection.to)
+  const range = position == null || contextSelectionContains(doc, selection, position)
     ? selection : EditorSelection.cursor(position);
   const first = doc.lineAt(range.from), last = doc.lineAt(range.empty ? range.to : range.to - 1);
   const source = doc.toString();
