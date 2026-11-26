@@ -52,6 +52,7 @@ jobs:
           node scripts/verify-vault-entry.mjs
           node scripts/verify-team-repositories.mjs
           DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs
+          node --test --test-name-pattern="launching Dynote again" scripts/verify-sticky-review.mjs
           node scripts/verify-update-install.mjs
       - run: node scripts/package-windows-distribution.mjs
       - name: Install native document editors for Windows handoff tests

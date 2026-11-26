@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 
@@ -90,6 +92,26 @@ const click = (app, id) => app.evaluate((_electron, id) => {
   if (!item) throw new Error("Missing tray item " + id);
   item.click();
 }, id);
+
+test("launching Dynote again restores the main window hidden in the tray", async () => {
+  await fixture([], async ({ app, profile }) => {
+    const id = await app.evaluate(({ BrowserWindow }) => {
+      const [main] = BrowserWindow.getAllWindows();
+      main.close();
+      return main.id;
+    });
+    const visible = () => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), id);
+    await until(visible, value => !value, "main window hides to tray");
+
+    const executable = await app.evaluate(() => process.execPath);
+    await promisify(execFile)(executable, process.env.DYNOTE_EXECUTABLE ? [] : ["."], {
+      env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 10000, killSignal: "SIGKILL",
+    });
+    await until(visible, Boolean, "original main window reappears");
+    const log = (await readFile(path.join(profile, "startup.log"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    assert.equal(log.filter(entry => entry.stage === "process.start").length, 1);
+  });
+});
 
 test("Sticky Note labels and five matching background/text colors", async () => {
   await fixture([], async ({ app }) => {

@@ -63,7 +63,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 if (process.env.OPEN_NOTES_DATA)
   app.setPath("userData", path.resolve(process.env.OPEN_NOTES_DATA));
-const startup = createStartupLog(app.getPath("userData"));
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on("second-instance", showMainWindow);
+const startup = createStartupLog(app.getPath("userData"), app.getVersion());
 startup.mark("process.start");
 let window;
 let vault;
@@ -424,7 +426,6 @@ app
       return copilot.askOnCloud(request);
     }, () => noteRemotes(app.getPath("userData"), registry.roots));
     if (cloudBridge?.settings) {
-      if (!app.requestSingleInstanceLock()) { app.exit(0); return; }
       let timer, stopped = false;
       const poll = async () => {
         if (!quitRequested && cloudBridge.service && !cloudBridge.changing) {
