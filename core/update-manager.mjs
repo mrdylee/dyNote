@@ -6,9 +6,32 @@ import path from 'node:path';
 import {allowedUpdateAsset,validateInternalFeedUrl,checkReleaseInformation,matchesUpdateAsset,releaseInformation} from './update-information.mjs';
 const WEEK=7*86400000,HOUR=3600000,MAX_SIZE=2*1024*1024*1024;
 function preferences(value={},downloadDirectory) {
-  return {source:value.source === 'internal' ? 'internal' : 'github',
+  return {source:['internal','local'].includes(value.source) ? value.source : 'github',
+    localSetup:value.localSetup ?? null,
     internalFeedUrl:typeof value.internalFeedUrl === 'string' ? value.internalFeedUrl : '',
     enabled:value.enabled!==false,backgroundDownload:value.backgroundDownload!==false,autoInstall:value.autoInstall!==false,includePrerelease:value.includePrerelease===true,ignored:Array.isArray(value.ignored)?value.ignored.filter(x=>typeof x==='string').slice(-100):[],downloadDirectory:typeof value.downloadDirectory==='string'&&path.isAbsolute(value.downloadDirectory)&&!value.downloadDirectory.includes('\0')?value.downloadDirectory:downloadDirectory};
+}
+function newerSetup(tag,current) {
+  return releaseInformation([{tag_name:tag}],current,true).available;
+}
+async function readLocalSetup(file,current) {
+  const match = /^(?:([a-f0-9]{64})-)?Dynote-([0-9][a-z0-9.+-]*)-windows-x64-Setup\.exe$/i.exec(path.basename(file));
+  if (!match) throw new Error('Dynote-버전-windows-x64-Setup.exe 형식의 파일명을 선택해 주세요.');
+  const tag = 'v' + match[2];
+  if (!newerSetup(tag,current)) throw new Error('현재 버전보다 높은 새 버전의 설치 파일을 선택해 주세요.');
+  const info = await stat(file);
+  if (!info.isFile() || info.size < 2 || info.size > MAX_SIZE) throw new Error('설치 파일 크기가 올바르지 않습니다.');
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of createReadStream(file)) {
+    if (!size && (chunk[0] !== 0x4d || chunk[1] !== 0x5a)) throw new Error('Windows 실행 파일을 선택해 주세요.');
+    size += chunk.length;
+    if (size > info.size) throw new Error('설치 파일이 변경되었습니다. 다시 선택해 주세요.');
+    hash.update(chunk);
+  }
+  const digest = hash.digest('hex');
+  if (size !== info.size || (match[1] && match[1].toLowerCase() !== digest)) throw new Error('설치 파일 검증에 실패했습니다. 파일을 다시 확인해 주세요.');
+  return {file,tag,asset:{size,digest:'sha256:'+digest}};
 }
 export class UpdateManager {
   constructor({directory,downloadDirectory=directory,current,platform=process.platform,arch=process.arch,installed=false,now=Date.now,fetcher=(...args)=>fetch(...args),check,onChange=()=>{}}) {
@@ -32,9 +55,12 @@ export class UpdateManager {
     let saved;try{saved=JSON.parse(await readFile(path.join(this.directory,'settings.json'),'utf8'));}catch{}
     if(saved){
       this.state.preferences=preferences(saved.preferences,this.defaultDownloadDirectory);
+      const prefs = this.state.preferences;
+      if (prefs.source === 'local' && !this.state.installSupported) prefs.source = 'github';
+      if (prefs.localSetup && !newerSetup(prefs.localSetup.tag,this.current)) prefs.localSetup = null;
       this.state.installation=saved.installation??null;
       for(const key of ['lastCheckedAt','lastAttemptAt','retryAt'])this.state[key]=Number.isFinite(saved[key])?saved[key]:0;
-      if(saved.cached){
+      if(saved.cached && prefs.source !== 'local'){
         const c=saved.cached;
         const result=releaseInformation([{tag_name:c.tag,assets:[{name:c.asset?.name,browser_download_url:c.asset?.url,size:c.asset?.size,digest:c.asset?.digest}]}],this.current,this.state.preferences.includePrerelease,this.target,this.internalFeedUrl);
         if(result.available){
@@ -47,7 +73,7 @@ export class UpdateManager {
       }
       const attempt=this.state.installation;
       if(attempt&&typeof attempt.directory==='string'&&path.dirname(attempt.directory)===path.join(this.directory,'install')&&/^[a-f0-9-]{36}$/.test(path.basename(attempt.directory))){
-        if(this.cached?.tag===attempt.tag){
+        if(this.cached?.tag===attempt.tag || (prefs.source === 'local' && prefs.localSetup?.tag===attempt.tag)){
           let result;try{result=JSON.parse((await readFile(path.join(attempt.directory,'result.json'),'utf8')).replace(/^\uFEFF/,''));}catch{}
           this.state.message=attempt.error||result?.error||'이전 업데이트 설치가 완료되지 않았습니다. 지금 설치를 눌러 다시 시도해 주세요.';
         }else if(!releaseInformation([{tag_name:attempt.tag}],this.current,true).available){
@@ -58,7 +84,7 @@ export class UpdateManager {
     }
     return this.state;
   }
-  async configure(change){
+  async configure(change,selectedFile){
     if(this.pending||this.state.phase==='installing')throw new Error('업데이트 확인 또는 설치가 끝난 후 설정을 변경해 주세요.');
     this.pending=(async()=>{
       const before=structuredClone(this.state),cached=this.cached;
@@ -66,17 +92,23 @@ export class UpdateManager {
         const folder=change.downloadDirectory;
         if(typeof folder!=='string'||!path.isAbsolute(folder)||folder.includes('\0')||!(await stat(folder)).isDirectory())throw new Error('다운로드할 폴더를 선택해 주세요.');
       }
-      if (Object.hasOwn(change,'source') && !['github','internal'].includes(change.source)) throw new Error('업데이트 배포처를 선택해 주세요.');
+      if (Object.hasOwn(change,'source') && !['github','internal','local'].includes(change.source)) throw new Error('업데이트 배포처를 선택해 주세요.');
       const previousFeed = this.internalFeedUrl;
-      const next = preferences({...before.preferences,...change},this.defaultDownloadDirectory);
+      const next = preferences({...before.preferences,...change,localSetup:before.preferences.localSetup},this.defaultDownloadDirectory);
+      if (next.source === 'local' && !this.state.installSupported) throw new Error('로컬 설치는 Windows x64 설치형 앱에서 지원합니다.');
+      if (selectedFile) {
+        if (next.source !== 'local') throw new Error('로컬 설치 파일 배포처를 선택해 주세요.');
+        next.localSetup = await readLocalSetup(selectedFile,this.current);
+      }
       if (Object.hasOwn(change,'internalFeedUrl') && change.internalFeedUrl !== '') next.internalFeedUrl = validateInternalFeedUrl(change.internalFeedUrl);
       this.state.preferences=next;
-      const sourceChanged = previousFeed !== this.internalFeedUrl;
+      const sourceChanged = before.preferences.source !== next.source || previousFeed !== this.internalFeedUrl;
       if (sourceChanged) {
         next.ignored = [];
         this.state.installation = null;
       }
-      if (sourceChanged || before.preferences.includePrerelease !== next.includePrerelease) {
+      if (selectedFile) this.state.installation = null;
+      if (selectedFile || sourceChanged || before.preferences.includePrerelease !== next.includePrerelease) {
         this.cached = null;
         Object.assign(this.state, {result:null, phase:'idle', progress:0, lastCheckedAt:0, retryAt:0, message:'', downloadedPath:null});
       }
@@ -85,7 +117,7 @@ export class UpdateManager {
     return this.pending;
   }
   check(manual=false){
-    if(this.state.phase==='installing')return Promise.resolve(this.state);
+    if(this.state.preferences.source==='local'||this.state.phase==='installing')return Promise.resolve(this.state);
     if(this.pending)return this.pending;
     const {preferences,lastCheckedAt,retryAt}=this.state,now=this.now();
     const interval = this.internalFeedUrl === null ? WEEK : 24 * HOUR;
@@ -113,7 +145,7 @@ export class UpdateManager {
     return file;
   }
   download(){
-    if(this.state.phase==='installing')return Promise.resolve(this.state);
+    if(this.state.preferences.source==='local'||this.state.phase==='installing')return Promise.resolve(this.state);
     if(this.pending)return this.pending;
     this.pending=(async()=>{try{await this.downloadAsset();await this.persist();}catch(error){this.emit({phase:'error',message:error.message,retryAt:this.now()+HOUR});await this.persist();}return this.state;})().finally(()=>{this.pending=null;});
     return this.pending;
@@ -151,20 +183,29 @@ export class UpdateManager {
     }finally{await handle?.close();await rm(partial,{force:true});}
   }
   async readyPath(){if(!this.cached)throw new Error('검증 완료된 다운로드가 없습니다.');return this.verify(this.cached.asset,this.cached.directory);}
-  async beginInstall(stage){
+  async beginInstall(stage,local=false){
     if(!this.state.installSupported)throw new Error('자동 설치는 Windows 설치형 앱에서 지원합니다.');
-    if(this.pending||this.state.phase!=='ready')throw new Error('업데이트 다운로드가 끝난 후 다시 시도해 주세요.');
+    if(local !== (this.state.preferences.source === 'local')) throw new Error('업데이트 배포처를 다시 확인해 주세요.');
+    const readyPhase = local ? 'idle' : 'ready';
+    const setup = this.state.preferences.localSetup;
+    if(local && !setup) throw new Error('로컬 설치 파일을 선택해 주세요.');
+    if(this.pending||this.state.phase!==readyPhase)throw new Error('업데이트 다운로드가 끝난 후 다시 시도해 주세요.');
     this.pending=(async()=>{
-      const file=await this.readyPath();
-      const job=await stage({file,asset:this.cached.asset,tag:this.cached.tag});
-      this.emit({phase:'installing',installation:{tag:this.cached.tag,directory:job.directory},message:'작업을 저장한 뒤 업데이트하고 다시 시작합니다.'});
-      try{await this.persist();}catch(error){this.emit({phase:'ready',message:error.message});throw error;}
+      const {file,asset,tag} = local ? setup : {...this.cached,file:await this.readyPath()};
+      let job;
+      try { job=await stage({file,asset,tag}); }
+      catch(error) {
+        if (local && error.code==='ENOENT' && error.path===file) throw new Error('설치 파일을 찾을 수 없습니다. 경로를 다시 선택해 주세요.',{cause:error});
+        throw error;
+      }
+      this.emit({phase:'installing',installation:{tag,directory:job.directory},message:'작업을 저장한 뒤 업데이트하고 다시 시작합니다.'});
+      try{await this.persist();}catch(error){this.emit({phase:readyPhase,message:error.message});throw error;}
       return job;
     })().finally(()=>{this.pending=null;});
     return this.pending;
   }
   async cancelInstall(message){
-    this.emit({phase:'ready',installation:{...this.state.installation,error:message},message});
+    this.emit({phase:this.state.preferences.source==='local'?'idle':'ready',installation:{...this.state.installation,error:message},message});
     await this.persist();
   }
 }

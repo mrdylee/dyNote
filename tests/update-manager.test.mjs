@@ -301,3 +301,52 @@ test('internal feed validates settings and metadata, checks daily, and never fal
  manifest = null; await manager.check(true);
  assert.equal(manager.state.message, 'company offline'); assert.equal(calls, 7);
 });
+
+test('local Setup selection survives restart and stages offline only on request', async t => {
+ const windows = {platform:'win32', arch:'x64', installed:true};
+ let lookups = 0;
+ const offline = {...windows, check:async () => { lookups++; throw new Error('offline'); }};
+ const {manager,directory} = await fixture(t, offline);
+ const file = path.join(directory,'Dynote-2.0.0-windows-x64-Setup.exe');
+ const content = Buffer.from('MZ offline installer fixture');
+ await writeFile(file,content);
+ await manager.configure({source:'local'});
+ await manager.configure({},file);
+ const restored = new tools.UpdateManager({directory,current:'1.0.0',...offline});
+ await restored.init();
+ assert.equal(restored.state.preferences.localSetup.file,file);
+ await restored.check();
+ await restored.check(true);
+ await restored.download();
+ await assert.rejects(restored.beginInstall(() => assert.fail('automatic install')),/배포처/);
+ assert.equal(lookups,0);
+ assert.equal(restored.state.phase,'idle');
+ const {stageUpdate} = await import('../electron/update-installer.mjs');
+ const stage = args => stageUpdate({...args,directory,executable:'Dynote.exe'});
+ await rm(file);
+ await assert.rejects(restored.beginInstall(stage,true),/경로/);
+ await writeFile(file,Buffer.alloc(content.length));
+ await assert.rejects(restored.beginInstall(stage,true),/검증/);
+ await writeFile(file,content);
+ const job = await restored.beginInstall(stage,true);
+ assert.deepEqual(await readFile(path.join(job.directory,'Setup.exe')),content);
+ assert.equal(JSON.parse(await readFile(job.manifest)).tag,'v2.0.0');
+ await restored.cancelInstall('저장 취소');
+ assert.equal(restored.state.phase,'idle');
+ await restored.configure({source:'github'});
+ await restored.check(true);
+ assert.equal(lookups,1);
+});
+
+test('local Setup rejects incompatible targets, old versions and invalid files', async t => {
+ const {manager:portable} = await fixture(t);
+ await assert.rejects(portable.configure({source:'local'}),/설치형/);
+ const {manager,directory} = await fixture(t,{platform:'win32',arch:'x64',installed:true});
+ await manager.configure({source:'local'});
+ for (const [name,error] of [['Dynote-1.0.0-windows-x64-Setup.exe',/새 버전/],['unexpected.exe',/파일명/],['Dynote-2.0.0-windows-x64-Setup.exe',/실행 파일/]]) {
+   const file = path.join(directory,name);
+   await writeFile(file,'invalid');
+   await assert.rejects(manager.configure({},file),error);
+ }
+ assert.equal(manager.state.preferences.localSetup,null);
+});

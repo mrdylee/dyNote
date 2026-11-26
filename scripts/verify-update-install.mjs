@@ -21,10 +21,16 @@ try {
     globalThis.updateFixture = { installSupported: true, installation: null, phase: 'ready', message: '', preferences: { enabled: true, backgroundDownload: true, autoInstall: true, includePrerelease: false, ignored: [], downloadDirectory: 'C:\\Downloads' }, downloadedPath: 'C:\\Downloads\\Setup.exe', result: { available: true, latest: { tag: 'v99.0.0', name: 'Fixture update', assets: [{ digest: 'test' }] } } };
     globalThis.installRequests = 0; globalThis.closeResponses = [];
     globalThis.sendUpdateFixture = () => BrowserWindow.getAllWindows()[0].webContents.send('notes:update-status', globalThis.updateFixture);
-    for (const name of ['update-state', 'update-settings', 'update-install']) ipcMain.removeHandler(`notes:${name}`);
+    for (const name of ['update-state', 'update-settings', 'update-local-file', 'update-install']) ipcMain.removeHandler(`notes:${name}`);
     ipcMain.handle('notes:update-state', () => ({ ok: true, value: globalThis.updateFixture }));
     ipcMain.handle('notes:update-settings', (_event, args) => { Object.assign(globalThis.updateFixture.preferences, args); globalThis.sendUpdateFixture(); return { ok: true, value: globalThis.updateFixture }; });
-    ipcMain.handle('notes:update-install', event => {
+    ipcMain.handle('notes:update-local-file', () => {
+      globalThis.updateFixture.preferences.localSetup = {file:'C:\\Offline\\Dynote-99.0.0-windows-x64-Setup.exe'};
+      globalThis.sendUpdateFixture();
+      return {ok:true, value:globalThis.updateFixture};
+    });
+    ipcMain.handle('notes:update-install', (event, options) => {
+      globalThis.lastInstallWasLocal = options?.local === true;
       globalThis.installRequests++;
       globalThis.updateFixture.phase = 'installing'; globalThis.sendUpdateFixture();
       setTimeout(() => event.sender.send('notes:before-close', { id: 92345, mode: 'quit', updating: true }), 20);
@@ -70,8 +76,19 @@ try {
   await page.getByRole('button', { name: '지금 설치하고 다시 시작', exact: true }).click();
   assert.equal(await requests(), 2, 'manual retry is available');
   assert.equal(await readFile(path.join(vault, 'Keep.md'), 'utf8'), '# Keep\n');
+  await ready();
+  await settings();
+  await page.getByLabel('업데이트 배포처').selectOption('local');
+  const localInstall = page.getByRole('button', {name:'설치하고 다시 시작',exact:true});
+  assert.equal(await localInstall.isDisabled(),true);
+  await page.getByRole('button', {name:'Setup.exe 선택'}).click();
+  await page.waitForFunction(() => document.querySelector('.update-settings .primary-button')?.disabled === false);
+  assert.ok((await page.getByLabel('설치 파일 경로').inputValue()).endsWith('Setup.exe'));
+  assert.equal(await page.getByRole('button', {name:'지금 업데이트 확인'}).count(),0);
+  await localInstall.click();
+  assert.equal(await app.evaluate(() => globalThis.lastInstallWasLocal),true);
   assert.deepEqual(errors, []);
-  console.log('PASS: installed update controls, idle timer, input reset, settings hold, auto-install off, Later, save handshake, failed-attempt suppression and manual retry. Installer IPC is controlled; no installed app changed.');
+  console.log('PASS: installed update controls, idle timer, input reset, settings hold, auto-install off, Later, save handshake, failed-attempt suppression, manual retry and explicit local Setup selection. Installer IPC is controlled; no installed app changed.');
 } catch (error) {
   if (app) console.error(await app.evaluate(() => ({ requests: globalThis.installRequests, responses: globalThis.closeResponses, state: globalThis.updateFixture })));
   throw error;

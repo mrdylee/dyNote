@@ -995,14 +995,14 @@ export default function App() {
   const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
   const updateComposing = useRef(false);
   updateContext.current = { treeWriting: switchingVault || treeWrites.length > 0 || restoringVaults.length > 0 || !!captureWritingId, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
-  const installUpdate = async (automatic = false) => {
+  const installUpdate = async ({automatic = false, local = false} = {}) => {
     if (updateRequest.current) return;
     if (updateContext.current.treeWriting || updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
     updateRequest.current = { interaction: updateInteraction.current, automatic };
-    try { await invoke(api.installUpdate()); }
+    try { await invoke(api.installUpdate({local})); }
     catch (error) { updateRequest.current = null; throw error; }
   };
-  const automaticInstall = useEffectEvent(() => installUpdate(true).catch(error => {
+  const automaticInstall = useEffectEvent(() => installUpdate({automatic:true}).catch(error => {
     setDismissedUpdate(updateState?.result?.latest?.tag);
     setError(error.message);
   }));
@@ -3591,7 +3591,7 @@ export default function App() {
             onImport={() => invoke(api.importPlugin({ vaultId: vault.id }))}
             onEnable={(id, enabled) => invoke(api.enablePlugin({ vaultId: vault.id, id, enabled }))}
             onShow={(id, settings) => invoke(api.showPlugin({ vaultId: vault.id, id, settings }))} />}
-          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onInstall={installUpdate} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
+          {settingsTab === "updates" && <UpdateSettings currentVersion={version} state={updateState} onLocalFile={()=>invoke(api.pickLocalSetup()).then(setUpdateState)} onLocalInstall={()=>installUpdate({local:true})} onInstall={installUpdate} onCheck={()=>invoke(api.checkUpdates()).then(setUpdateState)} onSettings={async value=>{const previous=updateState;setUpdateState(old=>({...old,preferences:{...old.preferences,...value}}));try{setUpdateState(await invoke(api.updateSettings(value)));}catch(error){setUpdateState(previous);throw error;}}} onDirectory={()=>invoke(api.pickUpdateDownloadDirectory()).then(setUpdateState)} onDownload={()=>invoke(api.downloadUpdate()).then(setUpdateState)} onShow={()=>invoke(api.showUpdate())} onOpen={openExternal}/>}
           {settingsTab === "git-workspace" && gitVault.id && <GitWorkspace key={gitVault.id} busy={busy} backupEnabled={gitSettingsStatus.enabled}
             teamResult={panelSyncs[gitVault.id]?.teamResult}
             onStatus={() => invoke(api.gitWorkspaceStatus({ vaultId: gitVault.id }))}

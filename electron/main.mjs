@@ -734,11 +734,18 @@ app
         const selected = await dialog.showOpenDialog(window, { title: "업데이트 다운로드 폴더 선택", defaultPath: updates.state.preferences.downloadDirectory, properties: ["openDirectory", "createDirectory"] });
         return selected.canceled ? updates.state : updates.configure({ downloadDirectory: selected.filePaths[0] });
       },
+      "update-local-file": async () => {
+        const selected = await dialog.showOpenDialog(window, {
+          title: "로컬 Dynote 설치 파일 선택", defaultPath: updates.state.preferences.localSetup?.file ?? app.getPath("downloads"),
+          properties: ["openFile"], filters: [{name: "Windows 설치 파일", extensions: ["exe"]}],
+        });
+        return selected.canceled ? updates.state : updates.configure({}, selected.filePaths[0]);
+      },
       "update-download": () => updates.download(),
       "update-show": async () => {shell.showItemInFolder(await updates.readyPath());return true;},
-      "update-install": async () => {
+      "update-install": async options => {
         if (updateInstallation || quitRequested || closePending || vaultOperations.active) throw new Error("다른 작업이 끝난 후 업데이트를 설치해 주세요.");
-        const pending = updates.beginInstall(args => stageUpdate({ ...args, directory: updates.directory, executable: process.execPath }));
+        const pending = updates.beginInstall(args => stageUpdate({ ...args, directory: updates.directory, executable: process.execPath }), options?.local === true);
         updateInstallation = pending;
         try {
           await pending;

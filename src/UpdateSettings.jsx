@@ -1,5 +1,5 @@
 import {useState} from 'react';
-export default function UpdateSettings({currentVersion,state,onCheck,onSettings,onDirectory,onDownload,onShow,onInstall,onOpen}) {
+export default function UpdateSettings({currentVersion,state,onCheck,onSettings,onLocalFile,onLocalInstall,onDirectory,onDownload,onShow,onInstall,onOpen}) {
   const [pending,setPending]=useState(false),[error,setError]=useState('');
   const [feedDraft,setFeedDraft]=useState(null);
   const run=async action=>{setPending(true);setError('');try{await action();}catch(e){setError(e.message);}finally{setPending(false);}};
@@ -16,7 +16,16 @@ export default function UpdateSettings({currentVersion,state,onCheck,onSettings,
     <h3>Dynote 업데이트</h3><p>현재 버전 {currentVersion}</p>
     <label>업데이트 배포처<select value={preferences.source || 'github'} disabled={busy} onChange={e=>run(async()=>{
       await onSettings({source:e.target.value}); setFeedDraft(null);
-    })}><option value="github">GitHub</option><option value="internal">회사 내부</option></select></label>
+    })}><option value="github">GitHub</option><option value="internal">회사 내부</option>{state.installSupported && <option value="local">로컬 설치 파일</option>}</select></label>
+    {preferences.source === 'local' ? <>
+      <p>공식 릴리스나 사내 배포 담당자에게 받은 Dynote 설치 파일을 선택하세요. 설치하면 작업을 저장하고 앱을 다시 시작합니다.</p>
+      <label>설치 파일 경로<input value={preferences.localSetup?.file ?? ''} readOnly/></label>
+      <div className="update-actions">
+        <button disabled={busy} onClick={()=>run(onLocalFile)}>Setup.exe 선택</button>
+        <button className="primary-button" disabled={busy || !preferences.localSetup} onClick={()=>run(onLocalInstall)}>설치하고 다시 시작</button>
+      </div>
+      {(error || message) && <p role={phase==='installing'?'status':'alert'}>{error || message}</p>}
+    </> : <>
     {internal && <>
       <label>사내 Git 또는 latest.json 주소<input type="url" value={feed} disabled={busy} onChange={e=>setFeedDraft(e.target.value)}/></label>
       <button disabled={busy || !feedChanged} onClick={()=>run(async()=>{
@@ -49,5 +58,6 @@ export default function UpdateSettings({currentVersion,state,onCheck,onSettings,
       {phase==='available'&&message&&<p>{message}</p>}
     </div>}
     <p className="muted">{state.installSupported ? '공식 배포 파일을 검증한 뒤 설치합니다. Windows를 자동으로 재부팅하지 않습니다.' : '다운로드한 파일은 검증 후 안내합니다. 설치는 직접 진행합니다.'}</p>
+    </>}
   </section>;
 }
