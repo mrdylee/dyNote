@@ -20,7 +20,7 @@ try {
   await writeFile(path.join(vault, "Board.canvas"), JSON.stringify({ nodes, edges }));
   await copyFile("tests/fixtures/office-preview.pptx", path.join(vault, "Slides.pptx"));
   await writeFile(path.join(root, "settings.json"), JSON.stringify({ vaultRoot: vault }));
-  app = await _electron.launch({ executablePath: electronPath, args: ["."], env: { ...process.env, OPEN_NOTES_DATA: root } });
+  app = await _electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || electronPath, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: root } });
   const page = await app.firstWindow();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
