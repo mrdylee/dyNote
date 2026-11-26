@@ -129,6 +129,10 @@ try {
   let downloaded;
   let installerJob, installingPid;
   let recoveryDraft, documentDraft;
+  const stickyPath = '포스트잇/Upgrade.md';
+  const stickyText = 'Keep this open Sticky Note through the Windows update.';
+  await mkdir(path.join(vault, '포스트잇'), {recursive: true});
+  await writeFile(path.join(vault, stickyPath), 'Before update');
   const previousRuns = new Set((await readFile(path.join(profile, 'startup.log'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).run));
   await launch(installed, async (app, page) => {
     assert.equal(await app.evaluate(({app}) => app.getVersion()), previousVersion || version);
@@ -184,6 +188,16 @@ try {
     await reveal.click();
     await page.waitForFunction(() => !document.querySelector('.update-settings input[type="checkbox"]')?.disabled);
     assert.equal(await app.evaluate(() => globalThis.shownUpdate), downloaded);
+    const opened = app.waitForEvent('window', {timeout: 15000});
+    const result = await page.evaluate(async path => {
+      const snapshot = await window.notes.snapshot({});
+      return window.notes.openSticky({vaultId: snapshot.value.id, path});
+    }, stickyPath);
+    assert.equal(result.ok, true, result.error);
+    const card = await opened;
+    await card.getByRole('textbox', {name: 'Sticky Note 메모'}).fill(stickyText);
+    assert.equal(await (await app.browserWindow(card)).evaluate(win => win.isVisible()), true);
+    await page.bringToFront();
     const exited = once(app.process(), 'exit', {signal: AbortSignal.timeout(60000)});
     console.log('Requesting installation and waiting for the app to exit');
     await updates.getByRole('button', {name: '지금 설치하고 다시 시작', exact: true}).click();
@@ -200,6 +214,9 @@ try {
     restarted = entries.find(entry => !previousRuns.has(entry.run) && Number(entry.run.split(':').at(-1)) !== installingPid && entry.stage === 'main.services-ready');
   }
   assert.ok(restarted, 'Installer helper should relaunch the installed app and finish startup.');
+  assert.equal(restarted.version, version, 'The automatically relaunched process must run the candidate version.');
+  assert.equal((await readFile(path.join(vault, stickyPath), 'utf8')).trimEnd(), stickyText);
+  console.log('PASS Windows update with open Sticky Note: %s -> %s, memo preserved', previousVersion || version, restarted.version);
   // Only this test's newly relaunched process is stopped, after verifying its executable.
   await run(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', '$fixtureProcess = Get-Process -Id ([int]$env:DYNOTE_TEST_PID); if ($fixtureProcess.Path -ne $env:DYNOTE_TEST_EXE) { throw "Unexpected executable" }; Stop-Process -InputObject $fixtureProcess'], {env: {...process.env, DYNOTE_TEST_PID: restarted.run.split(':').at(-1), DYNOTE_TEST_EXE: installed}});
   if (previousSetup) {
