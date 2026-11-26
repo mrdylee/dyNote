@@ -93,6 +93,16 @@ export class StickyNotes {
       this.#schedule(state);
     });
     ipcMain.on("sticky:new", event => { if (this.#sender(event)) this.open(); });
+    ipcMain.on("sticky:hide", event => {
+      const state = this.#sender(event);
+      if (!state) return;
+      clearTimeout(state.timer);
+      void this.#enqueue(async () => {
+        if (state.window.isDestroyed() || state.closing) return;
+        const saved = await this.#persist(state, { saveBlankDraft: true });
+        if (saved && !state.window.isDestroyed() && !state.closing) state.window.hide();
+      });
+    });
     ipcMain.on("sticky:close", event => this.#sender(event)?.window.close());
 
     const trayImage = nativeImage.createFromPath(icon);
@@ -282,11 +292,12 @@ export class StickyNotes {
     return state.flushing;
   }
 
-  async #persist(state) {
+  async #persist(state, { saveBlankDraft = false } = {}) {
     try {
       while (true) {
         const content = state.content;
-        if (content !== state.saved && (state.revision || content.trim())) {
+        const newDraft = saveBlankDraft && !state.revision && !this.#records.has(state.record.id);
+        if (newDraft || (content !== state.saved && (state.revision || content.trim()))) {
           const title = stickyTitle(content).slice(0, 54);
           state.record.path ??= notePath(state.record.id, title);
           const saved = await this.saveNote(state.record.root, state.record.path, content, state.revision);
