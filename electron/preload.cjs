@@ -179,6 +179,7 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.on("notes:git-status", listener);
       return () => ipcRenderer.removeListener("notes:git-status", listener);
     },
+    openSticky: args => call("open-sticky", args),
     onStickySaved: (callback) => {
       const listener = (_event, value) => callback(value);
       ipcRenderer.on("notes:sticky-saved", listener);

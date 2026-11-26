@@ -1,0 +1,37 @@
+.sticky-trigger { anchor-name: --sticky-trigger; }
+.sticky-trigger svg { color: #92692a; fill: #fff0bd; }
+.sticky-rail:has(:popover-open) .sticky-trigger { background: #f6eaca; }
+.sticky-picker {
+  position: fixed;
+  position-anchor: --sticky-trigger;
+  position-area: right span-top;
+  align-self: end;
+  inset: auto;
+  margin: 0 0 0 10px;
+  width: min(260px, calc(100vw - 72px));
+  padding: 6px;
+  color: inherit;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 5px 20px #30264126;
+}
+.sticky-picker-head, .sticky-picker-row { display: flex; align-items: center; }
+.sticky-picker-head { gap: 7px; padding: 3px 4px 7px 8px; border-bottom: 1px solid var(--border); }
+.sticky-count { padding: 1px 6px; border-radius: 9px; color: var(--accent-ink); background: var(--accent-soft); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sticky-picker-new { display: grid; place-items: center; margin-left: auto; width: 28px; height: 28px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink); }
+.sticky-picker-new:hover { background: var(--accent); color: white; }
+.sticky-picker-list { max-height: min(35vh, 260px); overflow-y: auto; padding: 5px 2px 2px; }
+.sticky-picker-list p { margin: 10px 6px; font-size: 12px; }
+.sticky-picker-row { gap: 9px; width: 100%; height: 32px; padding: 0 6px; border-radius: 5px; font-size: 12px; text-align: left; }
+.sticky-picker-row:hover { background: var(--soft); }
+.sticky-picker-row svg { color: #957239; }
+.sticky-picker-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-height: 760px) {
+  .activity-rail:has(.sticky-trigger) .rail-nav { gap: 5px; margin-top: 16px; }
+  .activity-rail:has(.sticky-trigger) .rail-bottom { gap: 10px; }
+}
+
+.sticky-picker-all { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 4px; padding: 8px; border-top: 1px solid var(--border); color: var(--accent-ink); font-size: 12px; }
+.sticky-picker-all:hover { background: var(--soft); }
