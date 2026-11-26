@@ -1,16 +1,20 @@
-import {mkdtemp,mkdir,writeFile,readFile,copyFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,appendFile,copyFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
+import electronPath from 'electron';
 const {_electron:electron}=await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
 const fixture=await mkdtemp(`${tmpdir()}/dynote-pdf-links-`),profile=`${fixture}/profile`,vault=`${fixture}/vault`;
 await mkdir(profile);await mkdir(vault);await mkdir('output/playwright',{recursive:true});
 await writeFile(`${profile}/settings.json`,JSON.stringify({vaultRoot:vault}));
 await writeFile(`${vault}/Note.md`,'# PDF links\n\n[[manual.pdf#page=2&selection=0,0,0,6|Selection]]\n\n[Annotation](manual.pdf#page=2&annotation=8R)\n\n[[a%23b.pdf#page=2|Hash file]]\n');await copyFile('tests/fixtures/link-target.pdf',`${vault}/manual.pdf`);
 await copyFile('tests/fixtures/link-target.pdf',`${vault}/a#b.pdf`);
+await appendFile(`${vault}/Note.md`,Array.from({length:44},(_,i)=>`\n[[manual.pdf#page=2&annotation=8R|Reference ${i+1}]]\n`).join(''));
 const before=await readFile(`${vault}/manual.pdf`);
-const app=await electron.launch({executablePath:`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||electronPath,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.locator('.file-tree').getByRole('button',{name:'Note',exact:true}).click();
+ await page.getByRole('button',{name:'읽기 보기',exact:true}).click();
  await page.locator('.markdown-preview a').filter({hasText:'Selection'}).click();
  await page.getByLabel('PDF 2페이지',{exact:true}).waitFor();
  await page.waitForFunction(()=>window.getSelection()?.toString()==='Second');
@@ -20,6 +24,22 @@ try {
  await page.getByRole('button',{name:'PDF 확대',exact:true}).click();await page.getByRole('button',{name:'PDF 축소',exact:true}).click();
  await page.getByRole('region',{name:'PDF 백링크'}).getByRole('button',{name:'Note.md',exact:true}).first().click();
  await page.locator('.markdown-preview a').filter({hasText:'Annotation'}).click();await page.getByLabel('PDF 링크 주석',{exact:true}).waitFor();
+ const previous=page.getByRole('button',{name:'이전 페이지',exact:true});
+ const annotation=page.getByLabel('PDF 링크 주석',{exact:true});
+ await previous.click();
+ await page.getByText('First page fixture',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'다음 페이지',exact:true}).click();
+ await annotation.waitFor();
+ await previous.click();
+ await page.getByText('First page fixture',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'page=2&annotation=8R',exact:true}).last().click();
+ await annotation.waitFor();
+ const inView=await annotation.evaluate(marker=>{
+   const box=marker.getBoundingClientRect();
+   return document.elementFromPoint(box.left+box.width/2,box.top+box.height/2)?.closest('.pdf-page')===marker.parentElement;
+ });
+ assert.ok(inView,'The annotation must be visible after following the last backlink');
+ assert.equal(await page.getByLabel('PDF 페이지',{exact:true}).inputValue(),'2');
  await page.getByRole('button',{name:'문서로 돌아가기',exact:true}).click();await page.locator('.markdown-preview a').filter({hasText:'Hash file'}).click();await page.getByLabel('PDF 2페이지',{exact:true}).waitFor();
  await page.screenshot({path:'output/playwright/native-pdf-links.png'});
  assert.deepEqual(await readFile(`${vault}/manual.pdf`),before);assert.deepEqual(errors,[]);

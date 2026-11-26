@@ -1,6 +1,21 @@
-import {PDFDocument,PDFName,PDFHexString,PDFString,PDFRef,PDFDict,PDFSignature} from 'pdf-lib';
+import {PDFDocument,PDFName,PDFHexString,PDFString,PDFRef,PDFDict,PDFSignature,PDFArray,PDFNumber,PDFBool} from 'pdf-lib';
 import {randomUUID} from 'node:crypto';
 import {validFilePath} from './vault.mjs';
+import {markerOpacity,markerOutline} from './pdf-marker.mjs';
+function setMarkerAppearance(pdf,annotation,color){
+ const quads=annotation.lookup(PDFName.of('QuadPoints'),PDFArray);
+ const commands=['/Ink gs',color.map(n=>n.toFixed(5)).join(' ')+' rg'];
+ for(let i=0;i<quads.size();i+=8){
+   const coord=j=>quads.lookup(i+j,PDFNumber).asNumber();
+   const points=markerOutline([coord(0),coord(5),coord(2),coord(1)]);
+   for(const [index,[x,y]] of points.entries())commands.push(`${x.toFixed(3)} ${y.toFixed(3)} ${index?'l':'m'}`);
+   commands.push('h');
+ }
+ commands.push('f');
+ const stream=pdf.context.flateStream(commands.join('\n'),{Type:'XObject',Subtype:'Form',
+   BBox:annotation.lookup(PDFName.of('Rect'),PDFArray),Resources:{ExtGState:{Ink:{Type:'ExtGState',BM:'Multiply',ca:annotation.lookup(PDFName.of('CA'),PDFNumber)}}}});
+ annotation.set(PDFName.of('AP'),pdf.context.obj({N:pdf.context.register(stream)}));
+}
 const refId=ref=>`${ref.objectNumber}R${ref.generationNumber||''}`;
 const colors=value=>{if(typeof value!=='string'||!/^#[\da-f]{6}$/i.test(value))throw new Error('PDF 주석 색상이 올바르지 않습니다.');return [1,3,5].map(i=>parseInt(value.slice(i,i+2),16)/255);};
 async function transform(bytes,input){
@@ -17,7 +32,11 @@ async function transform(bytes,input){
    const rects=input.rects,box=page.getCropBox();
    if(!Array.isArray(rects)||!rects.length||rects.length>500||rects.some(rect=>!Array.isArray(rect)||rect.length!==4||rect.some(n=>!Number.isFinite(n))||rect[0]>=rect[2]||rect[1]>=rect[3]||rect[0]<box.x-1||rect[1]<box.y-1||rect[2]>box.x+box.width+1||rect[3]>box.y+box.height+1))throw new Error('PDF 선택 영역 좌표가 올바르지 않습니다.');
    const rect=[Math.min(...rects.map(r=>r[0])),Math.min(...rects.map(r=>r[1])),Math.max(...rects.map(r=>r[2])),Math.max(...rects.map(r=>r[3]))];
-   annotation=pdf.context.obj({Type:'Annot',Subtype:'Highlight',Rect:rect,QuadPoints:rects.flatMap(([x1,y1,x2,y2])=>[x1,y2,x2,y2,x1,y1,x2,y1]),C:color,CA:0.2,Contents:PDFHexString.fromText(comment),T:PDFHexString.fromText('Dynote'),NM:PDFHexString.fromText(randomUUID()),F:4});
+   annotation=pdf.context.obj({Type:'Annot',Subtype:'Highlight',Rect:rect,QuadPoints:rects.flatMap(([x1,y1,x2,y2])=>[x1,y2,x2,y2,x1,y1,x2,y1]),C:color,CA:input.penStroke===true?markerOpacity:0.2,Contents:PDFHexString.fromText(comment),T:PDFHexString.fromText('Dynote'),NM:PDFHexString.fromText(randomUUID()),F:4});
+   if(input.penStroke===true){
+     annotation.set(PDFName.of('DynotePen'),PDFBool.True);
+     setMarkerAppearance(pdf,annotation,color);
+   }
    ref=pdf.context.register(annotation);page.node.addAnnot(ref);annotationId=refId(ref);
  }else{
    const annotations=page.node.Annots();
@@ -28,7 +47,9 @@ async function transform(bytes,input){
      page.node.removeAnnot(ref);
    }else{
      annotation.set(PDFName.of('Contents'),PDFHexString.fromText(comment));annotation.set(PDFName.of('C'),pdf.context.obj(color));
-     annotation.delete(PDFName.of('AP'));annotation.set(PDFName.of('M'),PDFString.fromDate(new Date()));
+     if(annotation.get(PDFName.of('DynotePen'))===PDFBool.True)setMarkerAppearance(pdf,annotation,color);
+     else annotation.delete(PDFName.of('AP'));
+     annotation.set(PDFName.of('M'),PDFString.fromDate(new Date()));
    }
  }
  const output=await pdf.save();if(output.length>25*1024*1024)throw new Error('PDF는 25MB 이하여야 합니다.');

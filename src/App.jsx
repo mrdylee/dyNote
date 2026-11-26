@@ -387,6 +387,7 @@ export default function App() {
   const [openedAttachment, setAttachment] = useState(null);
   const attachment = vaults[openedAttachment?.vaultId] ? openedAttachment : null;
   const attachmentRequest = useRef(0);
+  const pdfWrites = useRef(new Map());
   const wordIndexRequest = useRef(0);
   const journalScope = section === "journal" ? vaults[dailyVaultId] : null;
   const vault = (showingBoard ? stickyVault || null : journalScope)
@@ -1534,13 +1535,37 @@ export default function App() {
     }
     const request = ++attachmentRequest.current;
     try {
+      const saving = pdfWrites.current.get(documentKey(vaultId, path));
+      if (saving) await saving.catch(() => {});
       const data = await invoke(api.readAttachment({ vaultId, path }));
       if (request !== attachmentRequest.current || !vaultsRef.current[vaultId]) return;
-      setAttachment({ ...data, fragment, vaultId });
+      setAttachment({ ...data, fragment, vaultId, openId: request });
       setSection("files");
     } catch (err) {
       if (request === attachmentRequest.current) setError(err.message);
     }
+  };
+  const beginHighlighting = () => {
+    const { path, vaultId, openId } = attachment;
+    const key = documentKey(vaultId, path);
+    let revision = attachment.revision;
+    return input => {
+      const write = async () => {
+        const result = await invoke(api.applyPdf({ vaultId, revision, input: { ...input, path, kind: "highlight" } }));
+        revision = result.attachment.revision;
+        setAttachment(old => old?.openId === openId && old.path === path && old.vaultId === vaultId
+          ? { ...old, ...result.attachment } : old);
+      };
+      const previous = pdfWrites.current.get(key);
+      const saving = previous ? previous.then(write, write) : write();
+      pdfWrites.current.set(key, saving);
+      return saving.catch(error => {
+        setError(`${path} 형광펜을 저장하지 못했습니다. ${error.message}`);
+        throw error;
+      }).finally(() => {
+        if (pdfWrites.current.get(key) === saving) pdfWrites.current.delete(key);
+      });
+    };
   };
   const loadWordDocument = async (path, vaultId, revision, preview = true) => {
     const request = preview ? ++attachmentRequest.current : wordIndexRequest.current;
@@ -2818,10 +2843,10 @@ export default function App() {
                   <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>
                   <WordPreview html={attachment.html} error={attachment.error} />
                 </> : attachment.mime === "application/pdf" ? (
-                  <PdfViewer key={documentKey(attachment.vaultId, attachment.path)} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
+                  <PdfViewer key={attachment.openId} bytes={attachment.bytes} path={attachment.path} fragment={attachment.fragment} backlinks={attachmentBacklinks}
+                    onBeginHighlighting={beginHighlighting}
                     onCopy={text => invoke(api.copyText({ vaultId: attachment.vaultId, text }))}
                     onOpenNote={path => openNote(path, attachment.vaultId)}
-                    onFollow={fragment => setAttachment(old => old?.vaultId === attachment.vaultId && old.path === attachment.path ? { ...old, fragment } : old)}
                     onPreviewEdit={async input => {
                       const { vaultId, revision } = attachment;
                       const request = attachmentRequest.current;
@@ -2836,7 +2861,7 @@ export default function App() {
                       if (request === attachmentRequest.current) {
                         const fragment = `page=${preview.input.page}` + (result.annotationId ? `&annotation=${encodeURIComponent(result.annotationId)}` : "");
                         setAttachment(old => old?.vaultId === vaultId && old.path === attachment.path && old.revision === attachment.revision
-                          ? { ...result.attachment, vaultId, fragment } : old);
+                          ? { ...result.attachment, vaultId, fragment, openId: old.openId } : old);
                       }
                       return result;
                     }}/>
