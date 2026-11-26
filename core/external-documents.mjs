@@ -51,7 +51,7 @@ export class ExternalDocuments {
       await writeFile(file, data.bytes, { flag: "wx", mode: 0o600 });
       const converted = await preview(path.basename(source), data.bytes);
       const id = randomUUID(), name = path.basename(source);
-      this.#entries.set(id, { source, directory, file, name });
+      this.#entries.set(id, { source, directory, file, name, revision: data.revision });
       return { id, name, revision: data.revision, ...converted };
     } catch (error) {
       await rm(directory, { recursive: true, force: true });
@@ -79,12 +79,14 @@ export class ExternalDocuments {
     const pending = entry.file + ".refresh";
     await writeFile(pending, data.bytes, { mode: 0o600 });
     await rename(pending, entry.file);
+    entry.revision = data.revision;
     return { id, name: entry.name, revision: data.revision, ...converted };
   }
 
-  copyToVault(id, vault, folder) {
+  copyToVault(id, vault, folder, revision) {
     return this.#enqueue(() => {
       const entry = this.#entry(id);
+      if (revision !== entry.revision) throw new Error("미리보기가 변경되었습니다. 내용을 확인한 뒤 탭을 다시 끌어 주세요.");
       return vault.transferDroppedFile(entry.file, folder, "copy", entry.name);
     });
   }

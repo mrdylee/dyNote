@@ -69,6 +69,7 @@ try {
   const previewTab = page.getByRole("button", { name: "Report.HTM 임시 미리보기", exact: true });
   await previewTab.waitFor();
   assert.equal(await previewTab.evaluate(button => button.draggable), true);
+  await previewTab.dragTo(page.getByRole("button", { name: "파일 열기", exact: true }));
   await previewTab.dragTo(reports);
   await tree.locator('[title="Reports/Report (복사본 2).HTM"]').waitFor();
   assert.equal(await readFile(path.join(vault, "Reports/Report (복사본 2).HTM"), "utf8"), html);
@@ -76,7 +77,25 @@ try {
   await previewTab.dragTo(tree.locator('.folder-row[data-tree-drop-folder="Shared"]'));
   await tree.locator('[title="Shared/Report.HTM"]').waitFor();
   assert.equal(await readFile(path.join(team, "Shared/Report.HTM"), "utf8"), html);
+  for (const space of [vault, team])
+    await assert.rejects(readFile(path.join(space, "Report.HTM")), { code: "ENOENT" });
   assert.equal(await readFile(path.join(root, "Report.HTM"), "utf8"), html);
+  await previewTab.click();
+  const drag = await page.evaluateHandle(() => new DataTransfer());
+  await previewTab.dispatchEvent("dragstart", { dataTransfer: drag });
+  const updatedHtml = html.replace("시험 결과", "수정한 결과");
+  await writeFile(path.join(root, "Report.HTM"), updatedHtml);
+  await page.getByRole("button", { name: "미리보기 새로고침", exact: true }).click();
+  await page.getByRole("region", { name: "Report.HTM", exact: true }).frameLocator("iframe").getByRole("heading", { name: "수정한 결과" }).waitFor();
+  await reports.dispatchEvent("drop", { dataTransfer: drag });
+  await previewTab.dispatchEvent("dragend", { dataTransfer: drag });
+  await drag.dispose();
+  await page.getByText(/미리보기가 변경되었습니다/).waitFor();
+  await assert.rejects(readFile(path.join(vault, "Reports/Report (복사본 3).HTM")), { code: "ENOENT" });
+  await previewTab.dragTo(reports);
+  await tree.locator('[title="Reports/Report (복사본 3).HTM"]').waitFor();
+  assert.equal(await readFile(path.join(vault, "Reports/Report (복사본 3).HTM"), "utf8"), updatedHtml);
+  await page.getByText(/미리보기가 변경되었습니다/).waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Report.HTM 탭 닫기", exact: true }).click();
   await writeFile(path.join(root, "Move.txt"), "move me");
   await drop(reports, ["Move.txt"], false);

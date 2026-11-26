@@ -1577,8 +1577,9 @@ export default function App() {
     setTreeDrop(old => !operation ? null
       : old?.vaultId === vaultId && old.folder === folder && old.operation === operation ? old : { vaultId, folder, operation });
   };
-  const sidebarTarget = event => {
+  const sidebarTarget = (event, preview = false) => {
     const row = event.target.closest?.("[data-tree-drop-vault]");
+    if (preview && !row?.matches(".folder-row, .space-tree h3, .vault-switch")) return null;
     return { vaultId: row?.dataset.treeDropVault ?? (together && visibleSpaces.length === 1 ? visibleSpaces[0].id : vault.id),
       folder: row?.dataset.treeDropFolder ?? "" };
   };
@@ -1586,13 +1587,14 @@ export default function App() {
     const verb = operation === "save" ? "저장" : operation === "copy" ? "복사" : "이동";
     const completed = [], failed = [], refresh = new Set();
     setBusy(true);
+    setError("");
     setCopyStatus("파일 " + verb + " 중…");
     try {
       await flush();
       for (const file of files) {
         try {
           const result = await invoke(operation === "save"
-            ? api.copyExternalFile({ vaultId, folder, id: file.id })
+            ? api.copyExternalFile({ vaultId, folder, id: file.id, revision: file.revision })
             : api.transferDroppedFile({ vaultId, folder, operation }, file));
           if (!result.unchanged) refresh.add(vaultId);
           if (result.sourceVaultId) refresh.add(result.sourceVaultId);
@@ -2018,7 +2020,8 @@ export default function App() {
         onPointerDown={external ? undefined : event => startMacCopy(event, vaultId, path)}
         onDragStart={event => {
           if (!external) return startTabDrag(event, vaultId, path);
-          event.dataTransfer.setData(EXTERNAL_TAB_DRAG, key);
+          treeDrag.current = { preview: external.document };
+          event.dataTransfer.setData(EXTERNAL_TAB_DRAG, external.document.id);
           event.dataTransfer.effectAllowed = "copy";
         }} onDragEnd={endTreeDrag}
         onClick={() => external ? activateExternal(key) : draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
@@ -2172,7 +2175,8 @@ export default function App() {
             const preview = event.dataTransfer.types.includes(EXTERNAL_TAB_DRAG);
             if (!preview && !event.dataTransfer.types.includes("Files")) return;
             event.preventDefault(); event.stopPropagation();
-            const target = sidebarTarget(event);
+            const target = sidebarTarget(event, preview);
+            if (!target) { event.dataTransfer.dropEffect = "none"; setTreeDrop(null); return; }
             // Dynote removes the original after publishing the file; the native drag source must keep it.
             event.dataTransfer.dropEffect = busy ? "none" : "copy";
             highlightTreeDrop(target.vaultId, target.folder, busy ? null : preview || event.ctrlKey ? "import-copy" : "import-move");
@@ -2183,8 +2187,9 @@ export default function App() {
           onDropCapture={event => {
             if (event.dataTransfer.types.includes(EXTERNAL_TAB_DRAG)) {
               event.preventDefault(); event.stopPropagation(); setTreeDrop(null);
-              const preview = externalFile.documents[event.dataTransfer.getData(EXTERNAL_TAB_DRAG)]?.document;
-              if (preview && !busy) void transferSidebarFiles([preview], sidebarTarget(event), "save");
+              const preview = treeDrag.current?.preview, target = sidebarTarget(event, true);
+              if (target && preview?.id === event.dataTransfer.getData(EXTERNAL_TAB_DRAG) && !busy)
+                void transferSidebarFiles([preview], target, "save");
               return;
             }
             const files = Array.from(event.dataTransfer.files);
