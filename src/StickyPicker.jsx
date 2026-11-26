@@ -1,12 +1,8 @@
-import { useMemo } from "react";
-import { Plus, StickyNote } from "lucide-react";
-import { isStickyPath } from "../core/sticky-layout.mjs";
+import { LayoutGrid, Plus, StickyNote } from "lucide-react";
 import { stickyTitle } from "../core/sticky-title.mjs";
 import "./sticky-picker.css";
 
-export default function StickyPicker({ notes, onOpen }) {
-  const cards = useMemo(() => notes.filter(note => isStickyPath(note.path))
-    .sort((a, b) => b.metadata.mtime - a.metadata.mtime || a.path.localeCompare(b.path, "ko")), [notes]);
+export default function StickyPicker({ cards, onOpen, onBoard }) {
   return (
     <div className="sticky-rail">
       <button type="button" className="icon-button sticky-trigger" title="스티키 노트" aria-label="스티키 노트"
@@ -30,6 +26,9 @@ export default function StickyPicker({ notes, onOpen }) {
             </button>
           ))}
         </div>
+        <button className="sticky-picker-all" type="button" popoverTarget="sticky-picker" popoverTargetAction="hide" onClick={onBoard}>
+          <LayoutGrid size={14} aria-hidden="true"/> 전체 보기
+        </button>
       </section>
     </div>
   );

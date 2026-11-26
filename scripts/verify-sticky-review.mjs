@@ -387,3 +387,54 @@ test("synced sticky picker opens the original file and both plus buttons create 
     assert.equal(await markdown(reopened), updated);
   }, { withTeam: true });
 });
+
+test("sticky board shows all personal cards, previews and saves a new card without replacing document tabs", async () => {
+  const bodies = [
+    "- 주간 회의\n- [x] 일정 확인\n- [ ] 결과 정리",
+    "# 다음 읽을 책\n서점에서 목차 다시 보기",
+    "검토할 아이디어\n- 손으로 그린 레이아웃",
+    "점심 산책\n공원에서 20분 걷기",
+    "다음 배포\n- 변경 사항 확인\n- 테스트 결과 공유",
+    "기억할 문장\n노트에 담아 둘 한 줄",
+  ];
+  await fixture(bodies, async ({ app, main }) => {
+    const toggle = main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트", exact: true });
+    const reference = main.locator(".file-row").filter({ hasText: "Reference" }).first();
+    await reference.click();
+    const docTab = main.locator(".tabs .tab-label").filter({ hasText: "Reference" });
+    const openBoard = async () => {
+      await toggle.click();
+      await main.getByRole("button", { name: "전체 보기", exact: true }).click();
+    };
+    await openBoard();
+    const board = main.getByRole("region", { name: "포스트잇 보드" });
+    await board.waitFor();
+    const boardTab = main.locator(".tabs .tab-label").filter({ hasText: "포스트잇 보드" });
+    assert.equal(await board.locator(".sticky-board-card").count(), bodies.length);
+    assert.equal(await board.getByText("팀 전용 메모").count(), 0);
+    await board.getByText("☑ 일정 확인").waitFor();
+    await openBoard();
+    assert.equal(await boardTab.count(), 1);
+    await docTab.click();
+    assert.equal(await board.isVisible(), false);
+    await boardTab.click();
+    await mkdir("output/playwright", { recursive: true });
+    await board.screenshot({ path: "output/playwright/sticky-board.png" });
+    const window = await app.browserWindow(main);
+    const wideColumns = await board.locator(".sticky-board-grid").evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length);
+    await window.evaluate(win => win.setSize(win.getMinimumSize()[0], win.getSize()[1]));
+    await until(() => board.locator(".sticky-board-grid").evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(" ").length),
+      count => count < wideColumns, "narrower board uses fewer columns");
+    const [existing] = await Promise.all([app.waitForEvent("window"), board.getByRole("button", { name: "주간 회의", exact: true }).click()]);
+    assert.equal(await markdown(existing), bodies[0]);
+    await Promise.all([existing.waitForEvent("close"), existing.locator("#close").click()]);
+    const [card] = await Promise.all([app.waitForEvent("window"), board.getByRole("button", { name: "새 포스트잇" }).click()]);
+    await memo(card).fill("새 보드 메모\n기존 보드에서 바로 확인");
+    await board.getByText("기존 보드에서 바로 확인").waitFor();
+    assert.equal(await board.locator(".sticky-board-card").first().getAttribute("aria-label"), "새 보드 메모");
+    await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
+    await main.getByRole("button", { name: "포스트잇 보드 탭 닫기" }).click();
+    assert.equal(await boardTab.count(), 0);
+    assert.equal(await main.locator(".tab.active .tab-label").textContent(), await docTab.textContent());
+  }, { withTeam: true });
+});

@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   Sparkles,
   SplitSquareHorizontal,
+  StickyNote,
   X,
 } from "lucide-react";
 import {
@@ -64,7 +65,8 @@ import CanvasEditor from "./CanvasEditor.jsx";
 import BasesView from "./BasesView.jsx";
 import { documentKind } from "../core/documents.mjs";
 import { version } from "../package.json";
-import { STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
+import { isStickyPath, STICKY_SHORTCUT } from "../core/sticky-layout.mjs";
+import StickyBoard from "./StickyBoard.jsx";
 import StickyPicker from "./StickyPicker.jsx";
 import PanelResize from "./PanelResize.jsx";
 import SpaceTrees from "./SpaceTrees.jsx";
@@ -113,6 +115,7 @@ const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(
   name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
 ]));
 const emptyFiles = [];
+const stickyBoardKey = "sticky-board";
 const isReadyDraft = draft => draft && !draft.running && draft.content !== null;
 const emptyNavigation = normalizeNavigation(null);
 const emptyModel = buildKnowledge(emptyFiles);
@@ -340,6 +343,11 @@ export default function App() {
   const dailyVaultId = dailyRoot && Object.values(vaults).find(scope => scope.root === dailyRoot)?.id;
   const stickyVault = registryReady && (personalSpace ? vaults[dailyVaultId]
     : !vaults[selectedVaultId]?.purpose && vaults[selectedVaultId]);
+  const stickyNotes = stickyVault?.notes ?? emptyFiles;
+  const stickyCards = useMemo(() => stickyNotes.filter(note => isStickyPath(note.path))
+    .sort((a, b) => b.metadata.mtime - a.metadata.mtime || a.path.localeCompare(b.path, "ko")), [stickyNotes]);
+  const showingBoard = section === stickyBoardKey;
+  const beforeBoard = useRef("files");
   const showCalendar = section === "journal" && !!dailyVaultId && journalCalendar;
   const { vaultId: focusedVaultId, path: focusedPath } = documentRef(workspace.active, selectedVaultId);
   const [openedAttachment, setAttachment] = useState(null);
@@ -353,11 +361,12 @@ export default function App() {
     if (hasWorkspace) api?.startupStage?.("renderer.workspace-visible");
   }, [hasWorkspace]);
   const externalKey = workspace.active?.startsWith("external:") ? workspace.active : null;
-  const showingExternal = !!externalKey && !attachment && !["journal", "planner", "graph"].includes(section);
+  const showingDocument = !["journal", "planner", "graph", stickyBoardKey].includes(section);
+  const showingExternal = showingDocument && !!externalKey && !attachment;
   const active = !externalKey && vault?.id === focusedVaultId ? focusedPath : null;
-  const showingWord = attachment?.kind === "word" && !["journal", "planner", "graph"].includes(section);
-  const showingOffice = isOfficeKind(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
-  const showingFile = ["html", "other"].includes(attachment?.kind) && !["journal", "planner", "graph"].includes(section);
+  const showingWord = attachment?.kind === "word" && showingDocument;
+  const showingOffice = isOfficeKind(attachment?.kind) && showingDocument;
+  const showingFile = ["html", "other"].includes(attachment?.kind) && showingDocument;
   const displayedPath = showingWord || showingOffice || showingFile ? attachment.path : active;
   const currentVault = useRef(null);
   currentVault.current = vault?.id;
@@ -639,10 +648,10 @@ export default function App() {
   const model = models.get(vault?.id) ?? emptyModel;
   const pendingEdit = edits.drafts.find(draft => draft.path === active);
   const chatPaths = useRef(new Map());
-  const note = section === "journal" || attachment ? null : model.notes.find(n => n.path === active);
+  const note = showingBoard || section === "journal" || attachment ? null : model.notes.find(n => n.path === active);
   if (note) chatPaths.current.set(vault.id, note.path);
   const attachmentBacklinks = useMemo(() => attachment?.mime === "application/pdf" ? pdfBacklinks(model.notes, attachment.path, vault?.attachments ?? []) : [], [model, attachment?.path, attachment?.mime, vault?.attachments]);
-  const structured = section === "journal" || attachment ? null : documents.find(d => d.path === active);
+  const structured = showingBoard || section === "journal" || attachment ? null : documents.find(d => d.path === active);
   const journalPaths = useMemo(() => new Map(Object.values(vaults).map(scope => [
     scope.id, new Set(periodicEntries(models.get(scope.id).notes, "daily", { ...scope.journalPreferences?.daily, locale: scope.journalPreferences?.locale }).map(n => n.path)),
   ])), [models, vaults]);
@@ -1055,7 +1064,7 @@ export default function App() {
     attachmentRequest.current++;
     setAttachment(null);
     setTabs(old => old.includes(key) ? old : [...old, key]);
-    setSection(old => (["graph", "planner", "journal"].includes(old) ? "files" : old));
+    setSection(old => (["graph", "planner", "journal", stickyBoardKey].includes(old) ? "files" : old));
     setModal(null);
   }, [vault?.id, vaultsRef, updateNavigation, workspace.setActive]);
   const openDocumentDraft = draft => {
@@ -1077,6 +1086,18 @@ export default function App() {
     const target = documentRef(key, vault?.id);
     openNote(target.path, target.vaultId);
   };
+  const openSticky = async path => {
+    if (!stickyVault) return;
+    try {
+      if (path && queue.get(stickyVault.id, path)) await flush(true, stickyVault.id);
+      await invoke(api.openSticky({ vaultId: stickyVault.id, path }));
+    } catch (error) { setError(error.message); }
+  };
+  const showStickyBoard = () => {
+    if (!showingBoard) beforeBoard.current = section;
+    setTabs(old => old.includes(stickyBoardKey) ? old : [...old, stickyBoardKey]);
+    setSection(stickyBoardKey);
+  };
   const closeTabs = (keys, anchor, confirmed = false) => {
     if (busy || !keys.length) return;
     const closing = new Set(keys);
@@ -1093,8 +1114,11 @@ export default function App() {
     const next = tabs.filter(key => !closing.has(key));
     setTabs(old => old.filter(key => !closing.has(key)));
     workspace.dispatch({ type: "reconcile", paths });
+    if (showingBoard && closing.has(stickyBoardKey)) setSection(beforeBoard.current);
     if (!paths.length && closing.has(workspace.active) && next.length) {
-      workspace.setActive(next.includes(anchor) ? anchor : next.at(-1));
+      const target = next.includes(anchor) ? anchor : next.at(-1);
+      if (target === stickyBoardKey) setSection(stickyBoardKey);
+      else workspace.setActive(target);
     }
     return true;
   };
@@ -2006,6 +2030,10 @@ export default function App() {
     </>}
   </section>;
   const documentTabs = tabs.map(key => {
+    if (key === stickyBoardKey) return <div key={key} className={`tab ${showingBoard ? "active" : ""}`} onContextMenu={event => showTabMenu(event, key)}>
+      <button type="button" className="tab-label" onClick={showStickyBoard}><StickyNote size={14}/>포스트잇 보드</button>
+      <button type="button" className="tab-close" aria-label="포스트잇 보드 탭 닫기" onClick={() => closeTabs([key])}><X size={12}/></button>
+    </div>;
     const external = externalFile.documents[key];
     const { vaultId, path: vaultPath } = documentRef(key);
     const path = external?.document.name ?? vaultPath;
@@ -2013,7 +2041,7 @@ export default function App() {
     if (!scope && !external) return null;
     const draft = documentDrafts.find(item => draftKey(item) === key);
     const label = external ? "임시 미리보기" : together ? spaceLabel(scope) : null;
-    return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${key === workspace.active && (external ? showingExternal : section !== "graph") ? "active" : ""}`} key={key}
+    return <div data-tab-key={key} className={`tab ${draft?.running ? "generating" : isReadyDraft(draft) ? "draft-ready" : draft?.failed ? "draft-failed" : ""} ${!showingBoard && key === workspace.active && (external ? showingExternal : section !== "graph") ? "active" : ""}`} key={key}
       onContextMenu={event => showTabMenu(event, key)}
       onKeyDown={event => {
         if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
@@ -2163,12 +2191,7 @@ export default function App() {
             </IconButton>
           </div>
           <div className="rail-bottom">
-            {api?.openSticky && stickyVault && <StickyPicker notes={stickyVault.notes} onOpen={async path => {
-              try {
-                if (path && queue.get(stickyVault.id, path)) await flush(true, stickyVault.id);
-                await invoke(api.openSticky({ vaultId: stickyVault.id, path }));
-              } catch (error) { setError(error.message); }
-            }}/>}
+            {api?.openSticky && stickyVault && <StickyPicker cards={stickyCards} onOpen={openSticky} onBoard={showStickyBoard}/>}
             <IconButton label="설정" disabled={busy} onClick={() => setModal("settings")}><Settings size={20} /></IconButton>
             <IconButton
               label="저장과 복구 안내"
@@ -2372,7 +2395,7 @@ export default function App() {
               <Plus size={16} />
             </IconButton>
           </div>
-          <div className="document-toolbar">
+          {!showingBoard && <div className="document-toolbar">
             <div className="breadcrumbs">
               <Folder size={13} />
               <span>{showingExternal ? "임시 미리보기" : vault.name}</span>
@@ -2483,7 +2506,7 @@ export default function App() {
                 <PanelRight size={16} />
               </IconButton>
             </div>
-          </div>
+          </div>}
           {error && (
             <div className="error-banner" role="alert">
               <span>{error}</span>
@@ -2498,7 +2521,7 @@ export default function App() {
             </div>
           )}
           {updateState?.phase === "ready" && updateState.result?.latest?.tag !== dismissedUpdate && !updateState.preferences.ignored.includes(updateState.result?.latest?.tag) && <div className="classification-notice" role="status"><span>새 버전 {updateState.result?.latest?.tag} 다운로드 검증 완료{updateState.installSupported && updateState.preferences.autoInstall && updateState.installation?.tag !== updateState.result?.latest?.tag ? " · 작업을 마치고 1분간 입력이 없으면 업데이트 후 다시 시작합니다." : ""}{updateState.installation?.tag === updateState.result?.latest?.tag ? ` · ${updateState.message}` : ""}</span>{updateState.installSupported && <button disabled={busy || aiSession.activity.chat || aiSession.activity.planner} onClick={()=>installUpdate().catch(e=>setError(e.message))}>지금 설치하고 다시 시작</button>}<button onClick={()=>invoke(api.showUpdate()).catch(e=>setError(e.message))}>설치 파일 위치 열기</button><button onClick={()=>setDismissedUpdate(updateState.result?.latest?.tag)}>나중에</button></div>}
-          {journalNote && !["journal", "planner", "graph"].includes(section) && !attachment && <div className="classification-notice classification-controls">
+          {journalNote && showingDocument && !attachment && <div className="classification-notice classification-controls">
             <span>이 기록을 폴더별로 정리할 수 있습니다.</span>
             <div ref={classificationHelpRef} className={`classification-action${classificationHelpDismissed ? " help-dismissed" : ""}`} onMouseEnter={()=>setClassificationHelpDismissed(false)} onFocusCapture={()=>setClassificationHelpDismissed(false)} tabIndex={busy||edits.blocked()||!classification.length ? 0 : undefined} aria-label="분류 제안 사용 방법" aria-describedby="classification-help">
               <button aria-describedby="classification-help" disabled={busy||edits.blocked()||!classification.length} onClick={()=>setModal("classify")}>분류 제안 검토 ({classification.length})</button>
@@ -2517,7 +2540,8 @@ export default function App() {
           </>}
           {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" hidden={!!activeDocumentDraft && section === "files" && !attachment} onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
-            {section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
+            {showingBoard ? <StickyBoard cards={stickyCards} onOpen={openSticky} available={!!stickyVault}/>
+            : section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
               <NotebookPen size={40} />
               <h2>저널은 개인 노트에 저장됩니다</h2>
               <p>보관함에서 개인 노트를 연결해 주세요.</p>
@@ -2679,7 +2703,7 @@ export default function App() {
                 {scope.name} · {gitStates[scope.id].message}
               </button>)}
             <div>
-              {externalDocument ? <span>{externalDocument.kind.toUpperCase()}</span> : showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
+              {showingBoard ? null : externalDocument ? <span>{externalDocument.kind.toUpperCase()}</span> : showingFile ? <span>{attachment.kind === "html" ? "HTML" : "파일"}</span> : showingOffice ? <span>{attachment.kind.toUpperCase()}</span> : showingWord ? <span>DOCX</span> : <>
                 {note && <span>{statistics.words.toLocaleString()}단어</span>}
                 <span>{(note ? statistics.characters : structured?.content.length ?? 0).toLocaleString()}자</span>
                 <span>{structured?.kind ?? "Markdown"}</span>

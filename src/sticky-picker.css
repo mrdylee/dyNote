@@ -32,3 +32,6 @@
   .activity-rail:has(.sticky-trigger) .rail-nav { gap: 5px; margin-top: 16px; }
   .activity-rail:has(.sticky-trigger) .rail-bottom { gap: 10px; }
 }
+
+.sticky-picker-all { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 4px; padding: 8px; border-top: 1px solid var(--border); color: var(--accent-ink); font-size: 12px; }
+.sticky-picker-all:hover { background: var(--soft); }
