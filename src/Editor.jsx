@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { textSizeOptions } from "../core/text-size-options.mjs";
 import { runSelectionOrLine } from "./format-line.mjs";
-import TextColorPicker from "./TextColorPicker.jsx";
+import { selectionToolbar } from "./selection-toolbar.mjs";
+import TextColorPicker, { textColorPresets } from "./TextColorPicker.jsx";
 import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
@@ -32,7 +33,7 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
-import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runBulletFormat } from "./editorCommands.mjs";
+import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runHighlight, runBulletFormat } from "./editorCommands.mjs";
 import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
 
@@ -41,6 +42,7 @@ let lastAppliedTextColor = null;
 function applyFormat(view, format, color) {
   return runSelectionOrLine(view, target => {
     const size = textSizeOptions.find(option => option.id === format);
+    if (format === "highlight" || format === "clear-highlight") return runHighlight(target, format === "highlight");
     if (size) return runTextSize(target, size.value);
     if (format === "clear-color") return runTextColor(target, null);
     if (format === "apply-color") {
@@ -148,6 +150,10 @@ export default function Editor({
           outlining.current.of(journalOutline({ journal, live })),
           syntaxHighlighting(defaultHighlightStyle),
           EditorView.lineWrapping,
+          selectionToolbar((view, format, color) => {
+            if (color) setTextColor(color);
+            return applyFormat(view, format, color);
+          }, textColorPresets),
           keymap.of([
             { key: "Mod-b", run: view => runMarkdownFormat(view, "bold") },
             { key: "Mod-i", run: view => runMarkdownFormat(view, "italic") },
@@ -367,6 +373,8 @@ export default function Editor({
       <TextColorPicker value={textColor} onChange={setTextColor} disabled={readOnly} />
       <button type="button" aria-label="글자 색상 적용" disabled={readOnly} onMouseDown={event => event.preventDefault()} title="마지막 글자색 반복 · Ctrl/Cmd+Shift+H" onClick={() => applyFormat(editor.current, "apply-color", textColor)}>색상 적용</button>
       <button type="button" aria-label="글자 색상 지우기" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "clear-color")}>기본색</button>
+      <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "highlight")}>노란 형광펜</button>
+      <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "clear-highlight")}>형광펜 지우기</button>
       <button type="button" title="앱 전체의 글꼴과 크기 설정" onClick={onFontSettings}>글꼴·크기</button>
     </div>
     <div className="editor-host" ref={host} />

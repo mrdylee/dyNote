@@ -2248,3 +2248,30 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .format-toolbar .text-color-remove { position: absolute; bottom: -3px; left: 5px; min-width: 18px; padding: 0; font-size: 14px; line-height: 16px; }
 .text-color-custom { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .text-color-popover small { color: var(--muted); }
+
+.cm-editor .cm-tooltip.selection-format-menu {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 3px;
+  max-width: 100%;
+  flex-wrap: wrap;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+}
+.cm-editor:not(:focus-within) .selection-format-menu { visibility: hidden; }
+.selection-format-menu :is(button, select) {
+  font: inherit;
+  font-size: 12px;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: var(--surface);
+  padding: 4px;
+}
+.selection-format-menu button:hover { background: var(--soft); }
+.selection-format-menu button:first-child { font-weight: bold; }
+.selection-format-menu button[aria-label="선택 노란 형광펜"] { border-bottom: 3px solid #ffe58a; }

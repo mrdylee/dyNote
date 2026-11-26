@@ -3,7 +3,8 @@ import { textSizeOptions } from "./text-size-options.mjs";
 
 const sizes = textSizeOptions.flatMap(({ value }) => value ? [value] : []);
 const sizePattern = sizes.map(size => size.replace(".", "\\.")).join("|");
-const styleTag = new RegExp(`<span style="(?:color:(#[a-f0-9]{6})|font-size:(${sizePattern}))">`, "i");
+export const highlightColor = "#ffe58a";
+const styleTag = new RegExp(`<span style="(?:color:(#[a-f0-9]{6})|font-size:(${sizePattern})|background-color:(${highlightColor}))">`, "i");
 const opening = new RegExp("^" + styleTag.source, "i");
 export const validTextColor = value => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value);
 export const validTextSize = value => sizes.includes(value);
@@ -27,7 +28,7 @@ export function readStyleSpan(source, from = 0) {
       continue;
     }
     if (/^<span /i.test(token)) { if (++depth > 32) return null; }
-    else if (--depth === 0) return { from, contentFrom, contentTo: match.index, to: tokens.lastIndex, property: open[1] ? "color" : "font-size", value: (open[1] ?? open[2]).toLowerCase() };
+    else if (--depth === 0) return { from, contentFrom, contentTo: match.index, to: tokens.lastIndex, property: open[1] ? "color" : open[2] ? "font-size" : "background-color", value: (open[1] ?? open[2] ?? open[3]).toLowerCase() };
   }
   return null;
 }

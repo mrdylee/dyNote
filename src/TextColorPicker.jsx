@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { validTextColor } from "../core/text-color.mjs";
 
-const presets = [
+export const textColorPresets = [
   ["검정", "#212121"], ["회색", "#757575"], ["흰색", "#ffffff"],
   ["빨강", "#c62828"], ["주황", "#ef6c00"], ["노랑", "#f9a825"],
   ["초록", "#2e7d32"], ["청록", "#00838f"], ["파랑", "#1565c0"],
@@ -68,7 +68,7 @@ export default function TextColorPicker({ value, onChange, disabled }) {
     <summary title={value} onMouseDown={preserveSelection}><span className="text-color-current" style={{ backgroundColor: value }} />글자 색상 ▾</summary>
     <div className="text-color-popover">
       <span>기본 색상</span>
-      <div className="text-color-grid">{presets.map(([name, color]) => <span key={color}>{swatch(name, color)}</span>)}</div>
+      <div className="text-color-grid">{textColorPresets.map(([name, color]) => <span key={color}>{swatch(name, color)}</span>)}</div>
       <span>저장한 색</span>
       {saved.length ? <div className="text-color-grid">{saved.map(color => <div className="text-color-saved" key={color}>
         {swatch("저장한 색", color)}

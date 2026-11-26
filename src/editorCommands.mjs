@@ -1,4 +1,4 @@
-import { validTextColor, validTextSize, styleOpening, readStyleSpan, rewriteTextStyle } from "../core/text-color.mjs";
+import { highlightColor, validTextColor, validTextSize, styleOpening, readStyleSpan, rewriteTextStyle } from "../core/text-color.mjs";
 import { EditorSelection, Transaction, countColumn, findColumn } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import { foldEffect, unfoldEffect, foldService, ensureSyntaxTree, language } from '@codemirror/language';
@@ -217,6 +217,10 @@ export function runTextColor(view, color) {
 export function runTextSize(view, size) {
   if (size !== null && !validTextSize(size)) return false;
   return runInlineStyle(view, "font-size", size);
+}
+
+export function runHighlight(view, enabled) {
+  return runInlineStyle(view, "background-color", enabled ? highlightColor : null);
 }
 
 function runInlineStyle(view, property, value) {

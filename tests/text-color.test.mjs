@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { history, undo, redo } from "@codemirror/commands";
-import { runTextColor, runTextSize } from "../src/editorCommands.mjs";
+import { runTextColor, runTextSize, runHighlight } from "../src/editorCommands.mjs";
 import { renderMarkdown, buildKnowledge, searchNotes } from "../core/knowledge.mjs";
 import { readStyleSpan } from "../core/text-color.mjs";
 import { wikiSyntax, livePreview, livePreviewState } from "../src/live-preview.mjs";
@@ -204,4 +204,19 @@ test("sizing or coloring a whole callout preserves its title and styles the body
     undo(editor);
     assert.equal(editor.state.doc.toString(), doc);
   }
+});
+
+test("yellow highlight survives rendering and clears independently of bold and text color", () => {
+  const source = span("**검토** 계속");
+  const start = source.indexOf("검토");
+  const editor = view(source, start, start + 2);
+  assert.equal(runHighlight(editor, true), true);
+  const marked = editor.state.doc.toString();
+  assert.match(renderMarkdown(marked, [], "Home.md"), /<strong><span style="background-color:#ffe58a">검토<\/span><\/strong>/);
+  assert.equal(runHighlight(editor, false), true);
+  assert.equal(editor.state.doc.toString(), source);
+  undo(editor);
+  assert.equal(editor.state.doc.toString(), marked);
+  const unsafe = '<span style="background-color:#ffe58a;display:none">a</span>';
+  assert.equal(readStyleSpan(unsafe), null);
 });
