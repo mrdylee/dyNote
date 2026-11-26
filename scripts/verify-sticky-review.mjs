@@ -366,13 +366,17 @@ test("synced sticky picker opens the original file and both plus buttons create 
     await panel.waitFor({ state: "hidden" });
     assert.equal(await markdown(card), content);
     const nativeCard = await app.browserWindow(card);
-    await nativeCard.evaluate(win => win.hide());
+    const updated = content + "\n- 검토 완료";
+    await memo(card).fill(updated);
+    await card.getByRole("button", { name: "스티키 노트 숨기기" }).click();
+    await until(() => nativeCard.evaluate(win => win.isVisible()), visible => !visible, "the selected sticky is hidden");
+    assert.equal(await readFile(path.join(vault, relative), "utf8"), updated);
+    assert.equal(await mainWindow.evaluate(win => win.isVisible()), true);
     await toggle.click();
     await row.click();
     await until(() => nativeCard.evaluate(win => win.isVisible()), Boolean, "the existing card returns");
     assert.equal(app.windows().length, 2);
-    const updated = content + "\n- 검토 완료";
-    await memo(card).fill(updated);
+    assert.equal(await markdown(card), updated);
     for (const page of [card, panel]) {
       if (page === panel) await toggle.click();
       const [blank] = await Promise.all([app.waitForEvent("window"), page.getByRole("button", { name: "새 스티키 노트" }).click()]);
@@ -386,6 +390,49 @@ test("synced sticky picker opens the original file and both plus buttons create 
     const [reopened] = await Promise.all([app.waitForEvent("window"), row.click()]);
     assert.equal(await markdown(reopened), updated);
   }, { withTeam: true });
+});
+
+test("a hidden blank sticky stays available from the board and accepts received edits", async () => {
+  await fixture(["- 다른 메모"], async ({ app, main, vault, records: [record] }) => {
+    const other = await openCard(app, record);
+    const [card] = await Promise.all([app.waitForEvent("window"), other.getByRole("button", { name: "새 스티키 노트" }).click()]);
+    const native = await app.browserWindow(card);
+    const hide = card.getByRole("button", { name: "스티키 노트 숨기기" });
+    await hide.click();
+    await until(() => native.evaluate(win => win.isVisible()), visible => !visible, "blank sticky is hidden");
+    assert.equal(await (await app.browserWindow(other)).evaluate(win => win.isVisible()), true);
+    const folder = path.join(vault, "포스트잇");
+    const files = (await readdir(folder)).filter(file => file !== path.basename(record.path));
+    assert.equal(files.length, 1);
+    const file = path.join(folder, files[0]);
+    assert.equal(await readFile(file, "utf8"), "");
+    await main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트" }).click();
+    await main.getByRole("button", { name: "전체 보기" }).click();
+    const blank = main.getByRole("region", { name: "포스트잇 보드" }).getByRole("button", { name: "Sticky Note", exact: true });
+    await blank.waitFor();
+    await native.evaluate(win => win.webContents.send("sticky:receive", {
+      before: "", content: "동기화된 메모", token: "test-hidden-receive",
+    }));
+    await blank.click();
+    await until(() => native.evaluate(win => win.isVisible()), Boolean, "board restores the same window");
+    assert.equal(await markdown(card), "동기화된 메모");
+    assert.equal(await memo(card).evaluate(field => field === document.activeElement), true);
+  });
+});
+
+test("hiding a sticky with a save conflict keeps its draft visible", async () => {
+  await fixture(["기존 내용"], async ({ app, vault, records: [record] }) => {
+    const card = await openCard(app, record);
+    const native = await app.browserWindow(card);
+    const file = path.join(vault, record.path);
+    await writeFile(file, "다른 편집기의 변경");
+    await memo(card).fill("보존할 초안");
+    await card.getByRole("button", { name: "스티키 노트 숨기기" }).click();
+    await card.getByRole("status").getByText(/외부에서 문서가 변경/).waitFor();
+    assert.equal(await native.evaluate(win => win.isVisible()), true);
+    assert.equal(await markdown(card), "보존할 초안");
+    assert.equal(await readFile(file, "utf8"), "다른 편집기의 변경");
+  });
 });
 
 test("sticky board shows all personal cards, previews and saves a new card without replacing document tabs", async () => {

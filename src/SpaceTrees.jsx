@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { spaceLabel } from "../core/document-workspace.mjs";
 
-export default function SpaceTrees({ spaces, renderTree, dropProps, onContext, syncMessage, onSyncDetails }) {
+export default function SpaceTrees({ spaces, renderTree, dropProps, onContext, onRootKey, syncMessage, onSyncDetails }) {
   const container = useRef(null), drag = useRef(null);
   const [split, setSplit] = useState(() => {
     try {
@@ -26,7 +26,7 @@ export default function SpaceTrees({ spaces, renderTree, dropProps, onContext, s
     const message = syncMessage?.(scope.id);
     return <section key={scope.id} className="space-tree" aria-label={spaceLabel(scope)} {...dropProps(scope.id, "")} data-drop-label={undefined}
       onContextMenu={event => { if (!event.defaultPrevented) onContext?.(event, scope.id); }}>
-      <h3 tabIndex={0} {...dropProps(scope.id, "")} onContextMenu={event => onContext?.(event, scope.id)}>{spaceLabel(scope)}</h3>
+      <h3 tabIndex={0} {...dropProps(scope.id, "")} onContextMenu={event => onContext?.(event, scope.id)} onKeyDown={event => onRootKey(event, scope.id)}>{spaceLabel(scope)}</h3>
       {message && <div className="space-tree-sync" role="status">
         <button title={message + " · 동기화 설정 열기"} onClick={() => onSyncDetails(scope.id)}>{message}</button>
       </div>}

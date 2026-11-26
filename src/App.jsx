@@ -171,7 +171,7 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
 
 const copilotSessionPath = /^(?:Copilot Note|AI Conversations)\/[a-f0-9]{20}\/[a-f0-9]{20}\.md$/;
 
-function FileTree({ notes, folders, journalPreferences, captureEntries, active, reveal, onOpen, onContext, onRename, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
+function FileTree({ notes, folders, journalPreferences, captureEntries, active, reveal, onCreatedFolderMount, onOpen, onContext, onEntryKey, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
   const [closed, setClosed] = useState(new Set());
   const journalDates = new Map();
   const journalFolder = journalPreferences?.daily?.folder?.trim() || "";
@@ -203,10 +203,31 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
     const parts = note.path.split("/");
     children(parts.slice(0, -1))[parts.at(-1)] = { note };
   }
-  const renameOnF2 = (event, target) => {
-    if (event.key !== "F2" || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  const navigate = event => {
+    if (disabled || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const row = event.target;
+    if (!row.matches(".file-row, .folder-row") || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    onRename(target);
+    const rows = Array.from(event.currentTarget.querySelectorAll("button:enabled"));
+    const index = rows.indexOf(row);
+    const expanded = row.getAttribute("aria-expanded");
+    switch (event.key) {
+      case "Home": rows[0]?.focus(); break;
+      case "End": rows.at(-1)?.focus(); break;
+      case "ArrowUp": rows[index - 1]?.focus(); break;
+      case "ArrowDown": rows[index + 1]?.focus(); break;
+      case "ArrowLeft":
+        if (expanded === "true") row.click();
+        else {
+          const parent = row.title.split("/").slice(0, -1).join("/");
+          rows.find(item => item.title === parent)?.focus();
+        }
+        break;
+      case "ArrowRight":
+        if (expanded === "false") row.click();
+        else if (expanded === "true" && rows[index + 1]?.title.startsWith(row.title + "/")) rows[index + 1].focus();
+        break;
+    }
   };
   const render = (level, prefix = "", depth = 0) =>
     Object.entries(level)
@@ -235,7 +256,7 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word, other}); }}
-              onKeyDown={other ? undefined : event => renameOnF2(event, {path, folder:false})}
+              onKeyDown={event => onEntryKey(event, {path, folder:false, word, other})}
               onPointerDown={!draggable ? undefined : event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
@@ -254,9 +275,10 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
             <button
               className="folder-row"
               title={path}
+              ref={reveal?.focusPath === path ? onCreatedFolderMount : undefined}
               {...dropProps(path)}
               onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:true}); }}
-              onKeyDown={event => renameOnF2(event, {path, folder:true})}
+              onKeyDown={event => onEntryKey(event, {path, folder:true})}
               style={{ paddingLeft: 12 + depth * 16 }}
               onClick={() =>
                 setClosed((old) => {
@@ -280,7 +302,7 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
           </div>
         );
       });
-  return <div className="file-tree">{render(tree)}</div>;
+  return <div className="file-tree" onKeyDown={navigate}>{render(tree)}</div>;
 }
 
 function Modal({ title, children, onClose, wide = false, className = "" }) {
@@ -559,6 +581,10 @@ export default function App() {
   const captureContext=useRef(null),captureWorking=useRef(false);
   const captureScanning = useRef(false);
   const [fileTarget, setFileTarget] = useState(null);
+  const dismissModal = useCallback(() => {
+    setModal(null);
+    if (modal === "trash") fileTarget?.origin?.focus();
+  }, [modal, fileTarget]);
   const treeDrag = useRef(null);
   const [newFolder, setNewFolder] = useState(null);
   const macCopyDrag = useRef(null);
@@ -1307,6 +1333,7 @@ export default function App() {
       }
       if (
         (event.metaKey || event.ctrlKey) &&
+        !(event.key.toLowerCase() === "n" && (event.shiftKey || event.altKey)) &&
         ["p", "k", "s", "n"].includes(event.key.toLowerCase())
       ) {
         event.preventDefault();
@@ -1327,12 +1354,12 @@ export default function App() {
           macCopyDrag.current = null;
           setTreeDrop(null);
         }
-        setModal(null);
+        dismissModal();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [flush, busy]);
+  }, [flush, busy, dismissModal]);
 
   const importFiles = async (files, id = vault.id) => {
     try {
@@ -1708,6 +1735,34 @@ export default function App() {
     setTreeMenu(null);
     void prepareFile(target.path, "rename", target.folder, vaultId);
   };
+  const canTrashTreeTarget = (target, scope) => !!target.path && !target.word && !target.other &&
+    (!target.folder || canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)));
+  const trashTreeTarget = (target, vaultId, origin) => {
+    const scope = vaultsRef.current[vaultId];
+    if (!scope || modal || busy || editState.forVault(vaultId).blocked() || !canTrashTreeTarget(target, scope)) return;
+    setTreeMenu(null);
+    void prepareFile(target.path, "trash", target.folder, vaultId, origin);
+  };
+  const newTreeFolder = (target, vaultId) => {
+    const parent = target.folder ? target.path : target.path.split("/").slice(0, -1).join("/");
+    setNewFolder({ vaultId, parent, name: "", error: "" });
+    setTreeMenu(null);
+    setModal("new-folder");
+  };
+  const treeEntryKey = (event, target, vaultId) => {
+    if (event.altKey || event.isComposing || event.nativeEvent.isComposing) return;
+    const plain = !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    const newFolderKey = event.shiftKey && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && event.key.toLowerCase() === "n";
+    const trashKey = plain && event.key === "Delete" || isMac && event.metaKey && !event.ctrlKey && !event.shiftKey && event.key === "Backspace";
+    const renameKey = plain && event.key === "F2" && target.path && !target.other;
+    if (!newFolderKey && !trashKey && !renameKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat || busy || modal) return;
+    if (newFolderKey) newTreeFolder(target, vaultId);
+    else if (trashKey) trashTreeTarget(target, vaultId, event.currentTarget);
+    else renameTreeTarget(target, vaultId);
+  };
   const showTreeMenu = (origin, x, y, target, vaultId) => {
     const scope = vaultsRef.current[vaultId];
     if (!scope || busy) {
@@ -1715,9 +1770,8 @@ export default function App() {
       return;
     }
     const rect = origin.getBoundingClientRect();
-    const protectedFolder = target.folder && !canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences));
     setTreeMenu({
-      ...target, vaultId, origin, canTrash: !!target.path && !protectedFolder && !target.word && !target.other,
+      ...target, vaultId, origin, canTrash: canTrashTreeTarget(target, scope),
       renameReason: target.path ? treeRenameReason(target, scope) : "보관함 이름은 설정에서 변경해 주세요.",
       x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
       y: y || rect.bottom,
@@ -1734,7 +1788,7 @@ export default function App() {
       const path = target.parent ? `${target.parent}/${name}` : name;
       await invoke(api.createFolder({ vaultId: target.vaultId, path }));
       updateVault(target.vaultId, old => ({ ...old, folders: [...(old.folders ?? []), path] }));
-      setTreeReveal({ vaultId: target.vaultId, folder: path });
+      setTreeReveal({ vaultId: target.vaultId, folder: target.parent, focusPath: path });
       setNewFolder(null); setModal(null);
     } catch (error) { setNewFolder({ ...target, error: error.message }); }
   };
@@ -1776,7 +1830,7 @@ export default function App() {
     const target = macCopyTarget(event);
     if (target) void transferTreeFile({ ...target, source: drag.source, operation: event.ctrlKey ? "copy" : "move" });
   };
-  const prepareFile = async (path, action, folder = false, vaultId = vault.id) => {
+  const prepareFile = async (path, action, folder = false, vaultId = vault.id, origin = null) => {
     try {
       let revision = revisionMap(vaultId).get(path);
       if (action === "rename" && /\.docx$/i.test(path)) revision = vaultsRef.current[vaultId]?.wordDocuments?.find(file => file.path === path)?.revision;
@@ -1785,7 +1839,7 @@ export default function App() {
           await invoke(api.readAttachment({ vaultId, path }))
         ).revision;
       setError("");
-      setFileTarget({ path, revision, folder, vaultId });
+      setFileTarget({ path, revision, folder, vaultId, origin });
       setNewName(action === "rename" ? path.split('/').at(-1) : path);
       setModal(action);
     } catch (err) {
@@ -2121,10 +2175,11 @@ export default function App() {
     active={vault.id === scope.id ? displayedPath : null}
     disabled={busy} onOpen={path => openFile(path, scope.id)}
     reveal={treeReveal?.vaultId === scope.id ? treeReveal : null}
+    onCreatedFolderMount={row => { if (row) { row.focus(); setTreeReveal(null); } }}
     onDragDocument={(event, path) => startTreeDrag(event, scope.id, path)} onDragEnd={endTreeDrag}
     onCopyPointer={(event, path) => startMacCopy(event, scope.id, path)}
     dropProps={folder => treeDropProps(scope.id, folder)}
-    onRename={target => renameTreeTarget(target, scope.id)}
+    onEntryKey={(event, target) => treeEntryKey(event, target, scope.id)}
     onContext={(event, target) => {
       if (macCopyDrag.current && event.ctrlKey) return;
       showTreeMenu(event.currentTarget, event.clientX, event.clientY, target, scope.id);
@@ -2340,6 +2395,7 @@ export default function App() {
             </div>
           ) : (
             <SpaceTrees spaces={together ? visibleSpaces : [vault]} renderTree={renderTree} dropProps={treeDropProps} onContext={rootTreeContext}
+              onRootKey={(event, id) => treeEntryKey(event, {path:"", folder:true}, id)}
               syncMessage={id => !(vaults[id]?.purpose === "personal" && (panelSyncs[id]?.working || gitStates[id]?.phase === "saving")) &&
                 panelSyncs[id] && (panelSyncs[id].working ? "동기화 중…" : panelSyncs[id].message || gitStates[id]?.message)}
               onSyncDetails={id => openPanelSettings(id, panelSyncs[id]?.teamResult?.phase === "setup")}/>
@@ -2997,13 +3053,10 @@ export default function App() {
           void revealFile(documentKey(treeMenu.vaultId, treeMenu.path));
         }}>파일 위치 열기</button>}
         {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
-        <button role="menuitem" onClick={() => {
-          const parent = treeMenu.folder ? treeMenu.path : treeMenu.path.split("/").slice(0, -1).join("/");
-          setNewFolder({ vaultId: treeMenu.vaultId, parent, name: "", error: "" }); setTreeMenu(null); setModal("new-folder");
-        }}>폴더 추가</button>
+        <button role="menuitem" aria-keyshortcuts={isMac ? "Meta+Shift+N" : "Control+Shift+N"} onClick={() => newTreeFolder(treeMenu, treeMenu.vaultId)}>폴더 추가 <kbd aria-hidden="true">{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd></button>
         {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
         {treeMenu.path && !treeMenu.other && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
-        {treeMenu.canTrash && <button className="tree-trash" role="menuitem" disabled={busy||edits.blocked()} onClick={()=>{const {path,folder,vaultId}=treeMenu;setTreeMenu(null);prepareFile(path,"trash",folder,vaultId);}}>휴지통으로 이동</button>}
+        {treeMenu.canTrash && <button className="tree-trash" role="menuitem" aria-keyshortcuts={isMac ? "Delete Meta+Backspace" : "Delete"} disabled={busy || editState.forVault(treeMenu.vaultId).blocked()} onClick={() => trashTreeTarget(treeMenu, treeMenu.vaultId, treeMenu.origin)}>휴지통으로 이동 <kbd aria-hidden="true">{isMac ? "⌘⌫" : "Delete"}</kbd></button>}
       </div>}
       {modal === "new-folder" && newFolder && <Modal title="폴더 추가" onClose={() => !newFolder.working && setModal(null)}>
         <form className="new-note-form" onSubmit={addTreeFolder}>
@@ -3033,7 +3086,7 @@ export default function App() {
       {(modal === "move" || modal === "rename" || modal === "trash") && (
         <Modal
           title={modal === "rename" ? "이름 바꾸기" : modal === "move" ? "파일 이름 변경·이동" : "휴지통으로 이동"}
-          onClose={() => !busy && setModal(null)}
+          onClose={() => !busy && dismissModal()}
         >
           <form onSubmit={alterFile}>
             <p>{together && vaults[fileTarget?.vaultId] ? `${spaceLabel(vaults[fileTarget.vaultId])} · ` : ""}{fileTarget?.path}</p>
@@ -3061,7 +3114,8 @@ export default function App() {
             <div className="modal-actions">
               <button
                 type="button"
-                onClick={() => setModal(null)}
+                autoFocus={modal === "trash"}
+                onClick={dismissModal}
                 disabled={busy}
               >
                 취소
@@ -3337,6 +3391,9 @@ export default function App() {
           {settingsTab === "shortcuts" && <section className="settings-section">
             <h3>파일과 폴더</h3>
             <p><strong>이름 바꾸기</strong> <kbd>F2</kbd> · 왼쪽 파일 목록의 항목을 선택한 상태에서 누르세요.</p>
+            <p><strong>휴지통으로 이동</strong> <kbd>Delete</kbd>{isMac && <> 또는 <kbd>⌘⌫</kbd></>} · 확인 후 이동합니다.</p>
+            <p><strong>폴더 추가</strong> <kbd>{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd> · 선택한 폴더 안에 만듭니다. 파일을 선택하면 같은 위치에 만듭니다.</p>
+            <p><strong>목록 탐색</strong> ↑ ↓ 항목 이동 · ← → 폴더 접기·펼치기 · Home / End 처음·마지막 항목 · Enter 열기</p>
             <h3>Sticky Note</h3>
             <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
@@ -3443,7 +3500,7 @@ export default function App() {
       )}
       {modal==="personal-review" && reviewFile && <Modal title="버전 확인" className="version-dialog" onClose={()=>setModal(null)}>
         <PersonalVersionReview key={reviewFile.id+reviewFile.path} path={reviewFile.path} count={gitStates[reviewFile.id]?.conflicts?.find(f=>f.name===reviewFile.path)?.count}
-          action={async args=>{if(args.action==="resolve") await flush(true);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={()=>setModal(null)}/>
+          action={async args=>{if(args.action==="resolve") await flush(true,reviewFile.id);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={()=>setModal(null)}/>
       </Modal>}
       {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" className="version-dialog" onClose={() => setModal(null)}>
         <FileVersionHistory key={vault.id + ":" + displayedPath} path={displayedPath}

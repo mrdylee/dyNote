@@ -182,7 +182,9 @@ export async function normalizePublished(store, head, device, config) {
 
 export async function chooseVersion(store, head, path, basis, chosenCommit, device, config, options = {}) {
   const files = await store.tree(head);
-  const group = (await store.metadata(files)).groups.get(path);
+  const {devices, groups} = await store.metadata(files);
+  if (devices.some(row => row.id === device.id && !row.active)) throw new Error("이 기기의 등록이 해제되었습니다. 다시 연결해 주세요.");
+  const group = groups.get(path);
   if (
     !group?.pending.length ||
     !Array.isArray(basis) ||

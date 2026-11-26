@@ -28,6 +28,7 @@ window.sticky.onStatus(message => {
 });
 
 const initial = await window.sticky.state();
+let showingStarterBullet = !initial.content;
 document.body.dataset.color = initial.color;
 updatePin(initial.pinned === true);
 updateTitle(initial.content);
@@ -36,6 +37,7 @@ const lineBreak = initial.content.match(/\r\n|\r|\n/)?.[0] ?? "\n";
 let moveVersion = 0, receiving=false;
 const publish = state => {
   const content = state.doc.sliceString(0, state.doc.length, lineBreak);
+  showingStarterBullet = false;
   updateTitle(content);
   window.sticky.edit(content, moveVersion);
 };
@@ -56,13 +58,19 @@ const view = new EditorView({
     }),
   ],
 });
+document.querySelector("#hide").addEventListener("click", () => {
+  view.focus();
+  window.sticky.hide();
+});
 window.sticky.onReceive(({before,content,token})=>{
-  if(view.state.doc.toString()!==before.replace(/\r\n?/g,"\n"))return;
+  const local = showingStarterBullet ? "" : view.state.doc.toString();
+  if(local!==before.replace(/\r\n?/g,"\n"))return;
   receiving=true;
   try {
     const previous=view.state.doc.toString(),after=content.replace(/\r\n?/g,"\n");
     const change=changedRange(previous,after);
     if(change) view.dispatch({changes:{from:change.from,to:previous.length-after.length+change.to,insert:after.slice(change.from,change.to)},annotations:Transaction.addToHistory.of(false)});
+    showingStarterBullet=false;
     updateTitle(content);window.sticky.received(token);
   } finally {receiving=false;}
 });

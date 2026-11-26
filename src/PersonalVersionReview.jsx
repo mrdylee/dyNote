@@ -81,6 +81,8 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
     [picks, setPicks] = useState({});
   const hunks = parts?.filter(part => part.key) ?? [];
   const [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true),
+    [loadError, setLoadError] = useState(""),
     [error, setError] = useState(""),
     [limit, setLimit] = useState(50);
   const [both, setBoth] = useState(false),
@@ -88,6 +90,8 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
     [reload, setReload] = useState(0);
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setLoadError("");
     async function load() {
       const initial = await action({ action: "versions", path }),
         all = [...initial.versions];
@@ -99,18 +103,20 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         }
         all.push(...page.versions);
       }
-      const comparison = await action({ action: "comparison", path });
+      if (!active) return;
+      setRows((old) => [
+        ...old.filter((v) => all.some((a) => a.commit === v.commit)),
+        ...all.filter((v) => !old.some((o) => o.commit === v.commit)),
+      ]);
+      setBasis(initial.basis);
+      setCurrent(initial.current);
+      const comparison = initial.basis.length ? await action({ action: "comparison", path }) : {basis: [], parts: null};
       if (active) {
         if (JSON.stringify(comparison.basis) !== JSON.stringify(initial.basis)) {
           setReload(n => n + 1);
           return;
         }
-        setRows((old) => [
-          ...old.filter((v) => all.some((a) => a.commit === v.commit)),
-          ...all.filter((v) => !old.some((o) => o.commit === v.commit)),
-        ]);
-        setBasis(initial.basis);
-        setCurrent(initial.current);
+        setLoading(false);
         setParts(comparison.parts);
         setCompared(old => {
           const newest = [...all].reverse();
@@ -124,7 +130,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       }
     }
     load().catch((e) => {
-      if (active) setError(e.message);
+      if (active) { setLoading(false); setParts(null); setLoadError(e.message); }
     });
     return () => {
       active = false;
@@ -179,7 +185,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         {!!hunks.length && <span role="status">{remaining ? `미해결 충돌 ${remaining}개` : "모든 충돌 선택 완료"}</span>}
         <button
           className="primary-button"
-          disabled={busy || !ready || rows.length !== basis.length}
+          disabled={busy || loading || !!loadError || !ready || rows.length !== basis.length}
           onClick={apply}
         >
           {hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용"}
@@ -214,7 +220,10 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
   return (
     <section className="settings-section">
       <h3>{path}</h3>
-      {parts && compared.length === 2 && <div className="version-workspace">
+      {loading && <p role="status">{count ? `버전 ${count}개 불러오는 중…` : "버전 불러오는 중…"}</p>}
+      {loadError && <p role="alert">{loadError} <button onClick={() => setReload(n => n + 1)}>다시 불러오기</button></p>}
+      {!loading && !loadError && !basis.length && <p role="status">이 노트에 남은 충돌이 없습니다.</p>}
+      {parts && compared.length === 2 && compared.every(id => rows.some(v => v.commit === id)) && <div className="version-workspace">
         {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
           <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>
             {hunks.map((h, i) => <option key={h.key} value={i}>겹친 구간 {i + 1}</option>)}
@@ -232,10 +241,10 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
             })}/>}/>
       </div>}
       {parts && actions}
-      {hunks.length ? <details className="comparison-versions">
+      {basis.length > 0 && (hunks.length ? <details className="comparison-versions">
         <summary>버전별 선택 및 저장 · {basis.length}개</summary>
         {versions}
-      </details> : versions}
+      </details> : versions)}
       {!/\.md$/i.test(path) && selected && (
         <>
           <label>
@@ -257,7 +266,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         </>
       )}
       {error && <p role="alert">{error}</p>}
-      {!parts && actions}
+      {!parts && basis.length > 0 && actions}
     </section>
   );
 }

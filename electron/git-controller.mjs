@@ -144,7 +144,16 @@ export class GitController {
       this.check(id);
       if (!this.current.enabled || this.current.config?.mode!=="personal-sync") throw new Error("개인 동기화를 먼저 연결해 주세요.");
       const service=await this.startPersonal();await service.init();
-      if (args.action==="versions") return service.versions(args.path,args.skip);
+      if (args.action==="versions") {
+        const result = await service.versions(args.path,args.skip);
+        const conflicts = this.current.conflicts ?? [];
+        if (!result.basis.length || conflicts.find(row => row.name === args.path)?.count !== result.basis.length) {
+          const latest = conflicts.filter(row => row.name !== args.path);
+          if (result.basis.length) latest.push({name:args.path, count:result.basis.length});
+          this.publish({conflicts:latest, changed:result.basis.length ? [] : [args.path]});
+        }
+        return result;
+      }
       if (args.action==="preview") return service.preview(args.path,args.commit);
       if (args.action==="comparison") return service.comparison(args.path);
       if (args.action==="hunks") return (await service.comparison(args.path)).parts?.filter(part => part.key) ?? [];
@@ -154,7 +163,14 @@ export class GitController {
       try {
         let result;
         if(args.action==="device") result=await service.removeDevice(this.current.config,args.deviceId,progress.onStage);
-        else if(args.action==="resolve") result=await service.resolve(this.current.config,args.path,args.basis,args.commit,args.options,progress.onStage);
+        else if(args.action==="resolve") {
+          if (await realpath(this.vault.root) !== this.canonicalRoot) throw new Error("보관함 위치가 변경되었습니다.");
+          const changed = await service.resolve(this.current.config,args.path,args.basis,args.commit,args.options);
+          const status = this.publish({phase:"pending", message:"이 기기에 반영됨 · 동기화 대기", changed,
+            conflicts:(this.current.conflicts ?? []).filter(row => row.name !== args.path)});
+          this.sync(id,{personalOnly:true}).catch(()=>{});
+          return status;
+        }
         else throw new Error("알 수 없는 동기화 작업입니다.");
         return await this.personalResult(result,progress,revision);
       } catch (error) {
