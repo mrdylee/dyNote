@@ -196,17 +196,23 @@ async function verifyJournalConflict(a, b) {
   const review = b.page.getByRole("dialog", { name: "버전 확인" });
   await review.getByText("버전별 선택 및 저장 · 4개").waitFor();
   const pane = label => review.getByRole("region", { name: label, exact: true });
-  for (const [label, value] of [["공통 원문", "기준"], ["Cloud", "a"], ["Local", "b"]]) {
+  for (const [label, value] of [["병합 결과", "기준"], ["Cloud", "a"], ["Local", "b"]]) {
     const content = pane(label).locator(".comparison-body");
     assert((await content.textContent()).startsWith("오늘 회의\n"));
     assert.equal(await content.locator(".comparison-value").textContent(), value + "\n");
     assert((await content.textContent()).endsWith("다음 일정"));
   }
   const panels = review.locator(".comparison-pane");
-  assert.equal(await panels.nth(1).getAttribute("aria-label"), "공통 원문");
-  const width = await pane("공통 원문").boundingBox();
+  assert.equal(await panels.nth(1).getAttribute("aria-label"), "병합 결과");
+  for (const [index, glyph] of [[0, "→"], [2, "←"]]) {
+    const button = panels.nth(index).getByRole("button", { name: /가운데에 반영/ });
+    assert.equal((await button.textContent()).trim(), glyph);
+    const arrow = await button.boundingBox(), text = await panels.nth(index).locator(".comparison-value").boundingBox();
+    assert(index === 0 ? arrow.x >= text.x + text.width - 1 : arrow.x + arrow.width <= text.x + 1);
+  }
+  const width = await pane("병합 결과").boundingBox();
   await review.getByRole("separator").nth(1).press("ArrowRight");
-  assert.notEqual((await pane("공통 원문").boundingBox()).width, width.width);
+  assert.notEqual((await pane("병합 결과").boundingBox()).width, width.width);
   const switcher = review.getByRole("combobox", {name: await pane("Cloud").getByRole("combobox").getAttribute("aria-label")});
   const before = await switcher.inputValue();
   const older = await switcher.locator("option:enabled").evaluateAll(options => options.find(o => !o.selected).value);
@@ -215,17 +221,23 @@ async function verifyJournalConflict(a, b) {
   await switcher.selectOption(before);
   const apply = review.getByRole("button", { name: "선택한 내용 반영" });
   assert(await apply.isDisabled());
-  await pane("공통 원문").getByRole("button", { name: /원문 유지/ }).click();
+  await pane("병합 결과").getByRole("button", { name: /원문 유지/ }).click();
   await review.getByRole("button", { name: "나중에" }).click();
   assert.equal(await readFile(path.join(b.root, journal), "utf8"), body("0"));
   await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
-  for (const [source, destination, value] of [["Local", "Cloud", "b"], ["Cloud", "Local", "a"]]) {
-    await pane(source).getByRole("button", { name: /복사/ }).click();
-    assert.equal(await pane(destination).locator("ins").textContent(), value + "\n");
+  const output = pane("병합 결과");
+  const take = name => pane(name).getByRole("button", { name: /가운데에 반영/ });
+  await take("Cloud").click();
+  for (const [source, value] of [["Local", "b"], ["Cloud", "a"]]) {
+    await take(source).click();
+    assert.equal(await output.locator("ins").textContent(), value + "\n");
+    assert.equal(await output.locator("del").textContent(), "기준\n");
+    assert.equal(await pane("Cloud").locator(".comparison-value").textContent(), "a\n");
+    assert.equal(await pane("Local").locator(".comparison-value").textContent(), "b\n");
     assert.equal(await readFile(path.join(b.root, journal), "utf8"), body("0"));
     if (source === "Local") {
-      await pane(destination).getByRole("button", { name: /되돌리기/ }).click();
-      assert.equal(await review.locator("ins").count(), 0);
+      await output.getByRole("button", { name: /되돌리기/ }).click();
+      assert.equal(await output.locator(".comparison-value").textContent(), "기준\n");
       assert(await apply.isDisabled());
     }
   }
