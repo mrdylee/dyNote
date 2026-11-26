@@ -334,6 +334,9 @@ test("each conflicting Markdown hunk can be chosen independently while clean edi
   const final = await chooseVersion(store, head, path, group.pending, b, local, config, { hunks: [a, b] });
   const blob = (await store.tree(final)).get(path);
   assert.equal((await store.blob(blob.oid)).toString(), "CLOUD INTRO\nx2\na\nb\nc\ny3\nLOCAL END\n");
+  const original = await chooseVersion(store, head, path, group.pending, b, local, config, { hunks: ["original", b] });
+  const mixed = (await store.tree(original)).get(path);
+  assert.equal((await store.blob(mixed.oid)).toString(), "first\nx\na\nb\nc\ny3\nLOCAL END\n");
 });
 
 test("simultaneous decisions survive even if one chooses the already published contents", async (t) => {

@@ -66,7 +66,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         action: "resolve",
         path,
         basis,
-        commit: selected,
+        commit: selected || rows[0].commit,
         options: { hunks: hunks.map((h) => picks[h.key] ?? selected), copies },
       });
       onClose();
@@ -90,11 +90,32 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       setError(e.message);
     }
   }
-  const selectedText = hunks.length === 1 && !Object.keys(picks).length && hunks[0].alternatives[selected]?.trim();
-  const applyName = selectedText && selectedText.length <= 40 ? selectedText + "로 적용" : "선택한 버전으로 적용";
+  const ready = hunks.length ? hunks.every(h => {
+    const choice = picks[h.key] ?? selected;
+    return choice === "original" || Object.hasOwn(h.alternatives, choice);
+  }) : !!selected;
   return (
     <section className="settings-section">
       <h3>{path}</h3>
+      {hunks.map((h, i) => (
+        <fieldset key={h.key} className="conflict-hunk" disabled={busy}>
+          <legend>겹친 구간 {i + 1}</legend>
+          <div className="conflict-columns">
+            {[{ id: "original", label: "공통 원문", text: h.original }, ...rows
+              .filter(v => Object.hasOwn(h.alternatives, v.commit))
+              .map(v => ({ id: v.commit, label: v.device || v.author, time: v.time, text: h.alternatives[v.commit] }))
+            ].map(option => (
+              <label key={option.id} className="conflict-option">
+                <span><input type="radio" name={"hunk" + i} checked={(picks[h.key] ?? selected) === option.id}
+                  onChange={() => setPicks(old => ({ ...old, [h.key]: option.id }))}/>
+                  {option.label}</span>
+                {option.time && <small>{new Date(option.time).toLocaleString()}</small>}
+                <span className="conflict-text">{option.text || (option.id === "original" ? "(빈 원문)" : "(삭제)")}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ))}
       <fieldset disabled={busy}>
         <legend>검토할 버전 {basis.length}개</legend>
         {rows.map((v) => (
@@ -103,8 +124,8 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
               <input
                 type="radio"
                 name="version"
-                checked={selected === v.commit}
-                onChange={() => select(v.commit)}
+                checked={selected === v.commit && !Object.keys(picks).length}
+                onChange={() => { select(v.commit); setPicks({}); }}
               />
               {hunks[0]?.alternatives[v.commit]?.trim().slice(0, 120) || (v.blob ? "파일 수정" : "파일 삭제")} ·{" "}
               {v.device || v.author} · {new Date(v.time).toLocaleString()}
@@ -115,31 +136,6 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         ))}
         {rows.length < basis.length && <button onClick={() => setLimit((n) => n + 50)}>이전 버전 더 보기</button>}
       </fieldset>
-      {hunks.map((h, i) => (
-        <fieldset key={h.key}>
-          <legend>겹친 문장 {i + 1}</legend>
-          <details>
-            <summary>공통 원문</summary>
-            <pre>{h.original}</pre>
-          </details>
-          {rows
-            .filter((v) => Object.hasOwn(h.alternatives, v.commit))
-            .map((v) => (
-              <label key={v.commit}>
-                <input
-                  type="radio"
-                  name={"hunk" + i}
-                  checked={(picks[h.key] ?? selected) === v.commit}
-                  onChange={() => {
-                    setPicks((old) => ({ ...old, [h.key]: v.commit }));
-                    if (!selected) select(v.commit);
-                  }}
-                />
-                {h.alternatives[v.commit] || "(삭제)"}
-              </label>
-            ))}
-        </fieldset>
-      ))}
       {!/\.md$/i.test(path) && selected && (
         <>
           <label>
@@ -164,10 +160,10 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       <div className="settings-actions">
         <button
           className="primary-button"
-          disabled={busy || !selected || rows.length !== basis.length}
+          disabled={busy || !ready || rows.length !== basis.length}
           onClick={apply}
         >
-          {applyName}
+          {hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용"}
         </button>
         <button disabled={busy} onClick={onClose}>
           나중에

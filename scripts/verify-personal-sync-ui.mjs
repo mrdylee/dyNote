@@ -193,8 +193,15 @@ async function verifyJournalConflict(a, b) {
   await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
   const review = b.page.getByRole("dialog", { name: "버전 확인" });
   await review.getByRole("radio", { name: /^b · Local/ }).waitFor();
-  await review.getByRole("radio", { name: /^a · Cloud/ }).check();
-  await review.getByRole("button", { name: "a로 적용" }).click();
+  const hunk = review.getByRole("group", { name: "겹친 구간 1" });
+  const apply = review.getByRole("button", { name: "선택한 내용 반영" });
+  assert(await apply.isDisabled());
+  await hunk.getByRole("radio", { name: /공통 원문.*기준/ }).check();
+  await review.getByRole("button", { name: "나중에" }).click();
+  assert.equal(await readFile(path.join(b.root, journal), "utf8"), "0");
+  await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
+  await hunk.getByRole("radio", { name: /Cloud.* a$/ }).check();
+  await apply.click();
   await review.waitFor({ state: "hidden" });
   await sync(a);
   for (const pc of [a, b]) {
@@ -273,7 +280,7 @@ try {
   await b.sync();
   await dialog.getByText("검토할 버전 3개").waitFor();
   assert(await selection.isChecked());
-  await dialog.getByRole("button", { name: /3시.*적용/ }).click();
+  await dialog.getByRole("button", { name: "선택한 내용 반영" }).click();
   await dialog.waitFor({ state: "hidden" });
   await a.sync();
   assert.equal(await readFile(path.join(a.root, "회의록.md"), "utf8"), "회의 3시\n");
