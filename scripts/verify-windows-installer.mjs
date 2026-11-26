@@ -198,9 +198,21 @@ try {
     await card.getByRole('textbox', {name: 'Sticky Note 메모'}).fill(stickyText);
     assert.equal(await (await app.browserWindow(card)).evaluate(win => win.isVisible()), true);
     await page.bringToFront();
+    let installButton = '지금 설치하고 다시 시작';
+    if (!previousSetup) {
+      await app.evaluate(({dialog}, file) => {
+        dialog.showOpenDialog = async () => ({canceled:false, filePaths:[file]});
+        globalThis.fetch = async () => { throw new Error('Offline installer test'); };
+      }, downloaded);
+      await updates.getByLabel('업데이트 배포처').selectOption('local');
+      await updates.getByRole('button', {name:'Setup.exe 선택'}).click();
+      await page.waitForFunction(file => document.querySelector('.update-settings input[readonly]')?.value === file, downloaded);
+      installButton = '설치하고 다시 시작';
+      console.log('Selected the local Setup with updater network requests blocked');
+    }
     const exited = once(app.process(), 'exit', {signal: AbortSignal.timeout(60000)});
     console.log('Requesting installation and waiting for the app to exit');
-    await updates.getByRole('button', {name: '지금 설치하고 다시 시작', exact: true}).click();
+    await updates.getByRole('button', {name: installButton, exact: true}).click();
     await exited;
     installerJob = JSON.parse(await readFile(path.join(profile, 'updates', 'settings.json'), 'utf8')).installation.directory;
   });
