@@ -20,6 +20,7 @@ export function fontVariables(preferences) {
   const p = normalizeFonts(preferences);
   const family = (name, fallback) => name ? `"${name.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}", ${fallback}` : fallback;
   return {
+    "--windows-menu-font": family(p.uiFamily, '"Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", sans-serif'),
     "--ui-font": family(p.uiFamily, system), "--body-font": family(p.bodyFamily, system), "--code-font": family(p.codeFamily, mono),
     "--ui-size": `${p.uiSize}px`, "--body-size": `${p.bodySize}px`, "--code-size": `${p.codeSize}px`, "--body-line-height": String(p.lineHeight),
   };

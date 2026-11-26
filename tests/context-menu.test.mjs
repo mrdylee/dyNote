@@ -4,7 +4,7 @@ import { fileForElement, fileLocationRef } from "../src/file-location.mjs";
 import { contextMenuTemplate } from "../electron/context-menu.mjs";
 test("contenteditable menu uses editor history and formatting; form fields retain native roles", () => {
   const actions=[];
-  const menu=contextMenuTemplate({isEditable:true,formControlType:"none",editFlags:{canCopy:true,canPaste:true}},action=>actions.push(action),()=>actions.push("fonts"));
+  const menu=contextMenuTemplate({isEditable:true,formControlType:"none",bulletFormats:["bullet-list","paragraph"],editFlags:{canCopy:true,canPaste:true}},action=>actions.push(action),()=>actions.push("fonts"));
   const submenu=menu.find(item=>item.label==="서식").submenu;
   submenu.find(item=>item.id==="format-bold").click();
   assert.deepEqual(actions,["bold"]);
@@ -66,4 +66,12 @@ test("AI suggestion opens only from an editable Markdown surface", () => {
   assert.equal(item({ ...common, markdownEditor: true, isEditable: false }), undefined);
   item({ ...common, markdownEditor: true }).click();
   assert.deepEqual(actions, ["ai-suggestion"]);
+});
+
+test("menu contains exactly the applicable paragraph conversions", () => {
+  for (const formats of [[], ["bullet-list"], ["paragraph"], ["bullet-list", "paragraph"]]) {
+    const template = contextMenuTemplate({isEditable:true, formControlType:"none", bulletFormats:formats});
+    assert.deepEqual(template.filter(item => ["format-bullet-list", "format-paragraph"].includes(item.id))
+      .map(item => item.id), formats.map(format => "format-" + format));
+  }
 });

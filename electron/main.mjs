@@ -525,17 +525,30 @@ app
       const subframe = params.frame !== contents.mainFrame;
       const context = await contents.executeJavaScript(`({
         file: window.dynoteContextFile?.(${subframe}, ${JSON.stringify(point)}),
-        markdownEditor: ${!subframe} && !!(${point ? `document.elementFromPoint(${point.x}, ${point.y})` : "document.activeElement"})?.closest('.code-editor .cm-content[contenteditable="true"]:not([aria-readonly="true"])')
+        ...(${!subframe} && window.dynoteEditorContext?.(${JSON.stringify(point)})),
+        styledMenu: typeof window.dynoteShowEditorMenu === "function"
       })`).catch(() => null);
       if (contents.isDestroyed()) return;
-      const menu = Menu.buildFromTemplate(contextMenuTemplate({ ...params, markdownEditor: context?.markdownEditor },
+      const template = contextMenuTemplate({ ...params, ...context },
         format => window.webContents.send("notes:format-editor", format, point),
         () => window.webContents.send("notes:open-settings", "fonts"),
         () => window.webContents.send("notes:sync-vault"),
         context?.file ? () => revealFile(context.file).catch(error => dialog.showMessageBox(window, {
           type: "error", message: "파일 위치를 열 수 없습니다.", detail: error.message,
-        })) : undefined));
-      menu.popup({ window });
+        })) : undefined);
+      if (context?.markdownEditor && context.styledMenu) {
+        // Functions stay in the main process. The renderer returns only an ID from this menu.
+        const choice = await contents.executeJavaScript(
+          `window.dynoteShowEditorMenu(${JSON.stringify(template)}, ${JSON.stringify(point)})`
+        ).catch(() => null);
+        if (!choice || contents.isDestroyed()) return;
+        const item = template.flatMap(entry => entry.submenu ?? [entry])
+          .find(entry => (entry.id ?? entry.role) === choice && entry.enabled !== false);
+        if (item?.click) item.click();
+        else if (item?.role) contents[item.role]();
+        return;
+      }
+      Menu.buildFromTemplate(template).popup({ window });
     });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());

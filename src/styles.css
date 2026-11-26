@@ -2259,6 +2259,19 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .file-tree-menu button.tree-trash { color:#a12d35; }
 .file-tree-menu button[aria-disabled="true"] { opacity:.6; }
 .file-tree-menu kbd { float:right; }
+.windows-menus .file-tree-menu {
+  width: min(248px, calc(100vw - 8px)); padding: 5px; border-radius: 8px;
+  font-family: var(--windows-menu-font); box-shadow: 0 7px 20px -6px rgb(21 16 31 / 20%), 0 2px 4px rgb(21 16 31 / 5%);
+}
+.windows-menus .file-tree-menu button {
+  display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 4px 9px; font-size: max(14px, var(--ui-size));
+}
+.windows-menus .file-tree-menu button:hover:not(:focus-visible) { outline: none; }
+.windows-menus .file-tree-menu button:disabled:hover { background: transparent; }
+.windows-menus .file-tree-menu svg { width: 15px; height: 15px; stroke-width: 1.6; }
+.windows-menus .file-tree-menu kbd { font: inherit; font-size: 12px; white-space: nowrap; }
+.windows-menus .file-tree-menu :is(kbd, .menu-chevron) { margin-left: auto; }
+.windows-menus .file-tree-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 7px; }
 .file-tree-menu-hint { margin:0 10px 6px; font-size:12px; }
 .classification-review fieldset { border:1px solid var(--border); border-radius:8px; margin:12px 0; padding:12px; }
 .classification-review input:not([type=checkbox]) { width:100%; padding:8px; }

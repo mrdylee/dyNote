@@ -132,7 +132,7 @@ export function runMarkdownFormat(view, format) {
 
 const taskLikeText = /^\[[xX ]\](?:[ \t]|$)/;
 
-export function runBulletFormat(view, format, position) {
+function bulletFormatPlan(view, format, position) {
   if (!view || view.state.readOnly || view.composing || view.state.selection.ranges.length !== 1) return false;
   const { state } = view, { doc } = state;
   const selection = state.selection.main;
@@ -201,8 +201,18 @@ export function runBulletFormat(view, format, position) {
     const separator = first.number > 1 && doc.line(first.number - 1).text.trim() ? "\n" : "";
     edits.push({ from: Math.max(first.from, bom), to: first.to, insert: separator + "- " });
   }
-  if (!edits.length) return false;
-  const changes = state.changes(edits);
+  return edits.length ? { edits, range } : null;
+}
+
+export function availableBulletFormats(view, position) {
+  return ["bullet-list", "paragraph"].filter(format => bulletFormatPlan(view, format, position));
+}
+
+export function runBulletFormat(view, format, position) {
+  const plan = bulletFormatPlan(view, format, position);
+  if (!plan) return false;
+  const { edits, range } = plan;
+  const changes = view.state.changes(edits);
   view.dispatch({ changes, selection: EditorSelection.create([range.map(changes, 1)]),
     annotations: [Transaction.userEvent.of("input.format"), isolateHistory.of("full")], scrollIntoView: true });
   view.focus();

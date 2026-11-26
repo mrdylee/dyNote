@@ -1,3 +1,4 @@
+import WindowsEditorMenu, { positionMenu } from "./WindowsEditorMenu.jsx";
 import { fileLocationRef } from "./file-location.mjs";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { captureDateHeading } from "../core/copilot-journal-links.mjs";
@@ -16,6 +17,8 @@ import {
   Files,
   Folder,
   FolderOpen,
+  FolderPlus,
+  Trash2,
   Hash,
   Link2,
   List,
@@ -134,6 +137,7 @@ const readSpaceGit = async vaultId => {
   ]);
   return { ...repository, backup: backup.config?.remote };
 };
+const isWindows = navigator.platform.startsWith("Win");
 const isMac = navigator.platform.includes("Mac");
 const shortcut = isMac ? "⌘" : "Ctrl";
 const stored = (key, fallback) => {
@@ -457,9 +461,10 @@ export default function App() {
   const { vaultId: tabVaultId, path: tabPath } = tabMenu?.key === stickyBoardKey
     ? { vaultId: stickyVault?.id, path: null } : documentRef(tabMenu?.key, vault?.id);
   const tabMenuIndex = tabs.indexOf(tabMenu?.key);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (tabMenuIndex < 0) return;
     const menu = tabMenuRef.current;
+    positionMenu(menu, tabMenu.x, tabMenu.y);
     menu.querySelector("button:not(:disabled)")?.focus();
     const dismiss = event => { if (!menu.contains(event.target)) setTabMenu(null); };
     document.addEventListener("pointerdown", dismiss);
@@ -634,7 +639,7 @@ export default function App() {
     ?? menuFiles?.localOnlyFiles?.find(file => file.name === treeMenu.path || file.name.endsWith("/") && (treeMenu.path + "/").startsWith(file.name));
   useLayoutEffect(() => {
     const menu = treeMenuRef.current;
-    if (menu) menu.style.top = Math.max(4, Math.min(treeMenu.y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+    if (menu) positionMenu(menu, treeMenu.x, treeMenu.y);
   }, [treeMenu, menuFileState]);
   const acceptGitStatus = useCallback(value => {
     if (value?.vaultId) setGitStates(old => ({ ...old, [value.vaultId]: value }));
@@ -1175,7 +1180,7 @@ export default function App() {
     const rect = origin.getBoundingClientRect();
     setTabMenu({
       key, origin,
-      x: Math.max(4, Math.min(event.clientX || rect.left, window.innerWidth - 194)),
+      x: event.clientX || rect.left,
       y: event.clientY || rect.bottom,
     });
   };
@@ -1773,7 +1778,7 @@ export default function App() {
     setTreeMenu({
       ...target, vaultId, origin, canTrash: canTrashTreeTarget(target, scope),
       renameReason: target.path ? treeRenameReason(target, scope) : "보관함 이름은 설정에서 변경해 주세요.",
-      x: Math.max(4, Math.min(x || rect.left + 20, window.innerWidth - 194)),
+      x: x || rect.left + 20,
       y: y || rect.bottom,
     });
   };
@@ -2201,8 +2206,9 @@ export default function App() {
     .map((e) => model.notes.find((n) => n.path === e.target))
     .filter(Boolean);
   return (
-    <div className="app-shell" onPointerMove={moveMacCopy} onPointerUp={finishMacCopy}
+    <div className={isWindows ? "app-shell windows-menus" : "app-shell"} onPointerMove={moveMacCopy} onPointerUp={finishMacCopy}
       onPointerCancel={finishMacCopy} onLostPointerCapture={finishMacCopy}>
+      {isWindows && <WindowsEditorMenu />}
       <header className={isMac ? "titlebar titlebar-mac" : "titlebar"}>
         <button className="app-version" aria-label="앱 버전 정보" title="DyNote 버전 정보" onClick={() => setModal("about")}>
           <span className="app-mark"><img src="./brand/dynote.svg" width="30" height="30" alt="" /></span>
@@ -3023,12 +3029,12 @@ export default function App() {
           setTabMenu(null);
           tabMenu.origin.focus();
           void syncVault(tabVaultId);
-        }}>{panelSyncs[tabVaultId]?.working ? "동기화 중…" : "지금 동기화"}</button>
+        }}>{isWindows && <RefreshCw />}{panelSyncs[tabVaultId]?.working ? "동기화 중…" : "지금 동기화"}</button>
         {(externalFile.documents[tabMenu.key] || (!documentDrafts.some(draft => draftKey(draft) === tabMenu.key) && canRevealFile(tabVaultId, tabPath))) && <button role="menuitem" tabIndex={-1} onClick={() => {
           setTabMenu(null);
           tabMenu.origin.focus();
           void revealFile(tabMenu.key);
-        }}>파일 위치 열기</button>}
+        }}>{isWindows && <FolderOpen />}파일 위치 열기</button>}
         {[
           ["이 탭 닫기", [tabMenu.key]],
           ["다른 탭 모두 닫기", tabs.filter(key => key !== tabMenu.key)],
@@ -3041,22 +3047,24 @@ export default function App() {
             const target = document.querySelector(".tabs .tab.active .tab-label") ?? document.querySelector('.tabbar button[aria-label="새 문서"]');
             target?.focus();
           });
-        }}>{label}</button>)}
+        }}>{isWindows && <X />}{label}</button>)}
       </div>}
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
         {(personalMenu || teamMenu) && <button role="menuitem" disabled={panelWorking || personalMenu && !menuGit}
-          onClick={() => { setTreeMenu(null); treeMenu.origin.focus(); void syncVault(treeMenu.vaultId); }}>{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
+          onClick={() => { setTreeMenu(null); treeMenu.origin.focus(); void syncVault(treeMenu.vaultId); }}>{isWindows && <RefreshCw />}{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
         {!treeMenu.folder && canRevealFile(treeMenu.vaultId, treeMenu.path) && <button role="menuitem" onClick={() => {
           setTreeMenu(null);
           treeMenu.origin.focus();
           void revealFile(documentKey(treeMenu.vaultId, treeMenu.path));
-        }}>파일 위치 열기</button>}
+        }}>{isWindows && <FolderOpen />}파일 위치 열기</button>}
         {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
-        <button role="menuitem" aria-keyshortcuts={isMac ? "Meta+Shift+N" : "Control+Shift+N"} onClick={() => newTreeFolder(treeMenu, treeMenu.vaultId)}>폴더 추가 <kbd aria-hidden="true">{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd></button>
-        {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
+        {isWindows && (personalMenu || teamMenu || !treeMenu.folder && canRevealFile(treeMenu.vaultId, treeMenu.path)) && <hr />}
+        <button role="menuitem" aria-keyshortcuts={isMac ? "Meta+Shift+N" : "Control+Shift+N"} onClick={() => newTreeFolder(treeMenu, treeMenu.vaultId)}>{isWindows && <FolderPlus />}폴더 추가 <kbd aria-hidden="true">{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd></button>
+        {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>{isWindows && <PencilLine />}이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
         {treeMenu.path && !treeMenu.other && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
-        {treeMenu.canTrash && <button className="tree-trash" role="menuitem" aria-keyshortcuts={isMac ? "Delete Meta+Backspace" : "Delete"} disabled={busy || editState.forVault(treeMenu.vaultId).blocked()} onClick={() => trashTreeTarget(treeMenu, treeMenu.vaultId, treeMenu.origin)}>휴지통으로 이동 <kbd aria-hidden="true">{isMac ? "⌘⌫" : "Delete"}</kbd></button>}
+        {isWindows && treeMenu.canTrash && <hr />}
+        {treeMenu.canTrash && <button className="tree-trash" role="menuitem" aria-keyshortcuts={isMac ? "Delete Meta+Backspace" : "Delete"} disabled={busy || editState.forVault(treeMenu.vaultId).blocked()} onClick={() => trashTreeTarget(treeMenu, treeMenu.vaultId, treeMenu.origin)}>{isWindows && <Trash2 />}휴지통으로 이동 <kbd aria-hidden="true">{isMac ? "⌘⌫" : "Delete"}</kbd></button>}
       </div>}
       {modal === "new-folder" && newFolder && <Modal title="폴더 추가" onClose={() => !newFolder.working && setModal(null)}>
         <form className="new-note-form" onSubmit={addTreeFolder}>

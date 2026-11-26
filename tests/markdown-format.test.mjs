@@ -4,7 +4,7 @@ import { EditorState, EditorSelection } from "@codemirror/state";
 import { renderMarkdown } from "../core/knowledge.mjs";
 import { history, undo, redo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { runBulletFormat, runMarkdownFormat } from "../src/editorCommands.mjs";
+import { availableBulletFormats, runBulletFormat, runMarkdownFormat } from "../src/editorCommands.mjs";
 
 function editor(doc, anchor, head = anchor, readOnly = false) {
   const view = { state: EditorState.create({doc, selection: {anchor, head}, extensions: [history(), markdown({base: markdownLanguage}), EditorState.readOnly.of(readOnly)]}),
@@ -144,4 +144,16 @@ test("toggling existing underscore and nested emphasis removes only the requeste
     runMarkdownFormat(view, format);
     assert.equal(view.state.doc.toString(), expected);
   }
+});
+
+test("right-click conversion choices follow the targeted block or selected blocks without editing", () => {
+  const doc = "Plain\n\n- Item\n  continued\n\n```md\n- Code\n```";
+  const view = editor(doc, 0, doc.indexOf("continued") + 3);
+  assert.deepEqual(availableBulletFormats(view, 2), ["bullet-list", "paragraph"]);
+  assert.deepEqual(availableBulletFormats(view, doc.indexOf("Code")), []);
+  assert.deepEqual(availableBulletFormats(editor(doc, 1), doc.indexOf("continued")), ["paragraph"]);
+  assert.deepEqual(availableBulletFormats(editor(doc, doc.indexOf("Item")), 1), ["bullet-list"]);
+  assert.deepEqual(availableBulletFormats(editor("- [ ] task", 7)), []);
+  assert.deepEqual(availableBulletFormats(editor("", 0)), ["bullet-list"]);
+  assert.equal(view.state.doc.toString(), doc);
 });

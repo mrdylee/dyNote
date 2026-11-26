@@ -25,6 +25,8 @@ const content = () => page.locator(".cm-content").evaluate(el => el.cmTile.root.
 const select = async (from,to) => page.locator(".cm-content").evaluate((el,[anchor,head]) => {const v=el.cmTile.root.view;v.dispatch({selection:{anchor,head}});v.focus();},[from,to]);
 const openMenu = async (offset, point) => {
   const target=point??await page.locator(".cm-content").evaluate((el,offset)=>{const v=el.cmTile.root.view,r=v.coordsAtPos(offset??(v.state.selection.main.empty?v.state.selection.main.head:v.state.selection.main.from+1));return {x:r.left+1,y:r.top+3};},offset);
+  if (await page.evaluate(({x,y}) => !!document.elementFromPoint(x,y)?.closest(".selection-format-menu"), target))
+    await page.keyboard.press("Escape");
   await page.mouse.click(target.x,target.y,{button:"right"});
   await app.evaluate(async () => {
     const deadline = Date.now() + 3000;
