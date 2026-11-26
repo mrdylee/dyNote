@@ -59,7 +59,7 @@ export function installMarkdownExtensions(
         return `<a href="#" data-note="${escape(target)}">노트 · ${escape(label)}</a>`;
       if (visited.includes(note.path) || visited.length >= 4)
         return `<span class="embed-limit">순환/깊이 제한 · ${escape(label)}</span>`;
-      return `<section class="note-embed" data-embed="${escape(note.path)}"><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true })}</section>`;
+      return `<section class="note-embed" data-embed="${escape(note.path)}"><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true, sourceLines: false })}</section>`;
     }
     if (asset.status === "resolved")
       return `<a href="#" data-attachment="${escape(asset.path)}" data-attachment-fragment="${escape(fragment(target))}">${escape(label)}</a>`;
@@ -97,6 +97,11 @@ export function installMarkdownExtensions(
   md.core.ruler.after("inline", "tasks_and_callouts", (state) => {
     for (let i = 0; i < state.tokens.length; i++) {
       const token = state.tokens[i];
+      if (state.env.sourceLines && !token.hidden && token.map && token.tag && token.nesting >= 0) {
+        const [start, end] = token.map;
+        const offset = state.env.bodyOffset ?? 0;
+        if (end > start) token.attrSet("data-source-lines", `${start + offset}:${end + offset}`);
+      }
       const inline = state.tokens[i + 2];
       if (
         token.type === "list_item_open" &&

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { textSizeOptions } from "../core/text-size-options.mjs";
 import { runSelectionOrLine } from "./format-line.mjs";
 import { selectionToolbar } from "./selection-toolbar.mjs";
@@ -106,7 +106,7 @@ export default function Editor({
     onLink: (target, kind) => latest.current.onLink?.(target, kind),
   });
   callback.current = onChange;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -315,18 +315,10 @@ export default function Editor({
   useEffect(() => { editor.current?.dispatch({ effects: outlining.current.reconfigure(journalOutline({ journal, live })) }); }, [journal, live]);
   useEffect(() => { setRegionMode(regionSelection.active ? "journal" : "normal"); }, [regionSelection.active, note.path]);
   useEffect(() => { setRegionNotice(""); }, [note.path]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = editor.current;
     if (!view) return;
-    const area = host.current.closest(".document-area");
-    const bounds = area?.getBoundingClientRect();
-    const anchor = bounds && view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y: bounds.top + 24 }, false);
-    const top = anchor != null ? view.coordsAtPos(anchor)?.top : null;
-    view.dispatch({ effects: [rendering.current.reconfigure(live ? liveExtensions() : []), view.scrollSnapshot()] });
-    if (area && top != null) view.requestMeasure({
-      read: () => view.coordsAtPos(anchor)?.top,
-      write: (next) => { if (next != null) area.scrollTop += next - top; },
-    });
+    view.dispatch({ effects: rendering.current.reconfigure(live ? liveExtensions() : []) });
   }, [live]);
   useEffect(() => {
     if (live) editor.current?.dispatch({ effects: refreshLivePreview.of(null) });

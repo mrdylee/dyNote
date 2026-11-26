@@ -15,6 +15,7 @@ export default function DiagramPreview({ html, onClick, previewRef, tabIndex, cl
           if (disposed) return;
           const container = root.ownerDocument.createElement("div");
           container.className = "mermaid-diagram";
+          if (block.dataset.sourceLines) container.dataset.sourceLines = block.dataset.sourceLines;
           container.innerHTML = svg;
           block.parentElement.replaceWith(container);
         } catch {

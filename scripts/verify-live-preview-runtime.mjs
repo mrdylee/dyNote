@@ -10,7 +10,10 @@ await mkdir("output/playwright", { recursive: true });
 const original = '# Live Preview\n\n**bold** and *italic* and ~~old~~ and `code`\n\n[[Guide|가이드]] · [절차](Guide.md#Procedure)\n\n- [ ] Test task\n- ordinary item\n\n![[assets/pixel.png]]\n\n![remote](https://example.invalid/pixel.png)\n\n```md\n**literal** [[not-a-link]]\n```\n\n한글 편집 끝\n';
 await writeFile(`${vaultRoot}/Home.md`, original);
 await writeFile(`${vaultRoot}/Guide.md`, "---\ntags: [fixture]\n---\n\n# Guide\n\n## Procedure\nTesting instructions\n");
-await writeFile(`${vaultRoot}/Long.md`, Array.from({ length: 120 }, (_, i) => `### Section ${i}\n\n**내용 ${i}** · *한글* · [[Guide]]\n\n`).join(""));
+const wrappedParagraph = "긴 문장 ".repeat(180) + "\n**내용 130** · 줄바꿈 뒤의 문장\n짧은 줄\n\n";
+const longText = "---\ntags: [scroll]\n---\n\n" + Array.from({ length: 120 }, (_, i) => `${i === 75 ? wrappedParagraph : ""}### Section ${i}\n\n**내용 ${i}** · *한글* · [[Guide]]\n\n`).join("");
+await writeFile(`${vaultRoot}/Long.md`, longText);
+await writeFile(`${vaultRoot}/Other.md`, longText);
 await writeFile(`${vaultRoot}/assets/pixel.png`, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAPAAAABICAYAAADIzHiKAAAA/ElEQVR4nO3TOQ2AQAAAwVOMCDQhhxoH1ODhEp5Npph+mx3Hfl5A0/g6AJhnYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwqYGXpcNeICBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGGvDAz8g4EhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAi7AdxvIjaEtAftAAAAAElFTkSuQmCC", "base64"));
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
 const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
@@ -205,6 +208,73 @@ try {
     assert.ok(Math.abs(offset - 24) < 60, `scroll anchor offset ${offset} after ${mode}`);
   }
   report.checks.push("long document source/live switching preserves the visible text anchor");
+  const first = page.getByRole("region", { name: "문서 Long.md", exact: true });
+  const other = page.getByRole("region", { name: "문서 Other.md", exact: true });
+  const box = await first.boundingBox();
+  await page.locator('.file-row[title="Other.md"]').dragTo(first, { targetPosition: { x: box.width - 10, y: 28 } });
+  await other.waitFor();
+  // Use visible paragraph text as the oracle, independent of the app's source mapping.
+  const paragraphOffset = (pane, section, align = false) => pane.evaluate((el, {section, align}) => {
+    const text = `내용 ${section}`;
+    const y = el.querySelector(".pane-header").getBoundingClientRect().bottom;
+    const cm = el.querySelector(".cm-content");
+    let top;
+    if (cm) {
+      const view = cm.cmTile.root.view, pos = view.state.doc.toString().indexOf(`**${text}**`);
+      top = view.coordsAtPos(pos)?.top ?? view.documentTop + view.lineBlockAt(pos).top;
+    } else {
+      const marker = [...el.querySelectorAll(".markdown-preview strong")].find(node => node.textContent === text);
+      top = marker.getBoundingClientRect().top;
+    }
+    if (align) el.scrollTop += top - y + 3;
+    return top - y;
+  }, {section, align});
+  const place = async (pane, section) => {
+    await pane.hover();
+    await page.mouse.wheel(0, 80);
+    await page.waitForTimeout(100);
+    for (let i = 0; i < 5; i++) {
+      await paragraphOffset(pane, section, true);
+      await page.waitForTimeout(100);
+      if (Math.abs(await paragraphOffset(pane, section) + 3) < 10) return;
+    }
+    assert.fail(`could not position the test at paragraph ${section}`);
+  };
+  const switchMode = name => page.locator(".view-segments").getByRole("button", { name, exact: true }).click();
+  await place(first, 18);
+  await place(other, 64);
+  const firstScroll = await first.evaluate(el => el.scrollTop);
+  for (const mode of ["읽기 보기", "분할 보기", "편집 보기", "Live Preview", "읽기 보기"]) {
+    await switchMode(mode);
+    await page.waitForTimeout(160);
+    const offset = await paragraphOffset(other, 64);
+    assert.ok(Math.abs(offset + 3) < 32, `second pane paragraph offset ${offset} in ${mode}`);
+    assert.equal(await first.evaluate(el => el.scrollTop), firstScroll);
+  }
+  await place(other, 91);
+  await switchMode("Live Preview");
+  await page.waitForTimeout(160);
+  const movedOffset = await paragraphOffset(other, 91);
+  assert.ok(Math.abs(movedOffset + 3) < 32, `read-to-live paragraph offset ${movedOffset}`);
+  const otherScroll = await other.evaluate(el => el.scrollTop);
+  await first.locator(".pane-title").click();
+  await switchMode("읽기 보기");
+  await page.waitForTimeout(160);
+  assert.ok(Math.abs(await paragraphOffset(first, 18) + 3) < 32, "first pane keeps its own paragraph");
+  assert.equal(await other.evaluate(el => el.scrollTop), otherScroll);
+  const beforeWheel = await first.evaluate(el => el.scrollTop);
+  await first.hover();
+  await page.mouse.wheel(0, 500);
+  await page.waitForFunction(previous => document.querySelector('.document-pane.focused').scrollTop > previous + 100, beforeWheel);
+  await place(first, 130);
+  await switchMode("편집 보기");
+  await page.waitForTimeout(250);
+  const wrappedOffset = await paragraphOffset(first, 130);
+  assert.ok(Math.abs(wrappedOffset + 3) < 32, `paragraph after a long wrapped line moved to ${wrappedOffset}`);
+  assert.equal(await other.evaluate(el => el.scrollTop), otherScroll);
+  assert.equal(await readFile(`${vaultRoot}/Long.md`, "utf8"), longText);
+  assert.equal(await readFile(`${vaultRoot}/Other.md`, "utf8"), longText);
+  report.checks.push("two independently scrolled panes retain their paragraphs across live, source, split and reading modes");
   report.errors = errors;
   report.remoteRequests = remoteRequests;
   report.platform = process.platform;
