@@ -17,14 +17,21 @@ async function until(read, check, label) {
   assert.fail(label);
 }
 
-async function fixture(bodies, run) {
+async function fixture(bodies, run, { withTeam = false } = {}) {
   const root = await mkdtemp(path.join(await realpath(tmpdir()), "dynote-sticky-review-"));
   const profile = path.join(root, "profile");
   const vault = path.join(root, "vault");
   const stateDir = path.join(profile, "sticky-notes");
   await mkdir(stateDir, { recursive: true });
   await mkdir(path.join(vault, "포스트잇"), { recursive: true });
-  await writeFile(path.join(profile, "settings.json"), JSON.stringify({ vaultRoot: vault }));
+  const settings = { vaultRoot: vault };
+  if (withTeam) {
+    const team = path.join(root, "team");
+    await mkdir(path.join(team, "포스트잇"), { recursive: true });
+    await writeFile(path.join(team, "포스트잇", "team.md"), "팀 전용 메모");
+    Object.assign(settings, { vaultRoot: team, vaults: [team, vault], vaultPurposes: { [vault]: "personal", [team]: "team" } });
+  }
+  await writeFile(path.join(profile, "settings.json"), JSON.stringify(settings));
   await writeFile(path.join(vault, "Reference.md"), "# 참고 문서\n");
   const records = [];
   for (const [index, body] of bodies.entries()) {
@@ -317,4 +324,49 @@ test("Enter starts a bullet in an existing plain-text sticky and preserves its b
     assert.equal(await markdown(card), "이전 버전의 일반 문단\n\n- 새 불릿");
     await until(() => readFile(file, "utf8"), text => text === existing + "\r\n- 새 불릿", "original CRLF is preserved");
   });
+});
+
+test("synced sticky picker opens the original file and both plus buttons create cards", async () => {
+  await fixture([], async ({ app, main, vault }) => {
+    const panel = main.getByRole("region", { name: "스티키 노트" });
+    await panel.getByRole("button", { name: /스티키 노트 목록/ }).click();
+    const entries = await main.evaluate(async () => (await window.notes.workspaceSnapshots()).value);
+    const personal = entries.find(entry => entry.purpose === "personal");
+    const relative = "포스트잇/cloud.md";
+    const title = "제품 검토 회의";
+    const content = "- " + title + "\n  - 금요일까지 시안 공유";
+    await writeFile(path.join(vault, relative), content);
+    await app.evaluate(({ BrowserWindow }, status) => {
+      BrowserWindow.getAllWindows()[0].webContents.send("notes:git-status", status);
+    }, { vaultId: personal.snapshot.id, changed: [relative] });
+    const row = panel.getByRole("button", { name: title, exact: true });
+    await row.waitFor();
+    assert.equal(await panel.getByText("팀 전용 메모").count(), 0);
+    assert.equal(app.windows().length, 1);
+    const [card] = await Promise.all([app.waitForEvent("window"), row.click()]);
+    assert.equal(await markdown(card), content);
+    await mkdir("output/playwright", { recursive: true });
+    await main.locator(".navigator").screenshot({ path: "output/playwright/sticky-picker.png" });
+    await card.screenshot({ path: "output/playwright/sticky-picker-card.png" });
+    const nativeCard = await app.browserWindow(card);
+    await nativeCard.evaluate(win => win.hide());
+    await row.click();
+    await until(() => nativeCard.evaluate(win => win.isVisible()), Boolean, "the existing card returns");
+    assert.equal(app.windows().length, 2);
+    await mkdir("output/playwright", { recursive: true });
+    await main.locator(".navigator").screenshot({ path: "output/playwright/sticky-picker.png" });
+    await card.screenshot({ path: "output/playwright/sticky-picker-card.png" });
+    const updated = content + "\n- 검토 완료";
+    await memo(card).fill(updated);
+    for (const page of [card, panel]) {
+      const [blank] = await Promise.all([app.waitForEvent("window"), page.getByRole("button", { name: "새 스티키 노트" }).click()]);
+      assert.equal(await markdown(blank), "- ");
+      await Promise.all([blank.waitForEvent("close"), blank.locator("#close").click()]);
+    }
+    await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
+    assert.deepEqual(await readdir(path.join(vault, "포스트잇")), ["cloud.md"]);
+    assert.equal(await readFile(path.join(vault, relative), "utf8"), updated);
+    const [reopened] = await Promise.all([app.waitForEvent("window"), row.click()]);
+    assert.equal(await markdown(reopened), updated);
+  }, { withTeam: true });
 });

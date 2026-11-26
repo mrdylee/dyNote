@@ -1,3 +1,5 @@
+export const STICKY_FOLDER = "포스트잇/";
+export const isStickyPath = relative => typeof relative === "string" && relative.normalize("NFC").startsWith(STICKY_FOLDER) && /\.md$/i.test(relative);
 export const STICKY_SHORTCUT = "Ctrl+Shift+M";
 export const STICKY_COLORS = ["cream", "mint", "lavender", "sky", "peach"];
 

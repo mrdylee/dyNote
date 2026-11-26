@@ -1,0 +1,16 @@
+.sticky-picker { flex: none; border-top: 1px solid var(--border); padding: 6px 12px; }
+.sticky-picker-head, .sticky-picker-toggle, .sticky-picker-row { display: flex; align-items: center; }
+.sticky-picker-head { gap: 4px; }
+.sticky-picker-toggle { gap: 8px; flex: 1; min-width: 0; height: 32px; padding: 0 6px; border-radius: 6px; text-align: left; }
+.sticky-picker-toggle strong { font-size: 12px; }
+.sticky-picker-toggle > svg:last-child { margin-left: auto; color: var(--muted); }
+.sticky-paper { color: #92692a; fill: #fff0bd; }
+.sticky-count { padding: 1px 6px; border-radius: 9px; color: var(--accent-ink); background: var(--accent-soft); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sticky-picker-new { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink); }
+.sticky-picker-new:hover { background: var(--accent); color: white; }
+.sticky-picker-toggle:hover, .sticky-picker-row:hover { background: var(--soft); }
+#sticky-picker-list { max-height: min(24vh, 180px); overflow-y: auto; padding: 2px; }
+#sticky-picker-list p { margin: 8px 6px; font-size: 11px; color: var(--accent-ink); }
+.sticky-picker-row { gap: 9px; width: 100%; height: 29px; padding: 0 8px; border-radius: 5px; font-size: 12px; text-align: left; }
+.sticky-picker-row svg { color: #957239; }
+.sticky-picker-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
