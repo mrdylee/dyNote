@@ -1,0 +1,12 @@
+:root {
+  --accent: #7359ae;
+  --accent-ink: color-mix(in srgb, var(--accent) 82%, black);
+  --accent-line: color-mix(in srgb, var(--accent) 48%, white);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, white);
+  --text: color-mix(in srgb, var(--accent) 20%, #252525);
+  --muted: color-mix(in srgb, var(--accent) 30%, #686868);
+  --border: color-mix(in srgb, var(--accent) 19%, white);
+  --soft: color-mix(in srgb, var(--accent) 7%, white);
+  --panel: color-mix(in srgb, var(--accent) 4%, white);
+  --surface: color-mix(in srgb, var(--accent) 1.5%, white);
+}

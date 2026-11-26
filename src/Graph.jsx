@@ -9,7 +9,7 @@ function readSettings(key) {
   catch { return normalizeGraphSettings(null); }
 }
 const emptyFiles = [];
-export default function Graph({ notes, edges, attachments = emptyFiles, documents = emptyFiles, active, onOpen, vaultId, fontFamily }) {
+export default function Graph({ notes, edges, attachments = emptyFiles, documents = emptyFiles, active, onOpen, vaultId, fontFamily, accent }) {
   const key = `dynote:graph:${vaultId}`;
   const [settings, setSettings] = useState(() => readSettings(key));
   const [notice, setNotice] = useState(""), [replaying, setReplaying] = useState(false);
@@ -72,6 +72,7 @@ export default function Graph({ notes, edges, attachments = emptyFiles, document
   useEffect(() => { engine.current?.setDisplay({ nodeSize, lineWidth, labelThreshold, showLabels, arrows }); }, [nodeSize, lineWidth, labelThreshold, showLabels, arrows, ready]);
   useEffect(() => { engine.current?.setColors(graphColors(selected.nodes, settings.groups)); }, [selected, settings.groups, ready]);
   useEffect(() => { engine.current?.setActive(active); }, [active, ready, selected]);
+  useEffect(() => { engine.current?.setAccent(accent); }, [accent, ready]);
   useEffect(() => { if (fontFamily) engine.current?.setFont(fontFamily); }, [fontFamily, ready]);
   const toggle = (name, label) => <label className="graph-toggle" key={name}><span>{label}</span><input type="checkbox" checked={settings[name]} onChange={(e) => update(name, e.target.checked)} /></label>;
   const range = ([name, label, min, max, step]) => <label className="graph-range" key={name}><span>{label}<output>{settings[name]}</output></span><input aria-label={label} type="range" min={min} max={max} step={step} value={settings[name]} onChange={(e) => update(name, Number(e.target.value))} /></label>;

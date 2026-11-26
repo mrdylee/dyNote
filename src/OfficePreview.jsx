@@ -40,8 +40,11 @@ function Workbook({ bytes, selection }) {
   </>;
 }
 
-function Slides({ bytes, revision, selection }) {
+function Slides({ bytes, revision, selection, accent }) {
   const frame = useRef(null);
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage({ accent }, "notes://slides");
+  }, [accent]);
   useEffect(() => {
     const remember = event => {
       if (event.source === frame.current?.contentWindow && event.origin === "notes://slides" && Number.isInteger(event.data?.slideIndex))
@@ -51,10 +54,10 @@ function Slides({ bytes, revision, selection }) {
     return () => window.removeEventListener("message", remember);
   }, [selection]);
   return <iframe ref={frame} key={revision} title="슬라이드 미리보기" src="notes://slides/slides.html" sandbox="allow-scripts allow-same-origin"
-    onLoad={event => event.currentTarget.contentWindow.postMessage({ bytes, slideIndex: selection.current.slideIndex ?? 0 }, "notes://slides")} />;
+    onLoad={event => event.currentTarget.contentWindow.postMessage({ bytes, accent, slideIndex: selection.current.slideIndex ?? 0 }, "notes://slides")} />;
 }
 
-export default function OfficePreview({ document, onEdit, onRefresh, busy, error, position }) {
+export default function OfficePreview({ document, onEdit, onRefresh, busy, error, position, accent }) {
   const localPosition = useRef({});
   const selection = position ?? localPosition;
   const slides = document.kind === "pptx", Icon = slides ? Presentation : FileSpreadsheet;
@@ -65,7 +68,7 @@ export default function OfficePreview({ document, onEdit, onRefresh, busy, error
         <button type="button" className="office-edit" onClick={onEdit}><ExternalLink size={15}/>앱에서 수정</button></div></header>
     {error || document.previewError ? <p className="office-message" role="status">{error || document.previewError}</p>
       : !document.bytes ? <p className="office-message" role="status">문서를 읽는 중…</p>
-      : slides ? <Slides selection={selection} bytes={document.bytes} revision={document.revision}/>
+      : slides ? <Slides accent={accent} selection={selection} bytes={document.bytes} revision={document.revision}/>
       : <Workbook selection={selection} bytes={document.bytes}/>}
   </section>;
 }

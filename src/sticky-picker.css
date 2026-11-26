@@ -1,6 +1,6 @@
 .sticky-trigger { anchor-name: --sticky-trigger; }
-.sticky-trigger svg { color: #92692a; fill: #fff0bd; }
-.sticky-rail:has(:popover-open) .sticky-trigger { background: #f6eaca; }
+.sticky-trigger svg { color: var(--accent-ink); fill: var(--accent-soft); }
+.sticky-rail:has(:popover-open) .sticky-trigger { background: var(--accent-soft); }
 .sticky-picker {
   position: fixed;
   position-anchor: --sticky-trigger;
@@ -25,7 +25,7 @@
 .sticky-picker-list p { margin: 10px 6px; font-size: 12px; }
 .sticky-picker-row { gap: 9px; width: 100%; height: 32px; padding: 0 6px; border-radius: 5px; font-size: 12px; text-align: left; }
 .sticky-picker-row:hover { background: var(--soft); }
-.sticky-picker-row svg { color: #957239; }
+.sticky-picker-row svg { color: var(--accent-ink); }
 .sticky-picker-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-height: 760px) {

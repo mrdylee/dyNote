@@ -164,21 +164,23 @@ export default function CanvasEditor({
       ...decorated(n),
       selected: selectedNodes.has(n.id),
     }));
-    const nextEdges = (data.edges ?? []).map((e) => ({
-      id: e.id,
-      source: e.fromNode,
-      target: e.toNode,
-      sourceHandle: e.fromSide ?? "right",
-      targetHandle: e.toSide ?? "left",
-      label: e.label,
-      style: { stroke: e.color ? color(e.color) : "#9aa5b5" },
-      markerStart:
-        e.fromEnd === "arrow" ? { type: MarkerType.ArrowClosed } : undefined,
-      markerEnd:
-        e.toEnd === "none" ? undefined : { type: MarkerType.ArrowClosed },
-      data: { raw: e },
-      selected: selectedEdges.has(e.id),
-    }));
+    const nextEdges = (data.edges ?? []).map((e) => {
+      const stroke = e.color ? color(e.color) : "var(--accent-line)";
+      const arrow = { type: MarkerType.ArrowClosed, color: stroke };
+      return {
+        id: e.id,
+        source: e.fromNode,
+        target: e.toNode,
+        sourceHandle: e.fromSide ?? "right",
+        targetHandle: e.toSide ?? "left",
+        label: e.label,
+        style: { stroke },
+        markerStart: e.fromEnd === "arrow" ? arrow : undefined,
+        markerEnd: e.toEnd === "none" ? undefined : arrow,
+        data: { raw: e },
+        selected: selectedEdges.has(e.id),
+      };
+    });
     nodesRef.current = nextNodes;
     edgesRef.current = nextEdges;
     setNodes(nextNodes);
@@ -543,7 +545,7 @@ export default function CanvasEditor({
             }
           }}
         >
-          <Background color="#e2e7ef" gap={24} />
+          <Background color="var(--border)" gap={24} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>

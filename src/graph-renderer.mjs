@@ -1,4 +1,4 @@
-import { Application, Buffer, BufferUsage, Container, Geometry, Graphics, Mesh, Shader, Sprite, Text } from "pixi.js";
+import { Application, Buffer, BufferUsage, Color, Container, Geometry, Graphics, Mesh, Shader, Sprite, Text } from "pixi.js";
 // Pixi's CSP polyfill replaces generated JavaScript with ordinary functions.
 import "pixi.js/unsafe-eval";
 import { graphReplayOrder } from "../core/graph.mjs";
@@ -27,6 +27,8 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
   let sprites = [], texts = [], edgeMesh = null, geometry = null, shader = null;
   let vertices = new Float32Array(), colors = new Float32Array(), positionBuffer, colorBuffer;
   let camera = { x: 0, y: 0, zoom: 1 }, display = { nodeSize: 1, lineWidth: 1, labelThreshold: 0, arrows: false };
+  const accent = new Color();
+  let noteTint = 0xffffff;
   let nodeColors = [], replayState = null;
   let active = null, hover = -1, drag = null, frame = null, destroyed = false, autoFit = true;
   let width = app.screen.width, height = app.screen.height;
@@ -83,7 +85,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
       sprite.visible = revealed(i) && x >= -radius && y >= -radius && x <= width + radius && y <= height + radius;
       if (!sprite.visible) continue;
       sprite.position.set(x, y); sprite.width = sprite.height = radius * 2;
-      sprite.tint = important ? 0x8055b3 : nodeColors[i] ?? ({ tag: 0x49a591, attachment: 0x6c9cbe, missing: 0xb6b6c0 }[graph.nodes[i].type] ?? 0xb8a6ca);
+      sprite.tint = important ? accent.toNumber() : nodeColors[i] ?? ({ tag: 0x49a591, attachment: 0x6c9cbe, missing: 0xb6b6c0 }[graph.nodes[i].type] ?? noteTint);
       sprite.alpha = focus !== undefined && focus >= 0 && !important && !neighbors?.has(i) ? 0.3 : 1;
       if (important) selected.push(i); else if (labelAlpha > 0) candidates.push(i);
     }
@@ -119,7 +121,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
         for (let v = 0; v < edgeStride; v++) {
           const c = (e / 2 * edgeStride + v) * 4;
           const alpha = v < 4 || showArrow ? opacity : 0;
-          colors[c] = 0.55 * alpha; colors[c + 1] = 0.43 * alpha; colors[c + 2] = 0.68 * alpha; colors[c + 3] = alpha;
+          colors[c] = accent.red * alpha; colors[c + 1] = accent.green * alpha; colors[c + 2] = accent.blue * alpha; colors[c + 3] = alpha;
         }
       }
       positionBuffer.update(); colorBuffer.update();
@@ -133,7 +135,7 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
     }
     const createUntil = Math.min(wanted.length, texts.length + 8);
     while (texts.length < createUntil) {
-      const text = new Text({ text: "", style: { fontFamily: labelFont, fontSize: 12, fill: 0x6b557f }, resolution: Math.min(devicePixelRatio, 2) });
+      const text = new Text({ text: "", style: { fontFamily: labelFont, fontSize: 12, fill: accent.toNumber() }, resolution: Math.min(devicePixelRatio, 2) });
       text.anchor.set(0.5, 0); labels.addChild(text); texts.push(text);
     }
     for (let i = 0; i < texts.length; i++) {
@@ -219,6 +221,12 @@ export async function createGraphRenderer(container, { onOpen, onPin, onUnpin, o
       return positions.slice();
     },
     setPositions(next) { if (next.length === positions.length) { positions.set(next); if (autoFit) fit(); else invalidate(); } },
+    setAccent(color) {
+      accent.setValue(color);
+      noteTint = new Color(accent.toRgbArray().map(channel => channel * 0.55 + 0.45)).toNumber();
+      texts.forEach(text => { text.style.fill = accent.toNumber(); });
+      invalidate();
+    },
     setColors(next) { nodeColors = next; invalidate(); },
     replay() {
       if (!graph?.nodes.length) return;

@@ -39,7 +39,11 @@ window.addEventListener("keydown", event => {
 });
 // The preview origin has no access to the notebook or Electron API.
 window.addEventListener("message", async event => {
-  if (event.source !== parent || event.origin !== "notes://app" || !(event.data?.bytes instanceof Uint8Array) || viewer || rendering) return;
+  if (event.source !== parent || event.origin !== "notes://app") return;
+  if (/^#[0-9a-f]{6}$/i.test(event.data?.accent)) {
+    document.documentElement.style.setProperty("--accent", event.data.accent);
+  }
+  if (!(event.data?.bytes instanceof Uint8Array) || viewer || rendering) return;
   rendering = true;
   try {
     viewer = await PptxViewer.open(new Uint8Array(event.data.bytes).buffer, stage, {

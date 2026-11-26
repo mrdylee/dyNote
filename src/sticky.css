@@ -4,6 +4,9 @@ html { height: 100%; }
 
 body {
   --paper: #fff5d5;
+  --accent: var(--quiet);
+  --accent-line: var(--quiet);
+  --border: var(--edge);
   --edge: #e0c986;
   --quiet: #705e35;
   height: 100%;
@@ -58,8 +61,8 @@ button {
 }
 
 button:hover { background: rgb(35 27 48 / 8%); }
-button[aria-pressed="true"] { color: #573894; background: rgb(121 99 203 / 17%); }
-button:focus-visible { outline: 2px solid #7963cb; outline-offset: 1px; }
+button[aria-pressed="true"] { color: var(--quiet); background: var(--edge); }
+button:focus-visible { outline: 2px solid var(--quiet); outline-offset: 1px; }
 button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 #memo {

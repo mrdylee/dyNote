@@ -2039,7 +2039,7 @@ export default function App() {
   };
 
   const externalPreview = externalDocument && <section className="external-file-preview" ref={fileLocationRef(externalKey)} aria-label={externalDocument.name}>
-    {isOfficeKind(externalDocument.kind) ? <OfficePreview key={externalDocument.id} document={externalDocument} position={externalFile.current.position}
+    {isOfficeKind(externalDocument.kind) ? <OfficePreview accent={theme.color} key={externalDocument.id} document={externalDocument} position={externalFile.current.position}
       onEdit={externalFile.openSource} onRefresh={externalFile.refresh} error={externalFile.current.error}/> : <>
       <div className="word-preview-actions">
         {externalDocument.canOpenSource && <button onClick={externalFile.openSource}>앱에서 수정</button>}
@@ -2150,7 +2150,7 @@ export default function App() {
       onPointerCancel={finishMacCopy} onLostPointerCapture={finishMacCopy}>
       <header className={isMac ? "titlebar titlebar-mac" : "titlebar"}>
         <button className="app-version" aria-label="앱 버전 정보" title="DyNote 버전 정보" onClick={() => setModal("about")}>
-          <img src="./brand/dynote.svg" width="30" height="30" alt="" />
+          <span className="app-mark"><img src="./brand/dynote.svg" width="30" height="30" alt="" /></span>
           <span className="app-wordmark">Dy<span>Note</span></span>
           <small>v{version}</small>
         </button>
@@ -2599,6 +2599,7 @@ export default function App() {
               <Graph
                 key={vault.id}
                 fontFamily={fontVariables(fonts)["--ui-font"]}
+                accent={theme.color}
                 vaultId={vault.id}
                 notes={model.notes}
                 edges={model.edges}
@@ -2632,7 +2633,7 @@ export default function App() {
                 {["html", "other"].includes(attachment.kind) ? (
                   attachment.error ? <p role="status">{attachment.error}</p> : attachment.content === undefined ? <p role="status">파일을 읽는 중…</p>
                     : attachment.kind === "html" ? <HtmlPreview content={attachment.content}/> : <pre className="external-file-text">{attachment.content}</pre>
-                ) : isOfficeKind(attachment.kind) ? <OfficePreview key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
+                ) : isOfficeKind(attachment.kind) ? <OfficePreview accent={theme.color} key={documentKey(attachment.vaultId, attachment.path)} document={attachment} error={attachment.error}
                   onEdit={editAttachment}
                   onRefresh={() => loadOfficeDocument(attachment.path, attachment.vaultId, attachment.revision)}/> : attachment.kind === "word" ? <>
                   <p className="muted">읽기 전용 미리보기 · 편집하려면 .docx 기본 앱을 Microsoft Word로 설정하세요.</p>

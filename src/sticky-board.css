@@ -1,12 +1,12 @@
 .sticky-board {
   min-height: 100%; padding: clamp(20px, 3vw, 44px);
-  color: #342f31; background-color: #faf9f6;
-  background-image: radial-gradient(#dedbd4 0.7px, transparent 0.8px);
+  color: var(--text); background-color: var(--panel);
+  background-image: radial-gradient(var(--border) 0.7px, transparent 0.8px);
   background-size: 12px 12px;
 }
 .sticky-board-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .sticky-board-header h1 { margin: 0; font-size: clamp(21px, 2vw, 29px); letter-spacing: -.04em; }
-.sticky-board-header p { margin: 5px 0 0; color: #69656d; font-size: 12px; }
+.sticky-board-header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
 .sticky-board-new { display: inline-flex; align-items: center; gap: 5px; padding: 9px 13px; border-radius: 8px; background: var(--accent-ink); color: white; font-weight: 600; }
 .sticky-board-new:hover { background: var(--accent); }
 .sticky-board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(175px, 100%), 1fr)); align-items: stretch; gap: 16px; }
@@ -28,4 +28,4 @@
 .sticky-board-card strong { -webkit-line-clamp: 2; font-size: 16px; line-height: 1.4; }
 .sticky-board-preview { -webkit-line-clamp: 4; margin: 9px 0 12px; white-space: pre-wrap; line-height: 1.55; font-size: 13px; }
 .sticky-board-card small { margin-top: auto; font-size: 10px; color: #615a59; }
-.sticky-board-empty { padding: 45px 10px; text-align: center; color: #73695c; }
+.sticky-board-empty { padding: 45px 10px; text-align: center; color: var(--muted); }
