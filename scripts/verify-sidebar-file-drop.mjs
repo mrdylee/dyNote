@@ -73,7 +73,8 @@ try {
   await previewTab.dragTo(reports);
   await tree.locator('[title="Reports/Report (복사본 2).HTM"]').waitFor();
   assert.equal(await readFile(path.join(vault, "Reports/Report (복사본 2).HTM"), "utf8"), html);
-  await tree.locator('[title="Control.md"]').click();
+  await page.locator(".tab-label").filter({ hasText: "Control" }).click();
+  await page.locator(".tab.active .tab-label").filter({ hasText: "Control" }).waitFor();
   await previewTab.dragTo(tree.locator('.folder-row[data-tree-drop-folder="Shared"]'));
   await tree.locator('[title="Shared/Report.HTM"]').waitFor();
   assert.equal(await readFile(path.join(team, "Shared/Report.HTM"), "utf8"), html);
