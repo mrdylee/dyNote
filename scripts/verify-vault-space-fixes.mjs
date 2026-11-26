@@ -62,7 +62,7 @@ try{
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
  const settings=await readFile(`${profile}/settings.json`);
  await openVaultSection(page,'개인 노트');
- await page.getByRole('button',{name:'개인 노트 폴더 연결',exact:true}).click();await page.getByRole('alert').filter({hasText:'다른 용도로 등록'}).waitFor();
+ await page.getByRole('button',{name:'개인 노트 폴더 연결',exact:true}).click();await page.getByRole('dialog',{name:'설정'}).getByRole('alert').filter({hasText:'다른 용도로 등록'}).waitFor();
  assert.deepEqual(await readFile(`${profile}/settings.json`),settings);assert.match(await identity().innerText(),/팀 공유 노트/);
  assert.equal(await readFile(`${team}/Shared.md`,'utf8'),'# Shared fixture\n');
  await openVaultSection(page,'팀 노트');
