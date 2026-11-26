@@ -35,6 +35,7 @@ function gitFailureReason(error, stage, stderr, stdout) {
     if (/non-fast-forward|fetch first|stale info/i.test(report)) return "non-fast-forward";
     if (/protected branch|branch protection|repository rule|GH006|GH013/i.test(report)) return "branch-policy";
     if (httpStatus === "403" || /write access|write permission|(?:not allowed|not permitted|not authorized) to (?:push|upload)|permission to .+ denied|remote:\s*(?:access|permission) denied/i.test(report)) return "push-denied";
+    if (/cannot lock ref 'refs\/heads\/[^']+': is at [0-9a-f]+ but expected [0-9a-f]+/i.test(stderr)) return "non-fast-forward";
     if (/hook declined|\[remote rejected\]/i.test(report)) return "branch-policy";
   }
   if (httpStatus === "401" || httpStatus === "403" || /authentication (?:failed|required)|permission denied|could not read (?:Username|Password)|invalid credentials/i.test(stderr)) return "authentication";

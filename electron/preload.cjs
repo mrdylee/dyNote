@@ -3,6 +3,7 @@ const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
 contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
+    revealFile: key => call("reveal-file", key),
     startupStage: stage => ipcRenderer.send("notes:startup-stage", stage),
     snapshot: args => call("snapshot", args),
     workspaceSnapshots: () => call("workspace-snapshots"),
@@ -96,6 +97,11 @@ contextBridge.exposeInMainWorld(
     gitWorkspaceAction: (args) => call("git-workspace-action", args),
     previewGit: (args) => call("git-preview", args),
     restoreGit: (args) => call("git-restore", args),
+    onSyncVault: callback => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:sync-vault", listener);
+      return () => ipcRenderer.removeListener("notes:sync-vault", listener);
+    },
     onOpenSettings: (callback) => {
       const listener = (_event, tab) => callback(tab);
       ipcRenderer.on("notes:open-settings", listener);

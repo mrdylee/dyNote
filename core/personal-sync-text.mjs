@@ -99,6 +99,7 @@ export function resolveText(parts, choices, defaultId) {
     .map((part) => {
       if (typeof part === "string") return part;
       const id = choices?.[n++] ?? defaultId;
+      if (id === "original") return part.original;
       if (!Object.hasOwn(part.alternatives, id)) throw new Error("겹친 구간마다 남길 문장을 선택해 주세요.");
       return part.alternatives[id];
     })

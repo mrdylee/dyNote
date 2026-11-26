@@ -413,6 +413,12 @@ test("sticky board shows all personal cards, previews and saves a new card witho
     assert.equal(await board.locator(".sticky-board-card").count(), bodies.length);
     assert.equal(await board.getByText("팀 전용 메모").count(), 0);
     await board.getByText("☑ 일정 확인").waitFor();
+    const clickedFile = node => {
+      node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      return window.dynoteContextFile(false);
+    };
+    assert.match(await board.locator(".sticky-board-card").first().evaluate(clickedFile), /^[a-f0-9]{16}:포스트잇\/.+\.md$/);
+    assert.equal(await board.locator("h1").evaluate(clickedFile), null);
     await openBoard();
     assert.equal(await boardTab.count(), 1);
     await docTab.click();
@@ -436,5 +442,27 @@ test("sticky board shows all personal cards, previews and saves a new card witho
     await main.getByRole("button", { name: "포스트잇 보드 탭 닫기" }).click();
     assert.equal(await boardTab.count(), 0);
     assert.equal(await main.locator(".tab.active .tab-label").textContent(), await docTab.textContent());
+  }, { withTeam: true });
+});
+
+test("board menu targets personal sync when opened from a team document", async () => {
+  await fixture([], async ({ main }) => {
+    await main.locator(".file-row").filter({ hasText: "team" }).first().click();
+    const teamTab = main.locator(".tabs .tab.active .tab-label");
+    assert.match(await teamTab.innerText(), /팀 공유 노트/);
+    await main.getByRole("navigation", { name: "주 메뉴" }).getByRole("button", { name: "스티키 노트", exact: true }).click();
+    await main.getByRole("button", { name: "전체 보기", exact: true }).click();
+    const boardTab = main.locator(".tabs .tab-label").filter({ hasText: "포스트잇 보드" });
+    await boardTab.click({ button: "right" });
+    const menu = main.getByRole("menu", { name: "문서 탭 작업" });
+    await menu.waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "파일 위치 열기" }).count(), 0);
+    await menu.getByRole("menuitem", { name: "지금 동기화" }).click();
+    await main.getByRole("dialog").getByRole("heading", { name: "개인 노트 동기화" }).waitFor();
+    await main.keyboard.press("Escape");
+    await main.getByRole("button", { name: "포스트잇 보드 탭 닫기" }).click();
+    assert.match(await teamTab.innerText(), /팀 공유 노트/);
+    await teamTab.click({ button: "right" });
+    await menu.getByRole("menuitem", { name: "파일 위치 열기" }).waitFor();
   }, { withTeam: true });
 });

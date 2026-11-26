@@ -1,3 +1,4 @@
+import { documentRef } from "../core/document-workspace.mjs";
 import { contextMenuTemplate } from "./context-menu.mjs";
 import {
   app,
@@ -97,6 +98,17 @@ let temporaryDocuments;
 
 function externalDocuments() {
   return temporaryDocuments ??= new ExternalDocuments(app.getPath("temp"));
+}
+
+async function revealFile(key) {
+  if (key.startsWith("external:")) {
+    shell.showItemInFolder(await externalDocuments().fileLocation(key.slice(9)));
+    return;
+  }
+  const ref = documentRef(key);
+  const target = workspaceVault(ref.vaultId);
+  checkVault(ref, target);
+  shell.showItemInFolder(await target.fileLocation(ref.path));
 }
 
 function validateSender(event) {
@@ -506,12 +518,20 @@ app
         },
       ]),
     );
-    window.webContents.on("context-menu", (_event, params) => {
+    window.webContents.on("context-menu", async (_event, params) => {
       const zoom = window.webContents.getZoomFactor();
       const point = params.menuSourceType === "keyboard" ? null : { x: params.x / zoom, y: params.y / zoom };
+      const contents = window.webContents;
+      const subframe = params.frame !== contents.mainFrame;
+      const file = await contents.executeJavaScript(`window.dynoteContextFile?.(${subframe}, ${JSON.stringify(point)})`).catch(() => null);
+      if (contents.isDestroyed()) return;
       const menu = Menu.buildFromTemplate(contextMenuTemplate(params,
         format => window.webContents.send("notes:format-editor", format, point),
-        () => window.webContents.send("notes:open-settings", "fonts")));
+        () => window.webContents.send("notes:open-settings", "fonts"),
+        () => window.webContents.send("notes:sync-vault"),
+        file ? () => revealFile(file).catch(error => dialog.showMessageBox(window, {
+          type: "error", message: "파일 위치를 열 수 없습니다.", detail: error.message,
+        })) : undefined));
       menu.popup({ window });
     });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -914,6 +934,7 @@ app
         }
         return result;
       },
+      "reveal-file": revealFile,
       "read-other-file": (args, vault) => {
         checkVault(args, vault);
         return vault.readOtherFile(args.path);
@@ -1078,7 +1099,7 @@ app
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
         const exclusive = !checkingCapture && ["git-restore", "pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories", "git-workspace-action", "composer-apply", "classification-apply", "pdf-apply", "move-across-vaults", "copy-file", "rename-tree-entry", "trash-folder", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name);
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let locked = false;
         try {
           validateSender(event);
