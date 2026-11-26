@@ -3,7 +3,7 @@ import path from "node:path";
 
 const MAX_LOG_BYTES = 128 * 1024;
 
-export function createStartupLog(directory) {
+export function createStartupLog(directory, version) {
   const filename = path.join(directory, "startup.log");
   const started = performance.now();
   const run = `${new Date().toISOString()}:${process.pid}`;
@@ -19,7 +19,7 @@ export function createStartupLog(directory) {
     if (!writable) return;
     const now = performance.now();
     const entry = {
-      time: new Date().toISOString(), run, stage, event,
+      time: new Date().toISOString(), run, version, stage, event,
       elapsedMs: Math.round(now - started),
       durationMs: stageStarted === undefined ? undefined : Math.round(now - stageStarted),
     };
