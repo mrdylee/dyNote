@@ -1,3 +1,5 @@
+import { textSizeOptions } from "../core/text-size-options.mjs";
+
 export function contextMenuTemplate(params, onFormat, onFonts, onSync, onReveal) {
   const flags = params.editFlags ?? {};
   const editor = params.isEditable && params.formControlType === "none";
@@ -15,7 +17,8 @@ export function contextMenuTemplate(params, onFormat, onFonts, onSync, onReveal)
     { type: "separator" },
     { id: "format-bullet-list", label: "불릿으로 전환", click: () => onFormat("bullet-list") },
     { id: "format-paragraph", label: "일반 문단으로 전환", click: () => onFormat("paragraph") },
-    { label: "서식", submenu: [["bold", "굵게"], ["italic", "기울임"], ["strike", "취소선"], ["code", "인라인 코드"]]
+    { label: "서식", submenu: [["bold", "굵게"], ["italic", "기울임"], ["strike", "취소선"], ["code", "인라인 코드"],
+      ...textSizeOptions.map(({ id, label }) => [id, label]), ["apply-color", "글자 색상 적용"], ["clear-color", "기본색"]]
       .map(([id, label]) => ({ id: `format-${id}`, label, click: () => onFormat(id) })) },
   );
   template.push({ type: "separator" }, { id: "font-settings", label: "글꼴 설정…", click: onFonts });

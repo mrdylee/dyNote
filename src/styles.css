@@ -566,6 +566,8 @@ kbd {
   font-weight: 600;
   color: #5e516e;
 }
+.markdown-preview span[style*="color:"] :is(strong, a, code) { color: inherit; }
+.markdown-preview span[style*="font-size:"] code { font-size: inherit; }
 .markdown-preview a {
   color: #8d75ba;
   text-decoration: none;
@@ -2045,6 +2047,8 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .format-toolbar { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .format-toolbar button { min-width: 30px; padding: 5px 8px; border-radius: 4px; font-size: 12px; }
 .format-toolbar button:hover { background: var(--accent-soft); }
+.format-target { color: var(--muted); font-size: 12px; margin-inline: 2px 4px; }
+.format-toolbar select { font: inherit; font-size: 12px; color: inherit; background: var(--surface); padding: 3px; border: 1px solid var(--border); border-radius: 4px; }
 .format-bold { font-weight: 700; }
 .format-italic { font-style: italic; }
 .format-strike { text-decoration: line-through; }

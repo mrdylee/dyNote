@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EditorState, EditorSelection } from "@codemirror/state";
+import { renderMarkdown } from "../core/knowledge.mjs";
 import { history, undo, redo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { runBulletFormat, runMarkdownFormat } from "../src/editorCommands.mjs";
@@ -86,4 +87,36 @@ test("removing a parent bullet promotes its child list without changing task or 
   const selected = editor(text, text.indexOf("Parent"), text.indexOf("Task") + 4);
   assert.equal(runBulletFormat(selected, "paragraph"), true);
   assert.equal(selected.state.doc.toString(), "- Root\n\n  Parent\n\n  Child\n\n  - [x] Task\n  - Sibling\n\n1. Numbered\n");
+});
+
+for (const [format, tag] of [["bold", "strong"], ["italic", "em"], ["strike", "s"]]) {
+  test(`multiline ${format} renders on selected prose without changing block syntax`, () => {
+    const doc = ["---", "title: 메모", "---", "", "# 제목", "", "- [ ] 첫째", "- 둘째", "", "```md", "# 예시", "```", "", "마지막 문단"].join("\n");
+    const end = doc.indexOf(" 문단");
+    const view = editor(doc, end, 0);
+    assert.equal(runMarkdownFormat(view, format), true);
+    const formatted = view.state.doc.toString();
+    const html = renderMarkdown(formatted, [], "메모.md");
+    for (const part of ["제목", "첫째", "둘째", "마지막"]) assert.ok(html.includes(`<${tag}>${part}</${tag}>`), html);
+    assert.ok(formatted.startsWith("---\ntitle: 메모\n---\n"));
+    assert.ok(formatted.includes("```md\n# 예시\n```"));
+    assert.ok(formatted.endsWith(" 문단"));
+    assert.match(html, /<input[^>]*type="checkbox"/);
+    assert.ok(view.state.selection.main.anchor > view.state.selection.main.head);
+    runMarkdownFormat(view, format);
+    assert.equal(view.state.doc.toString(), doc);
+    undo(view);
+    assert.equal(view.state.doc.toString(), formatted);
+    undo(view);
+    assert.equal(view.state.doc.toString(), doc);
+    assert.equal(view.state.selection.main.anchor, end);
+    assert.equal(view.state.selection.main.head, 0);
+  });
+}
+
+test("multiline formatting fills mixed styles and stops at a trailing line boundary", () => {
+  const doc = "**기존**\n일반\n끝";
+  const view = editor(doc, 0, doc.indexOf("끝"));
+  runMarkdownFormat(view, "bold");
+  assert.equal(view.state.doc.toString(), "**기존**\n**일반**\n끝");
 });

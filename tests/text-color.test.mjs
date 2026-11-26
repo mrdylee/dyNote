@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { history, undo, redo } from "@codemirror/commands";
-import { runTextColor } from "../src/editorCommands.mjs";
-import { renderMarkdown, buildKnowledge } from "../core/knowledge.mjs";
-import { readColorSpan } from "../core/text-color.mjs";
+import { runTextColor, runTextSize } from "../src/editorCommands.mjs";
+import { renderMarkdown, buildKnowledge, searchNotes } from "../core/knowledge.mjs";
+import { readStyleSpan } from "../core/text-color.mjs";
 import { wikiSyntax, livePreview, livePreviewState } from "../src/live-preview.mjs";
 const span=(text,color="#c62828")=>`<span style="color:${color}">${text}</span>`;
 const openLength=span("").indexOf("</span>");
@@ -33,17 +33,17 @@ test("color reset affects only selected text inside a colored range",()=>{
 test("colored Markdown preserves bold and renders safe color in reading view",()=>{
   const html=renderMarkdown(span("**한글**"),[],"Home.md");
   assert.match(html,/<span style="color:#c62828"><strong>한글<\/strong><\/span>/);
-  const source=span("앞 "+span("안쪽","#1565c0")+" 뒤");const range=readColorSpan(source,0);
-  assert.equal(range.to,source.length);assert.equal(range.color,"#c62828");
+  const source=span("앞 "+span("안쪽","#1565c0")+" 뒤");const range=readStyleSpan(source,0);
+  assert.equal(range.to,source.length);assert.equal(range.value,"#c62828");
   assert.match(renderMarkdown(source,[],"Home.md"),/color:#1565c0/);
 });
 test("arbitrary HTML, CSS and event attributes stay inert; code and escaped spans stay literal",()=>{
   for(const raw of ['<span style="color:red">x</span>','<span style="color:#c62828;background:red">x</span>','<span onclick="alert(1)" style="color:#c62828">x</span>','<script>alert(1)</script>']) {
-    assert.equal(readColorSpan(raw,0),null);assert.doesNotMatch(renderMarkdown(raw,[],"Home.md"),/<span|<script/);
+    assert.equal(readStyleSpan(raw,0),null);assert.doesNotMatch(renderMarkdown(raw,[],"Home.md"),/<span|<script/);
   }
   for(const raw of ['`'+span("한글")+'`','\\'+span("한글"),'```html\n'+span("한글")+'\n```']) assert.doesNotMatch(renderMarkdown(raw,[],"Home.md"),/<span style=/);
-  assert.equal(readColorSpan(span("`</span>` 한글"),0).to,span("`</span>` 한글").length);
-  assert.equal(readColorSpan('<span style="color:#c62828">unclosed',0),null);
+  assert.equal(readStyleSpan(span("`</span>` 한글"),0).to,span("`</span>` 한글").length);
+  assert.equal(readStyleSpan('<span style="color:#c62828">unclosed',0),null);
 });
 test("Live Preview colors text, hides only wrappers and reveals syntax at cursor",()=>{
   const doc=span("**한글**")+"\n\n끝";
@@ -117,4 +117,75 @@ test("coloring near the start of a partially parsed large document preserves eve
   const tail="unchanged tail **text**\n\n".repeat(10000),doc="# Heading\n\n"+tail,editor=view(doc,2,9);
   runTextColor(editor,"#1565c0");
   assert.equal(editor.state.doc.toString(),"# "+span("Heading","#1565c0")+"\n\n"+tail);
+});
+
+const sized = (text, size = "1.25em") => `<span style="font-size:${size}">${text}</span>`;
+
+test("relative size affects only selected text, retains color and supports a one-step undo", () => {
+  const original = "앞 " + span("가나다") + " 뒤";
+  const from = original.indexOf("나"), editor = view(original, from, from + 1);
+  assert.equal(runTextSize(editor, "1.25em"), true);
+  assert.equal(editor.state.doc.toString(), "앞 " + span("가" + sized("나") + "다") + " 뒤");
+  assert.equal(editor.state.sliceDoc(editor.state.selection.main.from, editor.state.selection.main.to), "나");
+  runTextSize(editor, "1.5em");
+  assert.equal(editor.state.doc.toString(), "앞 " + span("가" + sized("나", "1.5em") + "다") + " 뒤");
+  runTextSize(editor, null);
+  assert.equal(editor.state.doc.toString(), original);
+  undo(editor);
+  assert.match(renderMarkdown(editor.state.doc.toString(), [], "Home.md"), /color:#c62828">가<span style="font-size:1.5em">나/);
+});
+
+test("color can be applied after size, and resetting part of the size retains color throughout", () => {
+  const editor = view("가나다", 0, 3);
+  runTextSize(editor, "1.5em");
+  runTextColor(editor, "#1565c0");
+  const doc = editor.state.doc.toString(), from = doc.indexOf("나");
+  editor.dispatch({ selection: { anchor: from, head: from + 1 } });
+  runTextSize(editor, null);
+  assert.equal(editor.state.doc.toString(), span(sized("가", "1.5em") + "나" + sized("다", "1.5em"), "#1565c0"));
+});
+
+test("sized headings, live preview, formatting, literal blocks and navigation agree", () => {
+  const doc = "# **제목**\n\n```md\n코드\n```", editor = view(doc, 0, doc.length);
+  runTextSize(editor, "1.5em");
+  const saved = editor.state.doc.toString();
+  assert.equal(saved, "# **" + sized("제목", "1.5em") + "**\n\n```md\n코드\n```");
+  assert.match(renderMarkdown(saved, [], "Home.md"), /<h1 id="제목"><strong><span style="font-size:1.5em">제목<\/span><\/strong><\/h1>/);
+  assert.equal(buildKnowledge([{ path: "Home.md", content: saved }]).notes[0].headings[0].id, "제목");
+  const state = EditorState.create({ doc: saved, extensions: [markdown({ base: markdownLanguage, extensions: [wikiSyntax] }), livePreview()] });
+  const styles = [];
+  state.field(livePreviewState).decorations.between(0, saved.length, (_from, _to, value) => styles.push(value.spec.attributes?.style));
+  assert.ok(styles.includes("font-size:1.5em"));
+});
+
+test("invalid sizes stay literal, read-only editors do not resize", () => {
+  const editor = view("한글", 0, 2);
+  for (const value of ["2px", "200em", "1.25em;color:red", "url(x)"]) {
+    assert.equal(runTextSize(editor, value), false);
+    assert.doesNotMatch(renderMarkdown(sized("한글", value), [], "Home.md"), /<span/);
+  }
+  assert.equal(runTextSize(view("한글", 0, 2, true), "1.25em"), false);
+});
+
+test("resizing repeatedly does not compound font sizes, even before typing into a new span", () => {
+  const editor = view("", 0);
+  for (const size of ["1.25em", "1.5em", "1.5em"]) {
+    runTextSize(editor, size);
+    assert.equal(editor.state.doc.toString(), sized("", size));
+  }
+  runTextSize(editor, null);
+  assert.equal(editor.state.doc.toString(), "");
+});
+
+test("sized notes retain natural titles, searchable phrases, literal code and link targets", () => {
+  const literal = sized("literal");
+  const content = "---\ntags: [note]\n---\n# 서식 " + sized("노트") + "\n\n쪽" + sized("지") + " 고정 [[Target|연결]]\n\n~~~html\n" + literal + "\n~~~";
+  const [note] = buildKnowledge([{ path: "Note.md", content }, { path: "Target.md", content: "연결" }]).notes;
+  assert.equal(note.content, content);
+  assert.equal(note.title, "서식 노트");
+  assert.equal(note.links[0].target, "Target");
+  assert.ok(note.searchText.includes(literal));
+  assert.equal(searchNotes([note], '"쪽지 고정"')[0].path, "Note.md");
+  const legacy = buildKnowledge([{ path: "Legacy.md", content: "도입\r\r쪽" + sized("지") + " 고정" }]).notes;
+  assert.equal(searchNotes(legacy, '"쪽지 고정"')[0].path, "Legacy.md");
 });

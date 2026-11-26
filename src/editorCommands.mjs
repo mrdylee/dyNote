@@ -1,8 +1,9 @@
-import { validTextColor, colorOpening, readColorSpan, rewriteTextColors } from "../core/text-color.mjs";
+import { validTextColor, validTextSize, styleOpening, readStyleSpan, rewriteTextStyle } from "../core/text-color.mjs";
 import { EditorSelection, Transaction, countColumn, findColumn } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import { foldEffect, unfoldEffect, foldService, ensureSyntaxTree, language } from '@codemirror/language';
 import { outlineEdit, outlineRange } from '../core/outliner.mjs';
+import { frontmatterEnd, lineContent } from './format-line.mjs';
 import { parseMetadata } from '../core/metadata.mjs';
 
 export const outlineFolding = foldService.of((state, lineStart) => {
@@ -29,7 +30,7 @@ const markdownMarkers = { bold: "**", italic: "*", strike: "~~", code: "`" };
 export function runMarkdownFormat(view, format) {
   if (!view || view.state.readOnly || !Object.hasOwn(markdownMarkers, format)) return false;
   const state = view.state;
-  const changes = state.changeByRange(range => {
+  const formatRange = range => {
     let { from, to } = range;
     let text = state.sliceDoc(from, to);
     if (format !== "code" && /\S/.test(text)) {
@@ -69,7 +70,30 @@ export function runMarkdownFormat(view, format) {
       anchor = from + marker.length + pad.length; head = anchor + text.length;
     }
     return { changes: { from, to, insert }, range: EditorSelection.range(anchor, head) };
+  };
+  const multiline = range => format !== "code" && state.doc.lineAt(range.from).number !== state.doc.lineAt(range.to).number;
+  const multilineRanges = state.selection.ranges.filter(multiline);
+  const tree = multilineRanges.length && ensureSyntaxTree(state, state.doc.lineAt(multilineRanges.at(-1).to).to, 100);
+  if (multilineRanges.length && !tree) return false;
+  const startOfBody = multilineRanges.length ? frontmatterEnd(state.doc) : 0;
+  const changes = state.changeByRange(range => {
+    if (!multiline(range)) return formatRange(range);
+    const edits = [];
+    const first = state.doc.lineAt(range.from).number, last = state.doc.lineAt(range.to - 1).number;
+    for (let n = first; n <= last; n++) {
+      const line = state.doc.line(n);
+      if (line.from < startOfBody) continue;
+      const body = lineContent(state, line, tree);
+      if (!body) continue;
+      const from = Math.max(range.from, body.from), to = Math.min(range.to, body.to);
+      if (from < to && /\S/.test(state.sliceDoc(from, to))) edits.push(formatRange({ from, to }).changes);
+    }
+    // A mixed selection gains the style on its plain lines; a fully styled selection removes it.
+    const addsStyle = edit => edit.insert.length > edit.to - edit.from;
+    const combined = state.changes(edits.some(addsStyle) ? edits.filter(addsStyle) : edits);
+    return { changes: combined, range: range.map(combined) };
   });
+  if (changes.changes.empty) return false;
   view.dispatch({ ...changes, annotations: [Transaction.userEvent.of("input.format"), isolateHistory.of("full")], scrollIntoView: true });
   view.focus(); return true;
 }
@@ -154,30 +178,47 @@ export function runBulletFormat(view, format, position) {
 }
 
 export function runTextColor(view, color) {
-  if (!view || view.state.readOnly || (color !== null && !validTextColor(color))) return false;
+  if (color !== null && !validTextColor(color)) return false;
+  return runInlineStyle(view, "color", color);
+}
+
+export function runTextSize(view, size) {
+  if (size !== null && !validTextSize(size)) return false;
+  return runInlineStyle(view, "font-size", size);
+}
+
+function runInlineStyle(view, property, value) {
+  if (!view || view.state.readOnly || view.composing) return false;
   const state = view.state, source = state.doc.toString(), ranges = state.selection.ranges;
   const tree = ensureSyntaxTree(state, Math.max(...ranges.map(range => range.to)), 100);
   if (!tree) return false;
   const targets = ranges.map(range => {
     if (!range.empty) return {from: range.from, to: range.to};
     for (let node = tree.resolveInner(range.from, 1); node; node = node.parent) {
-      if (node.name === "TextColor") { const span = readColorSpan(source, node.from); return {from:span.contentFrom,to:span.contentTo}; }
+      if (node.name === "TextStyle") {
+        const span = readStyleSpan(source, node.from);
+        if (span.property === property) return {from:span.contentFrom,to:span.contentTo, span};
+      }
     }
     return {from:range.from,to:range.to};
   });
   if (ranges.length === 1 && ranges[0].empty && targets[0].from === targets[0].to) {
-    if (color === null) return false;
-    const open = colorOpening(color), from = ranges[0].from;
-    view.dispatch({ changes: {from, insert:open + "</span>"}, selection:{anchor:from+open.length},
-      annotations:[Transaction.userEvent.of("input.color"),isolateHistory.of("full")] });
+    const existing = targets[0].span;
+    if (!existing && value === null) return false;
+    const open = value === null ? "" : styleOpening(property, value);
+    const from = existing?.from ?? ranges[0].from, to = existing?.to ?? from;
+    const insert = open ? open + "</span>" : "";
+    if (state.sliceDoc(from, to) === insert) return false;
+    view.dispatch({ changes: {from, to, insert}, selection:{anchor:from+open.length},
+      annotations:[Transaction.userEvent.of("input.format"),isolateHistory.of("full")] });
     view.focus(); return true;
   }
-  const result = rewriteTextColors(source, tree, targets, ranges, color);
+  const result = rewriteTextStyle(source, tree, targets, ranges, property, value);
   if (result.content === source) return false;
   let from = 0, oldTo = source.length, newTo = result.content.length;
   while (from < oldTo && from < newTo && source[from] === result.content[from]) from++;
   while (oldTo > from && newTo > from && source[oldTo - 1] === result.content[newTo - 1]) { oldTo--; newTo--; }
   view.dispatch({changes:{from,to:oldTo,insert:result.content.slice(from,newTo)},selection:EditorSelection.create(result.ranges.map(range=>EditorSelection.range(range.anchor,range.head)),state.selection.mainIndex),
-    annotations:[Transaction.userEvent.of("input.color"),isolateHistory.of("full")],scrollIntoView:true});
+    annotations:[Transaction.userEvent.of("input.format"),isolateHistory.of("full")],scrollIntoView:true});
   view.focus(); return true;
 }

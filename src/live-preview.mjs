@@ -1,5 +1,5 @@
 import {captureLinkRanges} from '../core/copilot-journal-links.mjs';
-import { colorInlineParser, readColorSpan } from "../core/text-color.mjs";
+import { textStyleParser, readStyleSpan } from "../core/text-color.mjs";
 import { Facet, RangeSet, RangeValue, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
@@ -14,7 +14,7 @@ const { unescapeAll } = markdown.utils;
 // This grammar participates in Markdown parsing, so escaped brackets and code
 // never become wiki links through a second, unrelated regex pass.
 export const wikiSyntax = {
-  defineNodes: ["WikiLink", "WikiEmbed", "TextColor", "ColorMark"],
+  defineNodes: ["WikiLink", "WikiEmbed", "TextStyle", "StyleMark"],
   parseInline: [{
     name: "WikiLink", before: "Link",
     parse(cx, next, pos) {
@@ -22,7 +22,7 @@ export const wikiSyntax = {
       const match = /^(!?)\[\[([^\]\n]+)\]\]/.exec(cx.slice(pos, cx.end));
       return match ? cx.addElement(cx.elt(match[1] ? "WikiEmbed" : "WikiLink", pos, pos + match[0].length)) : -1;
     },
-  }, colorInlineParser],
+  }, textStyleParser],
 };
 
 const config = Facet.define({ combine: (values) => values[0] ?? {} });
@@ -201,10 +201,10 @@ function decorate(state) {
       }
       if (skipChildren) return false;
     };
-    if (name === "TextColor") {
-      const span = readColorSpan(source, from);
+    if (name === "TextStyle") {
+      const span = readStyleSpan(source, from);
       if (span) {
-        mark(span.contentFrom, span.contentTo, "color", { style: `color:${span.color}` });
+        mark(span.contentFrom, span.contentTo, span.property, { style: `${span.property}:${span.value}` });
         hide(from, span.contentFrom); hide(span.contentTo, to);
       }
     } else if (formatting[name]) {

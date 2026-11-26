@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { textSizeOptions } from "../core/text-size-options.mjs";
+import { runSelectionOrLine } from "./format-line.mjs";
 import TextColorPicker from "./TextColorPicker.jsx";
 import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
@@ -30,9 +32,25 @@ import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
 import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
-import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runBulletFormat } from "./editorCommands.mjs";
+import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runBulletFormat } from "./editorCommands.mjs";
 import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
+
+let lastAppliedTextColor = null;
+
+function applyFormat(view, format, color) {
+  return runSelectionOrLine(view, target => {
+    const size = textSizeOptions.find(option => option.id === format);
+    if (size) return runTextSize(target, size.value);
+    if (format === "clear-color") return runTextColor(target, null);
+    if (format === "apply-color") {
+      const applied = runTextColor(target, color);
+      if (applied) lastAppliedTextColor = color;
+      return applied;
+    }
+    return runMarkdownFormat(target, format);
+  });
+}
 
 export default function Editor({
   note,
@@ -134,6 +152,7 @@ export default function Editor({
             { key: "Mod-i", run: view => runMarkdownFormat(view, "italic") },
             { key: "Mod-Shift-x", run: view => runMarkdownFormat(view, "strike") },
             { key: "Mod-e", run: view => runMarkdownFormat(view, "code") },
+            { key: "Mod-Shift-h", run: view => !!lastAppliedTextColor && applyFormat(view, "apply-color", lastAppliedTextColor) },
             { key: "Alt-ArrowUp", run: view => runOutlineCommand(view, "up") },
             { key: "Alt-ArrowDown", run: view => runOutlineCommand(view, "down") },
             { key: "Tab", run: view => runOutlineCommand(view, "indent") },
@@ -219,22 +238,26 @@ export default function Editor({
   }, []);
   useEffect(() => window.notes?.onFormatEditor?.((format, point) => {
     const view = editor.current;
-    if (!view || view.state.readOnly) return;
-    if (format === "bullet-list" || format === "paragraph") {
-      if (!point) {
-        if (view.hasFocus) runBulletFormat(view, format);
-        return;
-      }
-      if (!view.contentDOM.contains(view.dom.ownerDocument.elementFromPoint(point.x, point.y))) return;
-      const position = view.posAtCoords(point, false);
-      if (position != null) runBulletFormat(view, format, position);
+    if (!view || view.state.readOnly || view.composing) return;
+    if (format === "undo" || format === "redo") {
+      if (view.hasFocus) (format === "undo" ? undo : redo)(view);
       return;
     }
-    if (!view.hasFocus) return;
-    if (format === "undo") undo(view);
-    else if (format === "redo") redo(view);
-    else runMarkdownFormat(view, format);
-  }), []);
+    let position;
+    if (point) {
+      if (!view.contentDOM.contains(view.dom.ownerDocument.elementFromPoint(point.x, point.y))) return;
+      position = view.posAtCoords(point, false);
+      if (position == null) return;
+    } else if (!view.hasFocus) return;
+    if (format === "bullet-list" || format === "paragraph") {
+      runBulletFormat(view, format, position);
+      return;
+    }
+    if (position != null && !view.state.selection.ranges.some(range => range.from <= position && position <= range.to)) {
+      view.dispatch({ selection: { anchor: position } });
+    }
+    applyFormat(view, format, textColor);
+  }), [textColor]);
   useEffect(() => {
     editor.current?.dispatch({
       effects: readonly.current.reconfigure(EditorState.readOnly.of(readOnly)),
@@ -320,13 +343,19 @@ export default function Editor({
       {regionNotice && <span role="status">{regionNotice}</span>}
     </div>}
     <div className="format-toolbar" role="toolbar" aria-label="Markdown 서식">
+      <span className="format-target">{regionSelection.selected ? "선택 영역" : "현재 줄"}</span>
       {[["bold", "굵게", "B"], ["italic", "기울임", "I"], ["strike", "취소선", "S"], ["code", "인라인 코드", "</>"]].map(([format, label, text]) =>
         <button key={format} className={`format-${format}`} type="button" aria-label={label} title={label} disabled={readOnly}
-          onMouseDown={event => event.preventDefault()} onClick={() => runMarkdownFormat(editor.current, format)}>{text}</button>)}
+          onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, format)}>{text}</button>)}
+      <select aria-label="글자 크기 적용" title="현재 줄 또는 선택 영역의 글자 크기" value="" disabled={readOnly}
+        onChange={event => applyFormat(editor.current, event.target.value)}>
+        <option value="" disabled>글자 크기</option>
+        {textSizeOptions.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+      </select>
       <TextColorPicker value={textColor} onChange={setTextColor} disabled={readOnly} />
-      <button type="button" aria-label="글자 색상 적용" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, textColor)}>색상 적용</button>
-      <button type="button" aria-label="글자 색상 지우기" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => runTextColor(editor.current, null)}>기본색</button>
-      <button type="button" onClick={onFontSettings}>글꼴·크기</button>
+      <button type="button" aria-label="글자 색상 적용" disabled={readOnly} onMouseDown={event => event.preventDefault()} title="마지막 글자색 반복 · Ctrl/Cmd+Shift+H" onClick={() => applyFormat(editor.current, "apply-color", textColor)}>색상 적용</button>
+      <button type="button" aria-label="글자 색상 지우기" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "clear-color")}>기본색</button>
+      <button type="button" title="앱 전체의 글꼴과 크기 설정" onClick={onFontSettings}>글꼴·크기</button>
     </div>
     <div className="editor-host" ref={host} />
   </div>;

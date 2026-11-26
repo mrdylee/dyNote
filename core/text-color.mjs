@@ -1,13 +1,19 @@
-const opening = /^<span style="color:(#[a-f0-9]{6})">/i;
-export const validTextColor = value => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value);
-export const colorOpening = color => `<span style="color:${color.toLowerCase()}">`;
+import { textSizeOptions } from "./text-size-options.mjs";
 
-// Accept only the color-only span produced by the editor. Other HTML stays text.
-export function readColorSpan(source, from = 0) {
+const sizes = textSizeOptions.flatMap(({ value }) => value ? [value] : []);
+const sizePattern = sizes.map(size => size.replace(".", "\\.")).join("|");
+const styleTag = new RegExp(`<span style="(?:color:(#[a-f0-9]{6})|font-size:(${sizePattern}))">`, "i");
+const opening = new RegExp("^" + styleTag.source, "i");
+export const validTextColor = value => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value);
+export const validTextSize = value => sizes.includes(value);
+export const styleOpening = (property, value) => `<span style="${property}:${value.toLowerCase()}">`;
+
+// Accept one allowlisted declaration per span. All other HTML stays literal.
+export function readStyleSpan(source, from = 0) {
   const open = opening.exec(source.slice(from));
   if (!open) return null;
   const contentFrom = from + open[0].length;
-  const tokens = /\\[\s\S]|`+|<span style="color:#[a-f0-9]{6}">|<\/span>/gi;
+  const tokens = new RegExp(/\\[\s\S]|`+|<\/span>/.source + "|" + styleTag.source, "gi");
   tokens.lastIndex = contentFrom;
   let depth = 1, match;
   while ((match = tokens.exec(source))) {
@@ -20,46 +26,46 @@ export function readColorSpan(source, from = 0) {
       continue;
     }
     if (/^<span /i.test(token)) { if (++depth > 32) return null; }
-    else if (--depth === 0) return { from, contentFrom, contentTo: match.index, to: tokens.lastIndex, color: open[1].toLowerCase() };
+    else if (--depth === 0) return { from, contentFrom, contentTo: match.index, to: tokens.lastIndex, property: open[1] ? "color" : "font-size", value: (open[1] ?? open[2]).toLowerCase() };
   }
   return null;
 }
 
-export const colorInlineParser = {
-  name: "TextColor", before: "HTMLTag",
+export const textStyleParser = {
+  name: "TextStyle", before: "HTMLTag",
   parse(cx, next, pos) {
     if (next !== 60) return -1;
-    const source = cx.slice(pos, cx.end), span = readColorSpan(source);
+    const source = cx.slice(pos, cx.end), span = readStyleSpan(source);
     if (!span) return -1;
-    return cx.addElement(cx.elt("TextColor", pos, pos + span.to, [
-      cx.elt("ColorMark", pos, pos + span.contentFrom),
+    return cx.addElement(cx.elt("TextStyle", pos, pos + span.to, [
+      cx.elt("StyleMark", pos, pos + span.contentFrom),
       ...cx.parser.parseInline(source.slice(span.contentFrom, span.contentTo), pos + span.contentFrom),
-      cx.elt("ColorMark", pos + span.contentTo, pos + span.to),
+      cx.elt("StyleMark", pos + span.contentTo, pos + span.to),
     ]));
   },
 };
 
-export function installTextColor(md) {
-  md.inline.ruler.before("html_inline", "text_color", (state, silent) => {
+export function installTextStyle(md) {
+  md.inline.ruler.before("html_inline", "text_style", (state, silent) => {
     if (state.src.charCodeAt(state.pos) !== 60) return false;
-    const span = readColorSpan(state.src, state.pos);
+    const span = readStyleSpan(state.src, state.pos);
     if (!span) return false;
     if (!silent) {
-      const open = state.push("text_color_open", "span", 1);
-      open.attrSet("style", `color:${span.color}`);
+      const open = state.push("text_style_open", "span", 1);
+      open.attrSet("style", `${span.property}:${span.value}`);
       const children = [];
       state.md.inline.parse(state.src.slice(span.contentFrom, span.contentTo), state.md, state.env, children);
       state.tokens.push(...children);
-      state.push("text_color_close", "span", -1);
+      state.push("text_style_close", "span", -1);
     }
     state.pos = span.to;
     return true;
   });
 }
 
-// Rebuild only affected color spans, keeping Markdown delimiters outside color.
+// Rebuild only spans of the edited property. Keep the other property and Markdown delimiters intact.
 // This avoids turning headings/lists into HTML text or splitting emphasis marks.
-export function rewriteTextColors(source, tree, targets, selections, color) {
+export function rewriteTextStyle(source, tree, targets, selections, property, value) {
   let output = "";
   const points = selections.flatMap(range => [
     { pos: range.anchor, assoc: range.empty || range.anchor === range.from ? 1 : -1 },
@@ -83,7 +89,7 @@ export function rewriteTextColors(source, tree, targets, selections, color) {
     if (!value || !body) { raw(from, to); return; }
     const start = from + body.index, end = start + body[0].length;
     raw(from, start);
-    const open = colorOpening(value);
+    const open = styleOpening(property, value);
     output += open; map(start, end, output.length); output += source.slice(start, end) + "</span>";
     raw(end, to);
   };
@@ -97,7 +103,7 @@ export function rewriteTextColors(source, tree, targets, selections, color) {
     const sorted = [...new Set(boundaries)].sort((a,b) => a-b);
     for (let index = 0; index < sorted.length - 1; index++) {
       const start = sorted[index], end = sorted[index + 1];
-      piece(start, end, overlaps(start, end) ? color : current);
+      piece(start, end, overlaps(start, end) ? value : current);
     }
   };
   const block = new Set(["FencedCode", "CodeBlock", "HTMLBlock", "HTMLTag", "HorizontalRule", "LinkReference", "URL", "LinkTitle", "TaskMarker"]);
@@ -112,16 +118,23 @@ export function rewriteTextColors(source, tree, targets, selections, color) {
   };
   const walk = (node, current = null) => {
     if (node.to <= frontmatter || block.has(node.name) || /(?:Mark|Delimiter)$/.test(node.name)) { raw(node.from, node.to); return; }
-    if (node.name === "TextColor") {
-      if (!overlaps(node.from, node.to)) { raw(node.from, node.to); return; }
-      const span = readColorSpan(source, node.from);
-      remove(node.from, span.contentFrom); contents(node, span.contentFrom, span.contentTo, span.color); remove(span.contentTo, node.to);
+    if (!current && !overlaps(node.from, node.to)) { raw(node.from, node.to); return; }
+    if (node.name === "TextStyle") {
+      const span = readStyleSpan(source, node.from);
+      if (span.property === property) {
+        remove(node.from, span.contentFrom);
+        contents(node, span.contentFrom, span.contentTo, span.value);
+        remove(span.contentTo, node.to);
+      } else {
+        raw(node.from, span.contentFrom);
+        contents(node, span.contentFrom, span.contentTo, current);
+        raw(span.contentTo, node.to);
+      }
       return;
     }
-    if (!current && !overlaps(node.from, node.to)) { raw(node.from, node.to); return; }
     if (atomic.has(node.name)) {
       const full = targets.some(range => range.from <= node.from && range.to >= node.to);
-      piece(node.from, node.to, full ? color : current); return;
+      piece(node.from, node.to, full ? value : current); return;
     }
     contents(node, node.from, node.to, current);
   };
@@ -130,7 +143,8 @@ export function rewriteTextColors(source, tree, targets, selections, color) {
   return { content: output, ranges: selections.map((_range, index) => ({ anchor: points[index * 2].value ?? output.length, head: points[index * 2 + 1].value ?? output.length })) };
 }
 
-export function textWithoutColorMarkup(source) {
+export function textWithoutStyleMarkup(source) {
+  if (!styleTag.test(source)) return source;
   let result = "", pos = 0;
   while (pos < source.length) {
     if (source[pos] === "\\") { result += source.slice(pos,pos+2); pos += 2; continue; }
@@ -141,8 +155,8 @@ export function textWithoutColorMarkup(source) {
       while ((match = runs.exec(source))) if (match[0].length === opening.length) { end = runs.lastIndex; break; }
       if (end >= 0) { result += source.slice(pos,end); pos = end; continue; }
     }
-    const span = source[pos] === "<" ? readColorSpan(source,pos) : null;
-    if (span) { result += textWithoutColorMarkup(source.slice(span.contentFrom,span.contentTo)); pos = span.to; }
+    const span = source[pos] === "<" ? readStyleSpan(source,pos) : null;
+    if (span) { result += textWithoutStyleMarkup(source.slice(span.contentFrom,span.contentTo)); pos = span.to; }
     else result += source[pos++];
   }
   return result;

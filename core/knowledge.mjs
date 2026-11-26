@@ -1,5 +1,5 @@
 import {installCaptureMarkers} from './copilot-journal-links.mjs';
-import { textWithoutColorMarkup } from "./text-color.mjs";
+import { textWithoutStyleMarkup } from "./text-color.mjs";
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
 import { katex } from "@mdit/plugin-katex";
@@ -86,6 +86,23 @@ export function attachmentUrl(
     : null;
 }
 
+function searchableText(content, tokens, offset) {
+  if (!tokens.some(token => token.children?.some(child => child.type === "text_style_open"))) return undefined;
+  const lines = content.split(/\r\n?|\n/);
+  for (const token of tokens) {
+    // Table cells have no source map; Markdown-it maps their containing row.
+    if (!token.map || (token.type !== "inline" && token.type !== "tr_open")) continue;
+    const start = token.map[0] + offset, end = token.map[1] + offset;
+    const block = lines.slice(start, end).join("\n");
+    const plain = textWithoutStyleMarkup(block);
+    if (plain !== block) {
+      const changed = plain.split("\n");
+      for (let i = start; i < end; i++) lines[i] = changed[i - start];
+    }
+  }
+  return lines.join("\n");
+}
+
 const parsedNotes = new Map();
 export function buildKnowledge(raw) {
   const present = new Set(raw.map((n) => n.path));
@@ -104,7 +121,7 @@ export function buildKnowledge(raw) {
           level: Number(token.tag.slice(1)),
           text: tokens[i + 1]?.content ?? "",
           plainText,
-          id: headingId(textWithoutColorMarkup(tokens[i + 1]?.content ?? "")),
+          id: headingId(textWithoutStyleMarkup(tokens[i + 1]?.content ?? "")),
           line: (token.map?.[0] ?? 0) + meta.offset,
         });
       }
@@ -132,8 +149,9 @@ export function buildKnowledge(raw) {
       ...meta,
       properties: meta.properties,
       aliases: noteAliases(meta.properties),
+      searchText: searchableText(note.content, tokens, meta.offset),
       title:
-        headings.find((h) => h.level === 1)?.text ||
+        textWithoutStyleMarkup(headings.find((h) => h.level === 1)?.text ?? "") ||
         note.path.split("/").at(-1).replace(/\.md$/i, ""),
       headings,
       tags,
@@ -179,14 +197,15 @@ export function searchNotes(notes, query) {
       indexed.delete(key);
     }
   for (const [id, n] of byId) {
-    const signature = [n.content, n.title, (n.tags ?? []).join("\0")];
+    const text = n.searchText ?? n.content;
+    const signature = [text, n.title, (n.tags ?? []).join("\0")];
     const previous = indexed.get(id);
     if (!previous || signature.some((v, i) => v !== previous[i])) {
       searchIndex.add({
         id,
         path: n.path,
         title: n.title ?? n.path,
-        text: n.content,
+        text,
         tags: n.tags ?? [],
         mtime: 0,
       });
