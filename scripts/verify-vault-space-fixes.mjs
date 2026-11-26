@@ -14,8 +14,8 @@ const git=(...args)=>execFileSync('git',args,{encoding:'utf8',stdio:['pipe','pip
 const fetch='https://team.example.invalid/shared.git',push='git@write.example.invalid:shared.git';
 git('-C',team,'init','--initial-branch=main');git('-C',team,'remote','add','origin',fetch);git('-C',team,'remote','set-url','--push','origin',push);
 const config=await readFile(`${team}/.git/config`);
-const app=await electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
-let page;const report={checks:[],errors:[]};
+const launch=()=>electron.launch({executablePath:process.env.DYNOTE_EXECUTABLE||`${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,args:process.env.DYNOTE_EXECUTABLE?[]:['.'],env:{...process.env,OPEN_NOTES_DATA:profile}});
+let app=await launch(),page;const report={checks:[],errors:[]};
 const identity=()=>page.getByRole('button',{name:'공간 전환·관리',exact:true});
 const row=root=>page.locator('.vault-settings-list li').filter({has:page.getByText(root,{exact:true})});
 const selected=root=>row(root).getByText('사용 중',{exact:true});
@@ -62,7 +62,7 @@ try{
  await page.getByRole('button',{name:'개인·팀 공간 관리',exact:true}).click();
  const settings=await readFile(`${profile}/settings.json`);
  await openVaultSection(page,'개인 노트');
- await page.getByRole('button',{name:'개인 노트 폴더 연결',exact:true}).click();await page.getByRole('dialog',{name:'설정'}).getByRole('alert').filter({hasText:'다른 용도로 등록'}).waitFor();
+ await page.getByRole('button',{name:'개인 노트 폴더 연결',exact:true}).click();await page.getByRole('dialog',{name:'설정',exact:true}).getByRole('alert').filter({hasText:'다른 용도로 등록'}).waitFor();
  assert.deepEqual(await readFile(`${profile}/settings.json`),settings);assert.match(await identity().innerText(),/팀 공유 노트/);
  assert.equal(await readFile(`${team}/Shared.md`,'utf8'),'# Shared fixture\n');
  await openVaultSection(page,'팀 노트');
@@ -72,7 +72,10 @@ try{
  report.checks.push('opposite-purpose folder connection is rejected before changing selection, settings or notes; explicit purpose changes still work');
  const teamId=await page.evaluate(async()=>{const response=await window.notes.snapshot();return response.value.id;});
  const backup='https://backup.example.invalid/notes.git';
+ await app.close();
  await writeFile(`${profile}/git-backup.json`,JSON.stringify({[teamId]:{enabled:false,remote:backup,branch:'main',push:false,schedule:'daily'}}));
+ app=await launch();page=await app.firstWindow();page.setDefaultTimeout(10000);page.on('pageerror',e=>report.errors.push(e.message));
+ await identity().click();
  await openVaultSection(page,'개인 노트');
  await row(personal).getByRole('button',{name:'열기',exact:true}).click();await selected(personal).waitFor();
  await openVaultSection(page,'팀 노트');
