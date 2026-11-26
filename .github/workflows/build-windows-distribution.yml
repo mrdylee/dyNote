@@ -45,6 +45,9 @@ jobs:
           node scripts/verify-copilot-continuation.mjs
           node scripts/verify-word-documents.mjs
           node scripts/verify-external-file-open.mjs
+          node scripts/verify-readable-file-open.mjs
+          node scripts/verify-pdf-highlighter.mjs
+          node scripts/verify-pdf-links.mjs
           node scripts/verify-vault-space-fixes.mjs
           node scripts/verify-sidebar-file-drop.mjs
           node scripts/verify-theme-workspace.mjs
