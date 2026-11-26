@@ -128,6 +128,9 @@ try {
   checks.push('links inside the team pane resolve the team file with the same relative path');
 
   await editor(teamPane).click();
+  // Start the paste inside [[참고]], independent of the pane width and mouse coordinates.
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
   await editor(teamPane).evaluate(async element => {
     const canvas = document.createElement('canvas');
     canvas.width = 24; canvas.height = 16;
@@ -155,6 +158,7 @@ try {
   teamText = await readFile(path.join(team, same), 'utf8');
   const imagePath = teamText.match(/!\[\[([^\]]+\.png)\]\]/)?.[1];
   assert.ok(imagePath);
+  assert.ok(teamText.includes(`[[참고]]\n![[${imagePath}]]`), 'the original link stays intact before the embedded image');
   assert.ok((await readFile(path.join(team, imagePath))).length > 0);
   await assert.rejects(readFile(path.join(personal, imagePath)), { code: 'ENOENT' });
   assert.equal(await readFile(path.join(personal, same), 'utf8'), personalText);
@@ -246,6 +250,10 @@ try {
   assert.equal(await readFile(path.join(personal, same), 'utf8'), personalText);
   assert.equal(await readFile(path.join(team, same), 'utf8'), teamText);
   await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).getByRole('button', { name: '회의록', exact: true }).click();
+  await restarted.getByRole('button', { name: 'Live Preview', exact: true }).click();
+  await restarted.waitForFunction(({id, path}) => [...document.querySelectorAll('.document-pane img.cm-live-image')]
+    .some(img => img.src === `notes://vault/${id}/${path}` && img.naturalWidth === 24), {id: teamId, path: imagePath});
+  checks.push('reopening the saved team note after restart renders its pasted image');
   await restarted.locator('.attachments-list').getByRole('button', { name: 'manual.pdf', exact: true }).click();
   await restarted.locator('.attachment-view').waitFor();
   await restarted.getByRole('button', { name: '공간 전환·관리', exact: true }).click();

@@ -89,10 +89,10 @@ export function journalBackspace(view){
   annotations:[Transaction.userEvent.of('input.journal'),isolateHistory.of('full')]});
  return true;
 }
-export function journalInsertAttachments(view,text){
+export function journalInsertAttachments(view,text,from=view.state.selection.main.head){
  const current=block(view);if(!current)return false;
  const prefix=current.first.text.match(/^[\t ]*/)[0]+'- ';
- return insert(view,current.pos,text.split('\n').join('\n'+prefix)+'\n'+prefix);
+ return insert(view,from,text.split('\n').join('\n'+prefix)+'\n'+prefix);
 }
 export function journalSoftBreak(view){
  const current=block(view);if(!current)return false;

@@ -153,21 +153,30 @@ try {
     document.querySelector(".cm-content").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
   }, (await readFile(`${vaultRoot}/assets/pixel.png`)).toString("base64"));
   await page.waitForFunction(() => window.liveView.state.doc.toString().includes("pasted.png"));
-  const withPaste = await doc();
+  const finalContent = await doc();
   await cursor("end");
   await page.waitForFunction(() => document.querySelectorAll(".cm-live-image").length === 2);
-  await saved(withPaste);
-  await page.evaluate((base64) => {
-    const buffer = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const data = new DataTransfer(); data.items.add(new File([buffer], "dropped.png", { type: "image/png" }));
-    document.querySelector(".cm-content").dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
-  }, (await readFile(`${vaultRoot}/assets/pixel.png`)).toString("base64"));
-  await page.waitForFunction(() => window.liveView.state.doc.toString().includes("dropped.png"));
-  const finalContent = await doc();
   await saved(finalContent);
+  // A file dropped from disk opens a separate preview. Clipboard images embed in the note.
+  const dropInput = await page.evaluateHandle(() => {
+    const input = document.createElement("input");
+    input.type = "file"; document.body.append(input);
+    return input;
+  });
+  await dropInput.setInputFiles(`${vaultRoot}/assets/pixel.png`);
+  await dropInput.evaluate(input => {
+    const data = new DataTransfer(); data.items.add(input.files[0]);
+    document.querySelector(".cm-content").dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    input.remove();
+  });
+  await page.waitForFunction(() => document.querySelector(".external-file-image")?.naturalWidth === 240);
+  await page.getByRole("button", { name: "pixel.png 탭 닫기", exact: true }).click();
+  await page.locator('.file-row[title="Home.md"]').click();
+  await page.evaluate(() => { window.liveView = document.querySelector(".cm-content").cmTile.root.view; });
+  assert.equal(await doc(), finalContent);
   await cursor(0);
   await cursor(original.indexOf("한글 편집 끝"));
-  await page.evaluate(() => { document.querySelector(".document-area").scrollTop = 0; });
+  await page.evaluate(() => { document.querySelector(".document-pane.focused").scrollTop = 0; });
   await page.screenshot({ path: "output/playwright/live-preview.png" });
   assert.equal(remoteRequests.length, 0, remoteRequests.join("\n"));
   assert.equal(errors.length, 0, errors.join("\n"));
@@ -176,14 +185,14 @@ try {
   await setup();
   assert.equal(await doc(), finalContent);
   await cursor("end");
-  await page.waitForFunction(() => [...document.querySelectorAll(".cm-live-image")].filter((image) => image.naturalWidth > 0).length === 3);
-  report.checks.push("raw Markdown copy; undo/redo; clipboard and drop image import; exact disk save and app reopen; no remote image requests");
+  await page.waitForFunction(() => [...document.querySelectorAll(".cm-live-image")].filter((image) => image.naturalWidth > 0).length === 2);
+  report.checks.push("raw Markdown copy; undo/redo; clipboard image embed and separate disk image preview; exact disk save and app reopen; no remote image requests");
   await page.locator('.file-row[title="Long.md"]').click();
   await page.waitForTimeout(150);
-  await page.evaluate(() => { document.querySelector(".document-area").scrollTop = 1600; });
+  await page.evaluate(() => { document.querySelector(".document-pane.focused").scrollTop = 1600; });
   await page.waitForTimeout(100);
   const scrollAnchor = await page.evaluate(() => {
-    const area = document.querySelector(".document-area");
+    const area = document.querySelector(".document-pane.focused");
     const view = document.querySelector(".cm-content").cmTile.root.view;
     window.liveView = view;
     return view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y: area.getBoundingClientRect().top + 24 }, false);
@@ -192,7 +201,7 @@ try {
   for (const mode of ["편집 보기", "Live Preview"]) {
     await page.locator(".view-segments").getByRole("button", { name: mode, exact: true }).click();
     await page.waitForTimeout(100);
-    const offset = await page.evaluate((anchor) => window.liveView.coordsAtPos(anchor).top - document.querySelector(".document-area").getBoundingClientRect().top, scrollAnchor);
+    const offset = await page.evaluate((anchor) => window.liveView.coordsAtPos(anchor).top - document.querySelector(".document-pane.focused").getBoundingClientRect().top, scrollAnchor);
     assert.ok(Math.abs(offset - 24) < 60, `scroll anchor offset ${offset} after ${mode}`);
   }
   report.checks.push("long document source/live switching preserves the visible text anchor");

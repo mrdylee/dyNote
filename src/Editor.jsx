@@ -26,6 +26,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   defaultHighlightStyle,
   syntaxHighlighting,
+  syntaxTree,
   bracketMatching,
   foldGutter,
 } from "@codemirror/language";
@@ -249,8 +250,14 @@ export default function Editor({
               `${/\.(pdf|xlsx|pptx)$/i.test(asset.path) ? "" : "!"}[[${asset.path}]]`,
           )
           .join("\n");
-        if (journalInsertAttachments(target, text)) return;
-        const from = target.state.selection.main.head, inserted = "\n" + text + "\n";
+        const { state } = target;
+        let from = state.selection.main.head;
+        // Keep the link under the caret intact, including an image nested inside a link.
+        for (let node = syntaxTree(state).resolveInner(from, -1); node; node = node.parent) {
+          if (["WikiLink", "WikiEmbed", "Link", "Image"].includes(node.name)) from = node.to;
+        }
+        if (journalInsertAttachments(target, text, from)) return;
+        const inserted = "\n" + text + "\n";
         target.dispatch({ changes: { from, insert: inserted }, selection: { anchor: from + inserted.length } });
       } catch {
         /* The parent reports import errors. */
