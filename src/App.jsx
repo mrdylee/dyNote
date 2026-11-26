@@ -2163,6 +2163,12 @@ export default function App() {
             </IconButton>
           </div>
           <div className="rail-bottom">
+            {api?.openSticky && stickyVault && <StickyPicker notes={stickyVault.notes} onOpen={async path => {
+              try {
+                if (path && queue.get(stickyVault.id, path)) await flush(true, stickyVault.id);
+                await invoke(api.openSticky({ vaultId: stickyVault.id, path }));
+              } catch (error) { setError(error.message); }
+            }}/>}
             <IconButton label="설정" disabled={busy} onClick={() => setModal("settings")}><Settings size={20} /></IconButton>
             <IconButton
               label="저장과 복구 안내"
@@ -2338,12 +2344,6 @@ export default function App() {
           >
             <Plus size={16} />새 문서 만들기<span>{shortcut} N</span>
           </button>
-          {api?.openSticky && stickyVault && <StickyPicker notes={stickyVault.notes} onOpen={async path => {
-            try {
-              if (path && queue.get(stickyVault.id, path)) await flush(true, stickyVault.id);
-              await invoke(api.openSticky({ vaultId: stickyVault.id, path }));
-            } catch (error) { setError(error.message); }
-          }}/>}
           <div className="vault-footer">
             <ShieldCheck size={14} />
             <span>내 파일은 내 기기에</span>

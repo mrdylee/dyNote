@@ -329,7 +329,18 @@ test("Enter starts a bullet in an existing plain-text sticky and preserves its b
 test("synced sticky picker opens the original file and both plus buttons create cards", async () => {
   await fixture([], async ({ app, main, vault }) => {
     const panel = main.getByRole("region", { name: "스티키 노트" });
-    await panel.getByRole("button", { name: /스티키 노트 목록/ }).click();
+    const rail = main.getByRole("navigation", { name: "주 메뉴" });
+    const toggle = rail.getByRole("button", { name: "스티키 노트", exact: true });
+    const mainWindow = await app.browserWindow(main);
+    await mainWindow.evaluate(win => win.setSize(win.getSize()[0], win.getMinimumSize()[1]));
+    assert.ok(await rail.evaluate(nav => nav.lastElementChild.getBoundingClientRect().bottom <= innerHeight),
+      "the bottom icons fit at the minimum window height");
+    assert.equal(await panel.isVisible(), false);
+    await toggle.click();
+    await panel.waitFor();
+    await main.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden" });
+    await toggle.click();
     const entries = await main.evaluate(async () => (await window.notes.workspaceSnapshots()).value);
     const personal = entries.find(entry => entry.purpose === "personal");
     const relative = "포스트잇/cloud.md";
@@ -343,22 +354,27 @@ test("synced sticky picker opens the original file and both plus buttons create 
     await row.waitFor();
     assert.equal(await panel.getByText("팀 전용 메모").count(), 0);
     assert.equal(app.windows().length, 1);
-    const [card] = await Promise.all([app.waitForEvent("window"), row.click()]);
-    assert.equal(await markdown(card), content);
+    const anchor = await toggle.boundingBox();
+    const list = await panel.boundingBox();
+    assert.ok(list.x >= anchor.x + anchor.width && list.y <= anchor.y);
     await mkdir("output/playwright", { recursive: true });
-    await main.locator(".navigator").screenshot({ path: "output/playwright/sticky-picker.png" });
-    await card.screenshot({ path: "output/playwright/sticky-picker-card.png" });
+    await main.screenshot({ path: "output/playwright/sticky-picker-rail.png", clip: {
+      x: 0, y: Math.max(0, Math.floor(list.y - 48)), width: Math.ceil(list.x + list.width + 18),
+      height: Math.ceil(anchor.y + anchor.height - list.y + 120),
+    } });
+    const [card] = await Promise.all([app.waitForEvent("window"), row.click()]);
+    await panel.waitFor({ state: "hidden" });
+    assert.equal(await markdown(card), content);
     const nativeCard = await app.browserWindow(card);
     await nativeCard.evaluate(win => win.hide());
+    await toggle.click();
     await row.click();
     await until(() => nativeCard.evaluate(win => win.isVisible()), Boolean, "the existing card returns");
     assert.equal(app.windows().length, 2);
-    await mkdir("output/playwright", { recursive: true });
-    await main.locator(".navigator").screenshot({ path: "output/playwright/sticky-picker.png" });
-    await card.screenshot({ path: "output/playwright/sticky-picker-card.png" });
     const updated = content + "\n- 검토 완료";
     await memo(card).fill(updated);
     for (const page of [card, panel]) {
+      if (page === panel) await toggle.click();
       const [blank] = await Promise.all([app.waitForEvent("window"), page.getByRole("button", { name: "새 스티키 노트" }).click()]);
       assert.equal(await markdown(blank), "- ");
       await Promise.all([blank.waitForEvent("close"), blank.locator("#close").click()]);
@@ -366,6 +382,7 @@ test("synced sticky picker opens the original file and both plus buttons create 
     await Promise.all([card.waitForEvent("close"), card.locator("#close").click()]);
     assert.deepEqual(await readdir(path.join(vault, "포스트잇")), ["cloud.md"]);
     assert.equal(await readFile(path.join(vault, relative), "utf8"), updated);
+    await toggle.click();
     const [reopened] = await Promise.all([app.waitForEvent("window"), row.click()]);
     assert.equal(await markdown(reopened), updated);
   }, { withTeam: true });
