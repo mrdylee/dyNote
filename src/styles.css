@@ -733,11 +733,74 @@ kbd {
 .cm-selectionBackground {
   background: var(--accent-soft) !important;
 }
-.cm-editor .cm-search {
-  font-family: inherit;
-  font-size: 11px;
-  background: var(--panel);
+.mindmap-editor { position: relative; }
+.mindmap-editor > .document-search-host {
+  position: sticky;
+  top: 8px;
+  align-self: flex-end;
+  width: min(420px, calc(100% - 16px));
+  height: 0;
+  margin-right: 8px;
+  z-index: 6;
 }
+.document-search-host .rendered-find { position: relative; }
+.document-search-host .rendered-find [name=close] { position: absolute; }
+::highlight(note-find) { background: #ffeb86; color: #211b0a; }
+::highlight(note-find-current) { background: #ffad57; color: #211170; }
+.pane-header > .document-search-host {
+  /* CodeMirror applies its editor positioning to external panel hosts. */
+  position: absolute !important;
+  top: 100%;
+  right: 8px;
+  width: min(420px, calc(100% - 16px));
+}
+.pane-header > .document-search-host:has(> .rendered-find) {
+  position: relative !important;
+  inset: auto;
+  margin: 0 8px 0 auto;
+}
+.document-search-host .cm-panels-top,
+.code-editor .cm-panels-top:has(.cm-search) {
+  width: min(420px, 100%);
+  margin-left: auto;
+  border: 0;
+}
+:is(.document-search-host, .code-editor) .cm-panel.cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 14%);
+  font: 14px/1.4 var(--body-font, sans-serif);
+}
+:is(.document-search-host, .code-editor) .cm-panel.cm-search :is(input, button, label) {
+  margin: 0;
+  font: inherit;
+}
+:is(.document-search-host, .code-editor) .cm-search .cm-textfield {
+  width: calc(100% - 32px);
+  min-width: 0;
+  height: 36px;
+  padding: 4px 8px;
+}
+:is(.document-search-host, .code-editor) .cm-panel.cm-search [name=close] {
+  top: 12px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  font-size: 20px;
+}
+:is(.document-search-host, .code-editor) .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+:is(.document-search-host, .code-editor) .cm-search br { flex-basis: 100%; }
 .split .code-editor {
   width: 50%;
   border-right: 1px solid var(--border);

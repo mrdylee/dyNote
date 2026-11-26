@@ -1,18 +1,19 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ReactFlow,Background,Controls,Handle,Position,applyNodeChanges} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {parseMindmap,editMindmap} from '../core/mindmap.mjs';
+import RenderedDocumentFind,{useDocumentFind} from './RenderedDocumentFind.jsx';
 function MindNode({data}) {
   return <div className="mindmap-node"><Handle type="target" position={Position.Left}/><span>{data.text.replace(/<br\s*\/?\s*>/g,'\n')}</span><Handle type="source" position={Position.Right}/></div>;
 }
 const nodeTypes={mind:MindNode};
-function graph(model,collapsed) {
+function graph(model,collapsed,searching) {
   const byId=new Map(model.nodes.map(n=>[n.id,n])),children=new Map();
   for(const node of model.nodes){const parent=byId.has(node.parent)?node.parent:null;if(!children.has(parent))children.set(parent,[]);children.get(parent).push(node);}
   const positions=new Map(),visible=new Set(),stack=(children.get(null)||[]).slice().reverse().map(n=>({node:n,depth:0,after:false}));
   let row=0;
   while(stack.length) {
-    const {node,depth,after}=stack.pop();const list=node.expanded&&!collapsed.has(node.id)?children.get(node.id)||[]:[];
+    const {node,depth,after}=stack.pop();const list=searching||(node.expanded&&!collapsed.has(node.id))?children.get(node.id)||[]:[];
     if(after){const ys=list.map(n=>positions.get(n.id)?.y).filter(y=>y!==undefined);positions.set(node.id,{x:depth*240,y:ys.length?ys.reduce((a,b)=>a+b)/ys.length:row++*90});continue;}
     visible.add(node.id);stack.push({node,depth,after:true});for(const child of list.slice().reverse())stack.push({node:child,depth:depth+1,after:false});
   }
@@ -28,7 +29,17 @@ export default function MindmapEditor({note,onChange,onConvert,onMarkdown,readOn
   useEffect(()=>{if(ownContent.current!==note.content)setHistory({past:[],future:[]});ownContent.current=note.content;},[note.content]);
   const selectedNode=parsed.model?.nodes.find(n=>n.id===selected)||parsed.model?.nodes[0];
   useEffect(()=>setLabel(selectedNode?.text || ''),[selectedNode?.id,selectedNode?.text]);
-  const visual=useMemo(()=>parsed.model?graph(parsed.model,collapsed):{nodes:[],edges:[]},[parsed,collapsed]);
+  const stage=useRef(null),flow=useRef(null),searchHost=useRef(null);
+  const [searching,setSearching]=useState(false);
+  useDocumentFind(searchHost,!parsed.error,()=>{
+    setSearching(true);
+    const input=searchHost.current.querySelector('input[name=search]');
+    if(input){input.focus();input.select();}
+  });
+  const revealNode=useCallback(id=>{
+    flow.current?.fitView({nodes:[{id}],maxZoom:1});
+  },[]);
+  const visual=useMemo(()=>parsed.model?graph(parsed.model,collapsed,searching):{nodes:[],edges:[]},[parsed,collapsed,searching]);
   const [flowNodes,setFlowNodes]=useState(visual.nodes);
   useEffect(()=>setFlowNodes(visual.nodes),[visual]);
   const commit=(action,value,id=selectedNode?.id)=>{
@@ -44,7 +55,12 @@ export default function MindmapEditor({note,onChange,onConvert,onMarkdown,readOn
   };
   if(parsed.error)return <section className="mindmap-error"><p role="alert">마인드맵을 읽을 수 없습니다: {parsed.error}</p><button onClick={onMarkdown}>Markdown으로 열기</button></section>;
   const model=parsed.model;
-  return <section className="mindmap-editor" aria-label="마인드맵 편집기">
+  return <section className="mindmap-editor" tabIndex={-1} aria-label="마인드맵 편집기">
+    <div className="document-search-host" ref={searchHost}>
+      {searching&&<RenderedDocumentFind target={stage} revealNode={revealNode} onClose={()=>{
+        setSearching(false);searchHost.current.parentElement.focus({preventScroll:true});
+      }}/>}
+    </div>
     <div className="mindmap-toolbar">
       <button disabled={readOnly||!history.past.length} onClick={()=>travel(true)}>실행 취소</button><button disabled={readOnly||!history.future.length} onClick={()=>travel(false)}>다시 실행</button>
       <button disabled={readOnly||!selectedNode} onClick={()=>commit('add-child','새 생각')}>자식 노드 추가</button><button disabled={readOnly||!selectedNode} onClick={()=>commit('add-sibling','새 생각')}>형제 노드 추가</button>
@@ -54,7 +70,7 @@ export default function MindmapEditor({note,onChange,onConvert,onMarkdown,readOn
       <button onClick={onMarkdown}>Markdown으로 열기</button>
     </div>
     <form className="mindmap-label" onSubmit={e=>{e.preventDefault();commit('rename',label);}}><label>노드 이름<input aria-label="마인드맵 노드 이름" value={label} disabled={readOnly||!selectedNode} onChange={e=>setLabel(e.target.value)}/></label><button disabled={readOnly||!selectedNode}>이름 적용</button><small>{model.kind==='rich'?'rich · 점을 끌면 위치를 저장합니다.':'기본 Markdown · 제목과 목록으로 저장합니다.'}</small></form>
-    <div className="mindmap-stage"><ReactFlow nodes={flowNodes.map(n=>({...n,selected:n.id===selectedNode?.id}))} edges={visual.edges} nodeTypes={nodeTypes}
+    <div className="mindmap-stage" ref={stage}><ReactFlow onInit={instance=>{flow.current=instance;}} nodes={flowNodes.map(n=>({...n,selected:n.id===selectedNode?.id}))} edges={visual.edges} nodeTypes={nodeTypes}
       onNodesChange={changes=>setFlowNodes(old=>applyNodeChanges(changes,old))} onNodeClick={(_event,node)=>setSelected(node.id)}
       onNodeDragStop={(_event,node)=>commit('move',node.position,node.id)} nodesDraggable={model.kind==='rich'&&!readOnly} nodesConnectable={false} fitView minZoom={0.1} maxZoom={2}>
       <Background/><Controls showInteractive={false}/>

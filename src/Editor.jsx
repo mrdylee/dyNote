@@ -8,6 +8,7 @@ import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
+  panels,
   lineNumbers,
   highlightActiveLine,
   drawSelection,
@@ -28,7 +29,7 @@ import {
   bracketMatching,
   foldGutter,
 } from "@codemirror/language";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { openSearchPanel, search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
@@ -71,6 +72,7 @@ export default function Editor({
   onFontSettings,
   onSelection,
   editorRef,
+  searchHost,
   pendingOriginal,
 }) {
   const [suggestion, setSuggestion] = useState(null);
@@ -117,6 +119,14 @@ export default function Editor({
           history(),
           drawSelection(),
           highlightActiveLine(),
+          search({ top: true }),
+          panels({ topContainer: searchHost?.current }),
+          EditorState.phrases.of({
+            Find: "문서에서 찾기", next: "다음", previous: "이전", all: "모두 선택",
+            "match case": "대소문자 구분", "by word": "단어 단위", regexp: "정규식",
+            Replace: "바꿀 내용", replace: "바꾸기", "replace all": "모두 바꾸기", close: "닫기",
+            "current match": "현재 일치 항목", "on line": "줄 번호",
+          }),
           highlightSelectionMatches(),
           bracketMatching(),
           markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
@@ -166,6 +176,7 @@ export default function Editor({
             { key: "Alt-ArrowDown", run: view => runOutlineCommand(view, "down") },
             { key: "Tab", run: view => runOutlineCommand(view, "indent") },
             { key: "Shift-Tab", run: view => runOutlineCommand(view, "outdent") },
+            { key: "Ctrl-f", run: openSearchPanel },
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,

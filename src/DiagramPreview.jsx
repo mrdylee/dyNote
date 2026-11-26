@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { renderMermaid } from "./mermaid-preview.mjs";
 
-export default function DiagramPreview({ html, onClick, previewRef, className = "markdown-preview", renderDiagrams = true }) {
+export default function DiagramPreview({ html, onClick, previewRef, tabIndex, className = "markdown-preview", renderDiagrams = true }) {
   const own = useRef(null);
   useEffect(() => {
     if (!renderDiagrams) return;
@@ -34,6 +34,7 @@ export default function DiagramPreview({ html, onClick, previewRef, className = 
         own.current = node;
         if (previewRef) previewRef.current = node;
       }}
+      tabIndex={tabIndex}
       className={className}
       onClick={onClick}
       dangerouslySetInnerHTML={{ __html: html }}
