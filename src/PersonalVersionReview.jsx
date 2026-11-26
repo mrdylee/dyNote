@@ -16,7 +16,8 @@ function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, 
     if (block) view.scrollTop += block.getBoundingClientRect().top - view.getBoundingClientRect().top - 24;
   }, [target, id, parts]);
   const version = rows.find(v => v.commit === id);
-  const title = version ? version.device || version.author : "공통 원문";
+  const center = slot === "original";
+  const title = center ? "병합 결과" : version.device || version.author;
   let hunkIndex = 0;
   return <section className="document-pane comparison-pane" aria-label={title}>
     <header className="pane-header">
@@ -27,31 +28,42 @@ function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, 
             </option>)}
           </select>
         : <strong>{title}</strong>}
+      {center && <small>공통 원문 기준</small>}
       {version && rows.length === 2 && <small>{new Date(version.time).toLocaleString()}</small>}
     </header>
     <div className="comparison-body" ref={body} tabIndex={0} aria-label={title + " 전체 본문"}>
       {parts.map(part => {
         if (typeof part === "string") return part;
         const text = part.alternatives[id] ?? part.original;
-        if (!part.key) return text;
+        if (!part.key) return center ? part.merged : text;
         const number = ++hunkIndex;
         const pick = picks[part.key];
-        const source = pick?.source ?? selected;
-        const copiedHere = pick?.destination === id && Object.hasOwn(part.alternatives, source);
-        const original = slot === "original";
-        const caption = original ? "원문 유지" : slot === "left" ? "오른쪽으로 복사 →" : "← 왼쪽으로 복사";
-        return <div className="comparison-block" key={part.key} data-resolved={source === "original" || Object.hasOwn(part.alternatives, source)}>
+        const source = pick ?? selected;
+        const taken = Object.hasOwn(part.alternatives, source);
+        if (!center) {
+          const direction = slot === "left" ? "왼쪽" : "오른쪽";
+          const label = `충돌 ${number} · ${direction} 수정본을 가운데에 반영`;
+          return <div className="comparison-block comparison-source" data-slot={slot} key={part.key} data-resolved={source === "original" || taken}>
+            <div className="comparison-block-tools"><strong>충돌 {number}</strong></div>
+            <span className="comparison-value">{text || "(삭제)"}</span>
+            <button type="button" className="comparison-arrow" title={label} aria-label={label} aria-pressed={source === id}
+              disabled={busy || !Object.hasOwn(part.alternatives, id)} onClick={() => onPick(part.key, id)}>
+              {slot === "left" ? "→" : "←"}
+            </button>
+          </div>;
+        }
+        return <div className="comparison-block" key={part.key} data-resolved={source === "original" || taken}>
           <div className="comparison-block-tools">
             <strong>충돌 {number}</strong>
-            {copiedHere
-              ? <button type="button" disabled={busy} onClick={() => onPick(part.key, null)}>되돌리기</button>
-              : <button type="button" aria-pressed={source === id} disabled={busy || (!original && !Object.hasOwn(part.alternatives, id))}
-                  onClick={() => onPick(part.key, { source: id, destination: original ? null : other })}>{caption}</button>}
+            <span className="comparison-output-actions">
+              <button type="button" aria-pressed={source === "original"} disabled={busy} onClick={() => onPick(part.key, "original")}>원문 유지</button>
+              {pick && <button type="button" disabled={busy} onClick={() => onPick(part.key, null)}>되돌리기</button>}
+            </span>
           </div>
-          {copiedHere ? <>
-            <del>{text || "(빈 구간)"}</del>
+          {taken && part.alternatives[source] !== part.original ? <>
+            <del aria-label="공통 원문">{part.original || "(빈 원문)"}</del>
             <ins aria-label="반영할 내용">{part.alternatives[source] || "(삭제)"}</ins>
-          </> : <span className="comparison-value">{text || (original ? "(빈 원문)" : "(삭제)")}</span>}
+          </> : <span className="comparison-value">{part.original || "(빈 원문)"}</span>}
         </div>;
       })}
     </div>
@@ -134,7 +146,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         path,
         basis,
         commit: selected || rows[0].commit,
-        options: { hunks: hunks.map((h) => picks[h.key]?.source ?? selected), copies },
+        options: { hunks: hunks.map((h) => picks[h.key] ?? selected), copies },
       });
       onClose();
     } catch (e) {
@@ -158,7 +170,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
     }
   }
   const remaining = hunks.filter(h => {
-    const choice = picks[h.key]?.source ?? selected;
+    const choice = picks[h.key] ?? selected;
     return choice !== "original" && !Object.hasOwn(h.alternatives, choice);
   }).length;
   const ready = hunks.length ? remaining === 0 : !!selected;
