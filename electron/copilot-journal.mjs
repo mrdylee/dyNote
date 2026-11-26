@@ -20,7 +20,7 @@ const clone=value=>structuredClone(value);
 const usesDailyFile=(config,record)=>!config.sessionLayout||record.legacyDaily===true;
 const legacyLayout=config=>Object.values(config.records).some(record=>usesDailyFile(config,record));
 const conflictNotice=count=>`Git 충돌이 남은 파일 ${count}개가 있어 관련 대화의 가져오기를 보류했습니다. 개인 노트 동기화 설정의 ‘버전 확인’에서 충돌을 해결한 뒤 다시 가져와 주세요.`;
-const hasHistory=config=>!!config&&(Object.keys(config.records).length>0||!!config.pendingCapture);
+const hasHistory=config=>!!config&&(Object.keys(config.records).length>0||!!config.pendingCapture||config.blocked.length>0||!!config.trashId);
 const recordProjectKey=record=>path.posix.basename(path.posix.dirname(record.path));
 function selectionFor(config,project){
  const byId=Object.hasOwn(config.projects,project.id)?config.projects[project.id]:undefined;
@@ -89,38 +89,58 @@ export class CopilotJournal{
   if(this.failure)throw new Error(this.failure);
   return this.data.vaults[vault.id]??{sourceRoot:this.sourceRoot,enabled:false,projects:{},records:{},blocked:[]};
  }
- persist(vault,config){
+ updateVaults(edit){
   const saved=this.saving.then(async()=>{
-   const next={...this.data,vaults:{...this.data.vaults,[vault.id]:config}};
+   const vaults={...this.data.vaults};
+   await edit(vaults);
+   const next={...this.data,vaults};
    await atomic(this.file,next);this.data=next;
   });
   this.saving=saved.catch(()=>{});
   return saved;
  }
+ persist(vault,config){
+  return this.updateVaults(vaults=>{vaults[vault.id]=config;});
+ }
  async reconnect(vault,oldRoot,personal){
   if(!personal)throw new Error('개인 노트에서 이전 기록을 연결해 주세요.');
   if(typeof oldRoot!=='string'||!path.isAbsolute(oldRoot))throw new Error('이전 개인 노트의 전체 폴더 경로를 입력해 주세요.');
-  const previousRoot=path.resolve(oldRoot),current=this.config(vault);
-  if(Object.keys(current.records).length||current.pendingCapture||current.blocked.length)throw new Error('이 개인 노트에는 이미 대화 기록 또는 삭제 기록이 있습니다.');
-  const old=this.data.vaults[vaultIdForRoot(previousRoot)];
-  if(!hasHistory(old))throw new Error('그 경로에 저장된 이전 대화 기록을 찾지 못했습니다.');
-  if(await lstat(previousRoot).catch(error=>{if(error.code!=='ENOENT')throw error;}))throw new Error('이전 폴더가 아직 존재합니다. 이동 전 경로를 확인해 주세요.');
-  await this.persist(vault,{...current,sourceRoot:old.sourceRoot,wslSource:old.wslSource,enabled:false,allProjects:false,projects:{},projectKeys:old.projectKeys,
-   sessionLayout:old.sessionLayout,records:clone(old.records),pendingCapture:clone(old.pendingCapture),blocked:[...old.blocked]});
+  const previousRoot=path.resolve(oldRoot),previousId=vaultIdForRoot(previousRoot);
+  await this.updateVaults(async vaults=>{
+   const current=this.config(vault),old=vaults[previousId];
+   if(hasHistory(current))throw new Error('이 개인 노트에는 이미 대화 기록 또는 삭제 기록이 있습니다.');
+   if(!hasHistory(old))throw new Error('그 경로에 저장된 이전 대화 기록을 찾지 못했습니다.');
+   if(await lstat(previousRoot).catch(error=>{if(error.code!=='ENOENT')throw error;}))throw new Error('이전 폴더가 아직 존재합니다. 이동 전 경로를 확인해 주세요.');
+   // Publish the new owner only after its undo files have been written to the new recovery path.
+   for(const id of new Set([old.trashId,old.pendingCapture?.trashId].filter(Boolean))){
+    if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('잘못된 복원 항목입니다.');
+    const file=path.join('copilot-journal-trash',id+'.json');
+    const contents=await readFile(path.join(path.dirname(vault.recoveryRoot),previousId,file),'utf8');
+    await atomic(path.join(vault.recoveryRoot,file),JSON.parse(contents));
+   }
+   vaults[vault.id]={...old,enabled:false,allProjects:false,projects:{}};
+   delete vaults[previousId];
+  });
   return this.status(vault);
  }
  async projects(config,warnings=[]){
   const root=config.sourceRoot,records=Object.values({...config.records,...config.pendingCapture?.records});
   const saved=new Map(records.map(r=>[recordProjectKey(r),r]));
-  let canonical;
-  try{canonical=await realpath(root);}catch(error){if(error.code!=='ENOENT')throw error;}
-  if(canonical&&canonical!==root)throw new Error('VS Code 기록 경로가 바뀌었습니다. 폴더를 다시 선택해 주세요.');
+  let entries=[],unreadable=0;
+  try{
+   if(await realpath(root)!==root)throw new Error('VS Code 기록 경로가 바뀌었습니다. 폴더를 다시 선택해 주세요.');
+   entries=await readdir(root,{withFileTypes:true});
+  }catch(error){
+   if(['ENOTDIR','EACCES','EPERM'].includes(error.code)){
+    warnings.push('VS Code 기록 폴더를 읽을 수 없습니다. 경로와 접근 권한을 확인해 주세요.');
+   }else if(error.code!=='ENOENT')throw error;
+  }
   const result=[],keysByIdentity=new Map(Object.entries(config.projectKeys??{}));
-  for(const entry of canonical?await readdir(root,{withFileTypes:true}):[]){
+  for(const entry of entries){
    if(!entry.isDirectory()||!directoryName(entry.name))continue;
    let data;
    try{data=JSON.parse(await sourceFile(root,`${entry.name}/workspace.json`));}catch(error){if(error.code==='ENOENT')continue;
-    warnings.push(entry.name);continue;
+    unreadable++;continue;
    }
    const uri=data?.folder??data?.workspace;
    if(typeof uri!=='string')continue;
@@ -153,6 +173,7 @@ export class CopilotJournal{
    keysByIdentity.set(identity,key);
    result.push({id:entry.name,key,identity,label:label.replace(/\.code-workspace$/i,''),path:projectPath,...(wsl?{wsl}:{})});
   }
+  if(unreadable)warnings.push(`프로젝트 정보 파일 ${unreadable}개를 읽지 못했습니다. 표시된 프로젝트는 가져올 수 있습니다.`);
   const live=new Set(result.map(p=>p.key));
   for(const [key,record] of saved)if(!live.has(key)){
    result.push({id:'cached:'+key,key,label:record.label,path:record.projectPath??key,cached:true});
@@ -161,9 +182,9 @@ export class CopilotJournal{
  }
  async status(vault){
   const config=this.config(vault),warnings=[];let projects=[],error='';
-  try{projects=await this.projects(config,warnings);if(warnings.length)error=`프로젝트 정보 파일 ${warnings.length}개를 읽지 못했습니다. 표시된 프로젝트는 가져올 수 있습니다.`;}catch(e){error=e.message;}
+  try{projects=await this.projects(config,warnings);error=warnings.join(' · ');}catch(e){error=e.message;}
   return {sourceRoot:config.sourceRoot,sessionRoot:this.sessionRoot,wslSourceRoot:config.wslSource?.root??null,enabled:config.enabled,allProjects:config.allProjects===true,projects:projects.map(p=>({...p,selected:config.allProjects===true||!!selectionFor(config,p)})),error,
-   canReconnect:!hasHistory(config)&&!config.blocked.length&&Object.entries(this.data.vaults).some(([id,c])=>id!==vault.id&&hasHistory(c)),
+   canReconnect:!hasHistory(config)&&Object.entries(this.data.vaults).some(([id,c])=>id!==vault.id&&hasHistory(c)),
    needsMigration:legacyLayout(config),pendingCapture:!!config.pendingCapture,
    records:Object.values(config.records).map(r=>({id:r.id,label:r.label,date:r.date,journalPath:r.journalPath,
     projectKey:path.posix.basename(path.posix.dirname(r.path)),projectFolder:path.posix.dirname(r.path),
@@ -531,8 +552,10 @@ export class CopilotJournal{
  async restore(vault,trashId){
   if(!/^[a-f0-9-]{36}$/.test(trashId))throw new Error('잘못된 복원 항목입니다.');
   await this.finishPending(vault);
+  const previous=this.config(vault);
+  if(previous.trashId!==trashId)throw new Error('최근 삭제 항목을 다시 확인해 주세요.');
   const {record,sessionId,block,blocks=[block]}=JSON.parse(await readFile(path.join(vault.recoveryRoot,'copilot-journal-trash',`${trashId}.json`),'utf8'));
-  const previous=this.config(vault),next=clone(previous),current=next.records[record.id]??={...record,sessions:{}};
+  const next=clone(previous),current=next.records[record.id]??={...record,sessions:{}};
   for(const [id,session] of Object.entries(record.sessions))if(!sessionId||sessionId===id){if(current.sessions[id])throw new Error('이미 복원된 대화입니다.');current.sessions[id]=session;}
   next.blocked=next.blocked.filter(value=>!blocks.includes(value));next.trashId=null;
   return this.commit(vault,previous,next);

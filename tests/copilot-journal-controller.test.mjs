@@ -808,3 +808,62 @@ test('a pending reimport waits for Git conflict resolution before replaying its 
  assert.equal((await f.importProject()).changed,true);
  assert.equal(await readFile(f.file,'utf8'),f.original);
 });
+
+test('reconnecting a moved vault transfers its cache once even if two destinations try',async t=>{
+ const f=await deletedProject(t),old=f.vault.root,base=path.dirname(f.vault.recoveryRoot);
+ const moved=path.join(f.root,'moved'),other=path.join(f.root,'another');
+ await rename(old,moved);await mkdir(other);
+ const destinations=await Promise.all([moved,other].map(root=>Vault.open(root,base)));
+ const results=await Promise.allSettled(destinations.map(v=>f.controller.reconnect(v,old,true)));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ await mkdir(old);
+ const restarted=new CopilotJournal({file:f.controller.file,sourceRoot:f.source});await restarted.load();
+ assert.equal((await restarted.status(f.vault)).records.length,0);
+ assert.equal((await restarted.status(destinations[results.findIndex(r=>r.status==='fulfilled')])).records.length,1);
+});
+
+test('moving a vault preserves undo and exclusions after deleting its last conversation',async t=>{
+ const f=await fixture(t);await f.put();await f.configure(false);
+ const options={allSessions:true,projectIds:['project']};
+ const initial=await f.controller.sync(f.vault,{},true,options);
+ const record=initial.status.records[0],session=record.sessions[0];
+ const deleted=await f.controller.trash(f.vault,{id:record.id,sessionId:session.id});
+ const moved=path.join(f.root,'moved');await rename(f.vault.root,moved);
+ const vault=await Vault.open(moved,path.dirname(f.vault.recoveryRoot));
+ assert.equal((await f.controller.status(vault)).canReconnect,true);
+ const undoFile=path.join(f.vault.recoveryRoot,'copilot-journal-trash',deleted.trashId+'.json');
+ await rename(undoFile,undoFile+'.held');
+ await assert.rejects(f.controller.reconnect(vault,f.vault.root,true),{code:'ENOENT'});
+ assert.equal(f.controller.config(f.vault).trashId,deleted.trashId);
+ assert.equal(f.controller.config(vault).trashId,undefined);
+ await rename(undoFile+'.held',undoFile);
+ const linked=await f.controller.reconnect(vault,f.vault.root,true);
+ assert.equal(linked.trashId,deleted.trashId);
+ await f.controller.sync(vault,{},true,options);
+ await assert.rejects(readFile(path.join(moved,session.path)),{code:'ENOENT'});
+ await f.controller.restore(vault,linked.trashId);
+ assert.match(await readFile(path.join(moved,session.path),'utf8'),/질문/);
+});
+
+test('a source root that is no longer a directory still offers cached project recovery',async t=>{
+ const f=await deletedProject(t);
+ await rename(f.source,f.source+'-old');await writeFile(f.source,'invalid recording folder');
+ const status=await f.controller.status(f.vault),cached=status.projects.find(p=>p.cached);
+ assert.match(status.error,/기록 폴더/);assert.equal(cached?.label,'Work');
+ assert.equal((await f.importProject(cached.id)).changed,true);
+ assert.equal(await readFile(f.file,'utf8'),f.original);
+});
+
+test('a stale undo request cannot replace the latest deleted conversation',async t=>{
+ const f=await fixture(t);await f.put();await f.configure(false);
+ await f.put('q2','두 번째 질문',f.now(),path.join(f.source,'project/chatSessions/second.json'));
+ const {status}=await f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:['project']});
+ const [first,second]=status.records[0].sessions,id=status.records[0].id;
+ const earlier=await f.controller.trash(f.vault,{id,sessionId:first.id});
+ const latest=await f.controller.trash(f.vault,{id,sessionId:second.id});
+ await assert.rejects(f.controller.restore(f.vault,earlier.trashId),/최근 삭제/);
+ assert.equal((await f.controller.status(f.vault)).trashId,latest.trashId);
+ await f.controller.restore(f.vault,latest.trashId);
+ await assert.rejects(readFile(path.join(f.vault.root,first.path)),{code:'ENOENT'});
+ assert.ok(await readFile(path.join(f.vault.root,second.path),'utf8'));
+});
