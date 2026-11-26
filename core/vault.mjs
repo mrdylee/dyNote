@@ -765,12 +765,12 @@ export class Vault {
     return { ...file, path: to, content, revision: digest(content), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs } };
   }
 
-  transferDroppedFile(source, folder, operation) {
+  transferDroppedFile(source, folder, operation, filename) {
     return this.#enqueue(async () => {
       if (typeof source !== "string" || !path.isAbsolute(source) || typeof folder !== "string")
         throw new Error("디스크에서 파일을 선택해 주세요.");
       if (!["copy", "move"].includes(operation)) throw new Error("파일 작업을 선택해 주세요.");
-      const name = path.basename(source);
+      const name = filename ?? path.basename(source);
       const inFolder = leaf => folder ? folder + "/" + leaf : leaf;
       if (!validRelativePath(inFolder(name)) || name.startsWith("~$"))
         throw new Error("보관함에서 사용할 수 없는 파일 이름입니다.");

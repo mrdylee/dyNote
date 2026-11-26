@@ -1,7 +1,7 @@
 import { officeKind, isOfficeKind } from "./office-types.mjs";
 import { officePreview } from "./office-package.mjs";
 import { readSource, sourcePath, decodePreviewText } from "./file-source.mjs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { readWordContent } from "./word-documents.mjs";
@@ -76,8 +76,17 @@ export class ExternalDocuments {
 
   async #update(id, entry, data) {
     const converted = await preview(entry.name, data.bytes);
-    await writeFile(entry.file, data.bytes, { mode: 0o600 });
+    const pending = entry.file + ".refresh";
+    await writeFile(pending, data.bytes, { mode: 0o600 });
+    await rename(pending, entry.file);
     return { id, name: entry.name, revision: data.revision, ...converted };
+  }
+
+  copyToVault(id, vault, folder) {
+    return this.#enqueue(() => {
+      const entry = this.#entry(id);
+      return vault.transferDroppedFile(entry.file, folder, "copy", entry.name);
+    });
   }
 
   close(id) {

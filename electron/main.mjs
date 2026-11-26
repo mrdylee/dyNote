@@ -890,7 +890,9 @@ app
       },
       "transfer-dropped-file": async (args, vault) => {
         checkVault(args, vault);
-        const result = await vault.transferDroppedFile(args.source, args.folder, args.operation);
+        const result = args.externalId
+          ? await externalDocuments().copyToVault(args.externalId, vault, args.folder)
+          : await vault.transferDroppedFile(args.source, args.folder, args.operation);
         const sync=openedVaults.get(vault.id)?.git.personal;
         if(sync?.disk && result.path && /\.(?:zip|pdf|pptx|xlsx)$/i.test(result.path)) {
           const copy=await sync.disk.read(result.path).catch(()=>null);

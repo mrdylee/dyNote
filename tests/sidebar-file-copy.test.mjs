@@ -59,15 +59,20 @@ test("Korean HTML is decoded identically on import, external preview and drop", 
   const imported = await vault.importAttachment("report.htm", bytes);
   const expected = '<meta charset="euc-kr"><p>한글</p>';
   assert.equal(await vault.readOtherFile(imported.path), expected);
-  assert.equal((await external.open(source)).content, expected);
+  const tab = await external.open(source);
+  assert.equal(tab.content, expected);
   await vault.transferDroppedFile(source, "", "copy");
   assert.deepEqual(await readFile(path.join(dir, "report.htm")), bytes);
   const invalid = Buffer.from([0xff, 0]);
   await writeFile(source, invalid);
+  await assert.rejects(external.read(tab.id, tab.revision), /인코딩/);
+  const saved = await external.copyToVault(tab.id, vault, "");
+  assert.equal(saved.path, "report (복사본).htm");
+  assert.deepEqual(await readFile(path.join(dir, saved.path)), bytes);
   await assert.rejects(vault.importAttachment("invalid.html", invalid), /인코딩/);
   await assert.rejects(vault.transferDroppedFile(source, "", "move"), /인코딩/);
   assert.deepEqual(await readFile(source), invalid);
-  assert.deepEqual((await readdir(dir)).sort(), ["_attachments", "report.htm"]);
+  assert.deepEqual((await readdir(dir)).sort(), ["_attachments", "report (복사본).htm", "report.htm"]);
   await external.dispose();
 });
 

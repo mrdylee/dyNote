@@ -107,6 +107,7 @@ import { pdfBacklinks } from "../core/pdf-links.mjs";
 import Planner from "./Planner.jsx";
 import { BOARD_PATH } from "../core/planner.mjs";
 
+const EXTERNAL_TAB_DRAG = "application/x-dynote-external-tab";
 const api = window.notes && Object.fromEntries(Object.entries(window.notes).map(([name, method]) => [
   name, (input, ...rest) => method(input?.vaultId ? { ...input, workspace: true } : input, ...rest),
 ]));
@@ -1582,7 +1583,7 @@ export default function App() {
       folder: row?.dataset.treeDropFolder ?? "" };
   };
   const transferSidebarFiles = async (files, { vaultId, folder }, operation) => {
-    const verb = operation === "copy" ? "복사" : "이동";
+    const verb = operation === "save" ? "저장" : operation === "copy" ? "복사" : "이동";
     const completed = [], failed = [], refresh = new Set();
     setBusy(true);
     setCopyStatus("파일 " + verb + " 중…");
@@ -1590,7 +1591,9 @@ export default function App() {
       await flush();
       for (const file of files) {
         try {
-          const result = await invoke(api.transferDroppedFile({ vaultId, folder, operation }, file));
+          const result = await invoke(operation === "save"
+            ? api.copyExternalFile({ vaultId, folder, id: file.id })
+            : api.transferDroppedFile({ vaultId, folder, operation }, file));
           if (!result.unchanged) refresh.add(vaultId);
           if (result.sourceVaultId) refresh.add(result.sourceVaultId);
           if (result.warning) failed.push(file.name + " · " + result.warning);
@@ -2011,9 +2014,13 @@ export default function App() {
         if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showTabMenu(event, key);
       }}>
       <button className="tab-label" title={label ? `${label} · ${path}` : path} disabled={busy}
-        draggable={!external && !busy && /\.md$/i.test(path)}
+        draggable={!busy && (!!external || /\.md$/i.test(path))}
         onPointerDown={external ? undefined : event => startMacCopy(event, vaultId, path)}
-        onDragStart={event => startTabDrag(event, vaultId, path)} onDragEnd={endTreeDrag}
+        onDragStart={event => {
+          if (!external) return startTabDrag(event, vaultId, path);
+          event.dataTransfer.setData(EXTERNAL_TAB_DRAG, key);
+          event.dataTransfer.effectAllowed = "copy";
+        }} onDragEnd={endTreeDrag}
         onClick={() => external ? activateExternal(key) : draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
         {draft?.running ? <LoaderCircle size={13} className="document-generating-icon" aria-label="문서 생성 중" /> : <FileText size={13} />}
         <span className={label ? "tab-document" : undefined}>
@@ -2162,17 +2169,24 @@ export default function App() {
         </nav>
         <aside className="navigator" style={{ width: panelLayout.left }} data-sidebar-copy="" data-copy-active={treeDrop?.operation.startsWith("import-")}
           onDragOverCapture={event => {
-            if (!event.dataTransfer.types.includes("Files")) return;
+            const preview = event.dataTransfer.types.includes(EXTERNAL_TAB_DRAG);
+            if (!preview && !event.dataTransfer.types.includes("Files")) return;
             event.preventDefault(); event.stopPropagation();
             const target = sidebarTarget(event);
             // Dynote removes the original after publishing the file; the native drag source must keep it.
             event.dataTransfer.dropEffect = busy ? "none" : "copy";
-            highlightTreeDrop(target.vaultId, target.folder, busy ? null : event.ctrlKey ? "import-copy" : "import-move");
+            highlightTreeDrop(target.vaultId, target.folder, busy ? null : preview || event.ctrlKey ? "import-copy" : "import-move");
           }}
           onDragLeaveCapture={event => {
             if (treeDrop?.operation.startsWith("import-") && !event.currentTarget.contains(event.relatedTarget)) setTreeDrop(null);
           }}
           onDropCapture={event => {
+            if (event.dataTransfer.types.includes(EXTERNAL_TAB_DRAG)) {
+              event.preventDefault(); event.stopPropagation(); setTreeDrop(null);
+              const preview = externalFile.documents[event.dataTransfer.getData(EXTERNAL_TAB_DRAG)]?.document;
+              if (preview && !busy) void transferSidebarFiles([preview], sidebarTarget(event), "save");
+              return;
+            }
             const files = Array.from(event.dataTransfer.files);
             if (!files.length) return;
             event.preventDefault(); event.stopPropagation(); setTreeDrop(null);

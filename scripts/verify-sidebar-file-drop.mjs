@@ -66,6 +66,17 @@ try {
   assert.deepEqual((await readdir(path.join(vault, "Reports"))).sort(), ["Report (복사본).HTM", "Report.HTM", "Sample.txt"]);
   assert.equal(await readFile(path.join(root, "Report.HTM"), "utf8"), html);
   assert.equal(await readFile(path.join(vault, "Sample.txt"), "utf8"), await readFile(path.join(root, "Sample.txt"), "utf8"));
+  const previewTab = page.getByRole("button", { name: "Report.HTM 임시 미리보기", exact: true });
+  await previewTab.waitFor();
+  assert.equal(await previewTab.evaluate(button => button.draggable), true);
+  await previewTab.dragTo(reports);
+  await tree.locator('[title="Reports/Report (복사본 2).HTM"]').waitFor();
+  assert.equal(await readFile(path.join(vault, "Reports/Report (복사본 2).HTM"), "utf8"), html);
+  await tree.locator('[title="Control.md"]').click();
+  await previewTab.dragTo(tree.locator('.folder-row[data-tree-drop-folder="Shared"]'));
+  await tree.locator('[title="Shared/Report.HTM"]').waitFor();
+  assert.equal(await readFile(path.join(team, "Shared/Report.HTM"), "utf8"), html);
+  assert.equal(await readFile(path.join(root, "Report.HTM"), "utf8"), html);
   await page.getByRole("button", { name: "Report.HTM 탭 닫기", exact: true }).click();
   await writeFile(path.join(root, "Move.txt"), "move me");
   await drop(reports, ["Move.txt"], false);
