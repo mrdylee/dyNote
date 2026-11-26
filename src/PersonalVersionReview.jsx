@@ -35,12 +35,23 @@ function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, 
         const text = part.alternatives[id] ?? part.original;
         if (!part.key) return text;
         const number = ++hunkIndex;
-        const checked = (picks[part.key] ?? selected) === id;
-        return <div className="comparison-block" key={part.key}>
-          <label><input type="radio" name={"hunk-" + part.key} checked={checked}
-            disabled={busy || (id !== "original" && !Object.hasOwn(part.alternatives, id))}
-            onChange={() => onPick(part.key, id)}/>겹친 구간 {number} · {title}</label>
-          <span>{text || (id === "original" ? "(빈 원문)" : "(삭제)")}</span>
+        const pick = picks[part.key];
+        const source = pick?.source ?? selected;
+        const copiedHere = pick?.destination === id && Object.hasOwn(part.alternatives, source);
+        const original = slot === "original";
+        const caption = original ? "원문 유지" : slot === "left" ? "오른쪽으로 복사 →" : "← 왼쪽으로 복사";
+        return <div className="comparison-block" key={part.key} data-resolved={source === "original" || Object.hasOwn(part.alternatives, source)}>
+          <div className="comparison-block-tools">
+            <strong>충돌 {number}</strong>
+            {copiedHere
+              ? <button type="button" disabled={busy} onClick={() => onPick(part.key, null)}>되돌리기</button>
+              : <button type="button" aria-pressed={source === id} disabled={busy || (!original && !Object.hasOwn(part.alternatives, id))}
+                  onClick={() => onPick(part.key, { source: id, destination: original ? null : other })}>{caption}</button>}
+          </div>
+          {copiedHere ? <>
+            <del>{text || "(빈 구간)"}</del>
+            <ins aria-label="반영할 내용">{part.alternatives[source] || "(삭제)"}</ins>
+          </> : <span className="comparison-value">{text || (original ? "(빈 원문)" : "(삭제)")}</span>}
         </div>;
       })}
     </div>
@@ -123,7 +134,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         path,
         basis,
         commit: selected || rows[0].commit,
-        options: { hunks: hunks.map((h) => picks[h.key] ?? selected), copies },
+        options: { hunks: hunks.map((h) => picks[h.key]?.source ?? selected), copies },
       });
       onClose();
     } catch (e) {
@@ -146,12 +157,14 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       setError(e.message);
     }
   }
-  const ready = hunks.length ? hunks.every(h => {
-    const choice = picks[h.key] ?? selected;
-    return choice === "original" || Object.hasOwn(h.alternatives, choice);
-  }) : !!selected;
+  const remaining = hunks.filter(h => {
+    const choice = picks[h.key]?.source ?? selected;
+    return choice !== "original" && !Object.hasOwn(h.alternatives, choice);
+  }).length;
+  const ready = hunks.length ? remaining === 0 : !!selected;
   const actions = (
     <div className="settings-actions">
+        {!!hunks.length && <span role="status">{remaining ? `미해결 충돌 ${remaining}개` : "모든 충돌 선택 완료"}</span>}
         <button
           className="primary-button"
           disabled={busy || !ready || rows.length !== basis.length}
@@ -164,23 +177,8 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         </button>
       </div>
   );
-  return (
-    <section className="settings-section">
-      <h3>{path}</h3>
-      {parts && compared.length === 2 && <div className="version-workspace">
-        {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
-          <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>
-            {hunks.map((h, i) => <option key={h.key} value={i}>겹친 구간 {i + 1}</option>)}
-          </select>
-        </label>}
-        <DocumentPanes panes={[{key:"left", id:compared[0]}, {key:"original", id:"original"}, {key:"right", id:compared[1]}]}
-          renderPane={({key, id}) => <ComparisonPane slot={key} id={id} rows={rows} other={compared[key === "left" ? 1 : 0]}
-            parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
-            onSwitch={id => setCompared(old => key === "left" ? [id, old[1]] : [old[0], id])}
-            onPick={(key, id) => setPicks(old => ({ ...old, [key]: id }))}/>}/>
-      </div>}
-      {parts && actions}
-      <fieldset disabled={busy}>
+  const versions = (
+    <fieldset disabled={busy}>
         <legend>검토할 버전 {basis.length}개</legend>
         {rows.map((v) => (
           <div key={v.commit}>
@@ -200,6 +198,32 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         ))}
         {rows.length < basis.length && <button onClick={() => setLimit((n) => n + 50)}>이전 버전 더 보기</button>}
       </fieldset>
+  );
+  return (
+    <section className="settings-section">
+      <h3>{path}</h3>
+      {parts && compared.length === 2 && <div className="version-workspace">
+        {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
+          <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>
+            {hunks.map((h, i) => <option key={h.key} value={i}>겹친 구간 {i + 1}</option>)}
+          </select>
+        </label>}
+        <DocumentPanes panes={[{key:"left", id:compared[0]}, {key:"original", id:"original"}, {key:"right", id:compared[1]}]}
+          renderPane={({key, id}) => <ComparisonPane slot={key} id={id} rows={rows} other={compared[key === "left" ? 1 : 0]}
+            parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
+            onSwitch={id => setCompared(old => key === "left" ? [id, old[1]] : [old[0], id])}
+            onPick={(key, pick) => setPicks(old => {
+              const next = { ...old };
+              if (pick) next[key] = pick;
+              else delete next[key];
+              return next;
+            })}/>}/>
+      </div>}
+      {parts && actions}
+      {hunks.length ? <details className="comparison-versions">
+        <summary>버전별 선택 및 저장 · {basis.length}개</summary>
+        {versions}
+      </details> : versions}
       {!/\.md$/i.test(path) && selected && (
         <>
           <label>

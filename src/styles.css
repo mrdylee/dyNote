@@ -1801,9 +1801,14 @@ kbd {
 .comparison-pane .pane-header select { width: 100%; min-width: 0; }
 .comparison-pane small { color: var(--muted); }
 .comparison-body { flex: 1; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--body-font, inherit); }
-.comparison-block { background: var(--surface); border-left: 3px solid var(--border); padding: 6px 8px; }
-.comparison-block:has(:checked) { border-color: var(--accent); }
-.version-dialog .comparison-block label { margin: 0 0 5px; color: var(--accent); cursor: pointer; }
+.comparison-block { background: color-mix(in srgb, #d69b27 16%, var(--surface, white)); border-inline-start: 3px solid #b97e1b; padding: 6px 8px; }
+.comparison-block[data-resolved="true"] { background: var(--soft); border-color: var(--accent); }
+.comparison-block-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; font-size: 12px; white-space: normal; }
+.comparison-block-tools button { border: 1px solid var(--accent); border-radius: 4px; padding: 3px 8px; color: var(--accent-ink); }
+.comparison-block-tools button[aria-pressed="true"] { background: var(--accent); color: white; }
+.comparison-block del, .comparison-block ins { display: block; }
+.comparison-block del { background: color-mix(in srgb, #d65252 16%, var(--surface, white)); }
+.comparison-block ins { background: color-mix(in srgb, #30995a 21%, var(--surface, white)); text-decoration: none; }
 .version-dialog .settings-section .comparison-jump { display: flex; align-items: center; gap: 8px; }
 .modal.settings-modal { max-height: calc(100vh - 48px); overflow-y: auto; padding: 24px; }
 .settings-modal .modal-heading { padding: 0; }

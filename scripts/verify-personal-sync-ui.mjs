@@ -194,12 +194,12 @@ async function verifyJournalConflict(a, b) {
   }
   await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
   const review = b.page.getByRole("dialog", { name: "버전 확인" });
-  await review.getByRole("radio", { name: /^b · Local/ }).waitFor();
+  await review.getByText("버전별 선택 및 저장 · 4개").waitFor();
   const pane = label => review.getByRole("region", { name: label, exact: true });
   for (const [label, value] of [["공통 원문", "기준"], ["Cloud", "a"], ["Local", "b"]]) {
     const content = pane(label).locator(".comparison-body");
     assert((await content.textContent()).startsWith("오늘 회의\n"));
-    assert.equal(await content.locator(".comparison-block > span").textContent(), value + "\n");
+    assert.equal(await content.locator(".comparison-value").textContent(), value + "\n");
     assert((await content.textContent()).endsWith("다음 일정"));
   }
   const panels = review.locator(".comparison-pane");
@@ -215,11 +215,20 @@ async function verifyJournalConflict(a, b) {
   await switcher.selectOption(before);
   const apply = review.getByRole("button", { name: "선택한 내용 반영" });
   assert(await apply.isDisabled());
-  await pane("공통 원문").getByRole("radio").check();
+  await pane("공통 원문").getByRole("button", { name: /원문 유지/ }).click();
   await review.getByRole("button", { name: "나중에" }).click();
   assert.equal(await readFile(path.join(b.root, journal), "utf8"), body("0"));
   await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
-  await pane("Cloud").getByRole("radio").check();
+  for (const [source, destination, value] of [["Local", "Cloud", "b"], ["Cloud", "Local", "a"]]) {
+    await pane(source).getByRole("button", { name: /복사/ }).click();
+    assert.equal(await pane(destination).locator("ins").textContent(), value + "\n");
+    assert.equal(await readFile(path.join(b.root, journal), "utf8"), body("0"));
+    if (source === "Local") {
+      await pane(destination).getByRole("button", { name: /되돌리기/ }).click();
+      assert.equal(await review.locator("ins").count(), 0);
+      assert(await apply.isDisabled());
+    }
+  }
   await apply.click();
   await review.waitFor({ state: "hidden" });
   await sync(a);
@@ -292,6 +301,7 @@ try {
   await apps[1].evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 640));
   await b.page.getByRole("button", { name: /버전 확인 · 2개/ }).click();
   const dialog = b.page.getByRole("dialog", { name: "버전 확인" });
+  await dialog.getByText("버전별 선택 및 저장 · 2개").click();
   const selection = dialog.getByRole("radio", { name: /회의 3시.*Local/ }).first();
   await selection.check();
   await writeFile(path.join(third.root, "회의록.md"), "회의 4시\n");
