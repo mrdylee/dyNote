@@ -56,7 +56,7 @@ import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
 import { DOCUMENT_DRAG, TAB_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
-import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder, managedCopilotPath, renamedTreePath, treeRenameDestination } from "../core/file-tree.mjs";
+import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder, managedCopilotPath, pathInTree, renamedTreePath, treeRenameDestination } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
 import PdfViewer from "./PdfViewer.jsx";
@@ -910,13 +910,13 @@ export default function App() {
   useEffect(() => api?.onSyncVault?.(() => { void syncCurrentVault(); }), []);
 
   const refreshSequence=useRef(new Map());
-  const refreshSyncedVault = async vaultId => {
+  const refreshSyncedVault = async (vaultId, apply = installVault) => {
     if (!vaultsRef.current[vaultId]) return;
     const token=Symbol();refreshSequence.current.set(vaultId,token);
     while(vaultsRef.current[vaultId] && refreshSequence.current.get(vaultId)===token) {
       const generation=queue.generation(vaultId),snapshot=await invoke(api.snapshot({vaultId}));
       if (generation!==queue.generation(vaultId))continue;
-      if(refreshSequence.current.get(vaultId)===token && vaultsRef.current[vaultId]) installVault(snapshot);
+      if(refreshSequence.current.get(vaultId)===token && vaultsRef.current[vaultId]) apply(snapshot);
       break;
     }
   };
@@ -941,7 +941,7 @@ export default function App() {
   updateContext.current = { treeWriting: treeWrites.length > 0, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
   const installUpdate = async (automatic = false) => {
     if (updateRequest.current) return;
-    if (updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
+    if (updateContext.current.treeWriting || updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
     updateRequest.current = { interaction: updateInteraction.current, automatic };
     try { await invoke(api.installUpdate()); }
     catch (error) { updateRequest.current = null; throw error; }
@@ -1573,11 +1573,7 @@ export default function App() {
     const scope = vaultsRef.current[vaultId];
     const moved = name => renamedTreePath(name, from, to);
     let navigation = scope.navigation;
-    for (const key of new Set([...workspace.paths, ...Object.keys(workspace.modes)])) {
-      const reference = documentRef(key);
-      if (reference.vaultId === vaultId && moved(reference.path) !== reference.path)
-        workspace.dispatch({ type: "rename", path: key, to: documentKey(vaultId, moved(reference.path)) });
-    }
+    workspace.dispatch({ type: "rename-tree", vaultId, from, to });
     for (const name of new Set([...navigation.recent, ...navigation.bookmarks]))
       if (moved(name) !== name) navigation = navigationAction(navigation, { type: "rename", from: name, to: moved(name) });
     persist(`dynote.navigation.${vaultId}`, navigation);
@@ -1880,10 +1876,6 @@ export default function App() {
     const { vaultId, path, folder } = fileTarget;
     const action = modal;
     const background = action === "trash" || action === "rename";
-    if (treeWrites.some(target => target.vaultId === vaultId)) {
-      setError("이 보관함의 파일 작업이 끝난 뒤 다시 시도해 주세요.");
-      return;
-    }
     const scope = vaultsRef.current[vaultId];
     let to;
     if (action === "rename") {
@@ -1894,8 +1886,15 @@ export default function App() {
         if (scope.folders.includes(to) || existing.some(file => file.path === to)) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
       } catch (error) { setError(error.message); return; }
     }
+    const operation = { vaultId, path, folder, action, to: to ?? (action === "move" ? newName.trim() : null) };
+    const paths = [path, operation.to].filter(Boolean);
+    if (treeWrites.some(target => target.vaultId === vaultId && [target.path, target.to].some(name =>
+      name && paths.some(next => pathInTree(name, next) || pathInTree(next, name))))) {
+      setError("이 경로의 파일 작업이 끝난 뒤 다시 시도해 주세요.");
+      return;
+    }
     if (background) {
-      setTreeWrites(old => [...old, { ...fileTarget, action }]);
+      setTreeWrites(old => [...old, operation]);
       setModal(null);
     } else setBusy(true);
     try {
@@ -1935,7 +1934,7 @@ export default function App() {
     } catch (err) {
       setError(err.message);
     } finally {
-      if (background) setTreeWrites(old => old.filter(target => target.vaultId !== vaultId));
+      if (background) setTreeWrites(old => old.filter(target => target !== operation));
       else setBusy(false);
     }
   };
@@ -2820,7 +2819,7 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
-            {treeWrites.map(target => <span key={target.vaultId} role="status" title={target.path}>
+            {treeWrites.map(target => <span key={documentKey(target.vaultId, target.path)} role="status" title={target.path}>
               {target.action === "trash" ? "휴지통으로 이동 중…" : "이름 변경 중…"}
             </span>)}
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
@@ -3521,8 +3520,12 @@ export default function App() {
               const id = gitVault.id;
               if (!["fetch", "commit", "unstage", "delete-branch"].includes(action.kind)) await flush(false, id);
               try {
+                const generation = queue.generation(id);
                 const result = await invoke(api.gitWorkspaceAction({ vaultId: id, action }));
-                if (result.snapshot && vaultsRef.current[id]) acceptSnapshot(result.snapshot);
+                if (result.snapshot && vaultsRef.current[id]) {
+                  if (queue.generation(id) === generation) acceptSnapshot(result.snapshot);
+                  else await refreshSyncedVault(id, acceptSnapshot);
+                }
                 return result.status;
               } catch (error) {
                 setError(error.message);

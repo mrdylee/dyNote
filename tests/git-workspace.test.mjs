@@ -48,6 +48,30 @@ test('GIT-01 clean fast-forward pull succeeds and dirty worktree is preserved',a
  await writeFile(`${other}/Remote.md`,'remote new\n');await runGit(other,['add','--','Remote.md']);await runGit(other,['commit','-m','other diverged']);await runGit(other,['push']);
  await assert.rejects(git.action({kind:'pull'}));assert.equal((await runGit(root,['rev-parse','HEAD'])).stdout,localHead);assert.equal(await readFile(`${root}/A.md`,'utf8'),'dirty\n');
 });
+test('pull keeps downloads outside the vault write queue and applies only its own fetch', async t => {
+  const {dir,root} = await fixture(t), remote = dir + '/origin.git';
+  await runGit(dir, ['init','--bare',remote]);
+  await runGit(root, ['remote','add','origin',remote]);
+  await runGit(root, ['push','origin','main']);
+  const workspace = new tools.GitWorkspace(root);
+  const apply = () => { assert.fail('A pull with no verified target must not take the vault write lock'); };
+  await assert.rejects(workspace.action({kind:'pull'}, apply), /원격 브랜치/);
+
+  await runGit(root, ['branch','--set-upstream-to=origin/main']);
+  const before = (await runGit(root, ['rev-parse','HEAD'])).stdout;
+  await runGit(root, ['switch','-c','other']);
+  await runGit(root, ['commit','--allow-empty','-m','other branch']);
+  await runGit(root, ['push','origin','other']);
+  await runGit(root, ['switch','main']);
+  workspace.git = async (args, options) => {
+    const result = await runGit(root, args, options);
+    if (args[0] === 'fetch') await runGit(root, ['fetch','origin','other']);
+    return result;
+  };
+  await workspace.action({kind:'pull'});
+  assert.equal((await runGit(root, ['for-each-ref','refs/dynote-pull'])).stdout, '');
+  assert.equal((await runGit(root, ['rev-parse','HEAD'])).stdout, before);
+});
 test('GIT-01 branch changes require clean files and merged-only deletion preserves unmerged work',async t=>{
  assert.equal(typeof tools.GitWorkspace,'function');const {root}=await fixture(t),git=new tools.GitWorkspace(root);
  await git.action({kind:'create-branch',branch:'feature'});assert.equal((await git.status()).branch,'feature');

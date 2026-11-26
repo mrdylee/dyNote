@@ -1110,7 +1110,12 @@ app
           const target = scoped ? workspaceVault(args.vaultId) : vault;
           if (scoped) checkVault(args, target);
           if (!readOnly) {
-            const roots = target && !globalOperation ? [target.root] : [];
+            const roots = [];
+            if (target && !globalOperation) {
+              const metadataOnly = name === "git-workspace-action" && ["fetch", "commit", "unstage", "delete-branch"].includes(args?.action?.kind);
+              if (!metadataOnly) roots.push(target.root);
+              if (metadataOnly || (exclusive && !transfer)) roots.push(path.join(target.root, ".git"));
+            }
             if (target && transfer && args?.sourceVaultId) {
               const source = workspaceVault(args.sourceVaultId);
               if (source) roots.push(source.root);

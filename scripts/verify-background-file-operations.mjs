@@ -14,7 +14,7 @@ const server = createServer((_req, response) => waiting.resolve(response));
 let app;
 try {
   for (const root of [personal, team, profile]) await mkdir(root);
-  for (const name of ["Keep", "Remove", "Rename"]) await writeFile(path.join(personal, name + ".md"), name);
+  for (const name of ["Keep", "Remove", "Rename", "CopySource"]) await writeFile(path.join(personal, name + ".md"), name);
   await writeFile(path.join(team, "Team.md"), "Team");
   await writeFile(path.join(profile, "settings.json"), JSON.stringify({vaultRoot:personal, vaults:[personal,team], vaultPurposes:{[personal]:"personal",[team]:"team"}}));
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -53,12 +53,15 @@ try {
     });
     observer.observe(document.body, {attributes:true, subtree:true, attributeFilter:["disabled"]});
   });
-  await file("Remove").click({button:"right"});
-  await page.getByRole("menuitem", {name:/휴지통으로 이동/}).click();
-  await page.getByRole("dialog").getByRole("button", {name:"휴지통으로 이동",exact:true}).click();
-  await file("Remove").waitFor({state:"detached"});
-  assert.equal(await page.evaluate(() => window.blockedTabs), false);
-  assert.match(await page.locator(".tab.active").innerText(), /Keep/);
+  const copied = await page.evaluate(async () => {
+    const {value:spaces} = await window.notes.workspaceSnapshots();
+    const source = spaces.find(space => space.purpose === "personal").snapshot;
+    const target = spaces.find(space => space.purpose === "team").snapshot;
+    const revision = source.notes.find(note => note.path === "CopySource.md").revision;
+    return window.notes.copyFile({workspace:true, vaultId:target.id, sourceVaultId:source.id, from:"CopySource.md", folder:"", revision});
+  });
+  assert.equal(copied.ok, true, copied.error);
+  assert.equal(await readFile(path.join(team, "CopySource.md"), "utf8"), "CopySource");
   await file("Rename").click({button:"right"});
   await page.getByRole("menuitem", {name:/이름 바꾸기/}).click();
   const dialog = page.getByRole("dialog", {name:"이름 바꾸기"});
@@ -66,6 +69,12 @@ try {
   await dialog.locator("button[type=submit], button.primary-button").last().click();
   await dialog.waitFor({state:"hidden"});
   await page.getByRole("status").filter({hasText:"이름 변경 중…"}).waitFor();
+  await file("Remove").click({button:"right"});
+  await page.getByRole("menuitem", {name:/휴지통으로 이동/}).click();
+  await page.getByRole("dialog").getByRole("button", {name:"휴지통으로 이동",exact:true}).click();
+  await file("Remove").waitFor({state:"detached"});
+  assert.equal(await page.evaluate(() => window.blockedTabs), false);
+  assert.match(await page.locator(".tab.active").innerText(), /Keep/);
   for (const [root,name] of [[personal,"Keep"], [team,"Team"]]) {
     await file(name).click();
     await page.getByRole("button", {name:"편집 보기",exact:true}).click();
@@ -76,16 +85,18 @@ try {
     while (!(await readFile(path.join(root, name + ".md"), "utf8")).includes("editing during fetch") && Date.now() < deadline) await delay(50);
     assert.match(await readFile(path.join(root,name + ".md"), "utf8"), /editing during fetch/);
   }
+  await file("Rename").click();
+  assert.match(await page.locator(".tab.active").innerText(), /Rename/);
   response.writeHead(404); response.end();
   await page.evaluate(() => window.backgroundFetch);
   await file("Renamed").waitFor();
   assert.equal(execFileSync("git", ["-C", personal, "log", "-1", "--format=%s"], {encoding:"utf8"}).trim(), "background commit");
   assert.equal(execFileSync("git", ["-C", personal, "show", "HEAD:Keep.md"], {encoding:"utf8"}), "Keep");
-  assert.match(await page.locator(".tab.active").innerText(), /Team/);
+  assert.match(await page.locator(".tab.active").innerText(), /Renamed/);
   await page.getByRole("button", {name:"되돌리기",exact:true}).click();
   await file("Remove").waitFor();
   assert.equal(await readFile(path.join(personal, "Remove.md"), "utf8"), "Remove");
-  console.log("PASS dismiss pending commit, delete, edit both vaults during fetch, keep staged bytes, finish rename without stealing focus, undo delete");
+  console.log("PASS dismiss pending commit, copy between vaults, delete, edit both vaults during fetch, keep staged bytes, retain a tab opened during rename, undo delete");
 } catch (error) {
   console.error(error);
   app?.process().kill();

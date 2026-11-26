@@ -1,5 +1,3 @@
-import {readFile} from 'node:fs/promises';
-import path from 'node:path';
 import {GitBackup,runGit,validateGitConfig} from './git-backup.mjs';
 import {validFilePath} from './vault.mjs';
 import {localOnlyFiles} from './git-file-status.mjs';
@@ -223,17 +221,21 @@ export class GitWorkspace {
       else {
         await this.clean();
         const branch=state.branchName;
-        const merge=branch && (await this.git(['config','--get-all',`branch.${branch}.merge`],{allow:[0,1]})).stdout.trim();
-        if (!merge || merge.includes('\n')) {
-          // Let Git handle repositories without a single configured merge branch.
-          await applyChanges(async () => { await this.clean(); await this.git(['pull','--no-rebase','--ff-only','--no-autostash']); });
-        } else {
-          const before=(await this.git(['rev-parse','--verify','HEAD'],{allow:[0,128]})).stdout;
-          await this.git(['fetch']);
-          const fetchFile = (await this.git(['rev-parse','--git-path','FETCH_HEAD'])).stdout.trim();
-          const heads = [...(await readFile(path.resolve(this.root,fetchFile),'utf8')).matchAll(/^([0-9a-f]+)\t\t/gm)];
-          if (heads.length !== 1) throw new Error('가져온 원격 브랜치를 확인할 수 없습니다. 브랜치 설정을 확인해 주세요.');
-          const incoming = heads[0][1];
+        const before=(await this.git(['rev-parse','--verify','HEAD'],{allow:[0,128]})).stdout;
+        const config=async key=>(await this.git(['config','--null','--get-all',key],{allow:[0,1]})).stdout.split('\0').filter(Boolean);
+        const [trackedRemote]=await config(`branch.${branch}.remote`);
+        const source=trackedRemote || remote;
+        const merges=await config(`branch.${branch}.merge`);
+        const refspecs=await config(`remote.${source}.fetch`);
+        const firstSource=refspecs[0]?.replace(/^\+/,'').split(':')[0] ?? 'HEAD';
+        const target=merges[0] || firstSource;
+        if (!branch || merges.length>1 || !target || /[\^*]/.test(target))
+          throw new Error('가져올 원격 브랜치 하나를 현재 브랜치에 연결해 주세요.');
+        // Keep the exact result of this fetch even when an external client fetches concurrently.
+        const fetched='refs/dynote-pull/'+randomUUID();
+        try {
+          await this.git(['fetch','--',source,...refspecs,`+${target}:${fetched}`]);
+          const incoming=(await this.git(['rev-parse','--verify',fetched+'^{commit}'])).stdout.trim();
           await applyChanges(async () => {
             if ((await this.git(['symbolic-ref','--short','HEAD'])).stdout.trim()!==branch ||
                 (await this.git(['rev-parse','--verify','HEAD'],{allow:[0,128]})).stdout!==before)
@@ -241,6 +243,8 @@ export class GitWorkspace {
             await this.clean();
             await this.git(['merge','--ff-only','--no-autostash','--',incoming]);
           });
+        } finally {
+          await this.git(['update-ref','-d',fetched]);
         }
       }
     } else if(['create-branch','switch-branch','delete-branch'].includes(input.kind)){

@@ -40,3 +40,17 @@ test('new Markdown panes default to live preview while explicit modes survive na
  state=workspace.workspaceAction(state,{type:'open',path:'General.md'});assert.equal(state.modes['General.md'],'read');
  state=workspace.workspaceAction(state,{type:'reset',path:'Other.md'});assert.equal(state.modes['Other.md'],'live');
 });
+
+test('finishing a folder rename maps the current panes and their saved view modes', () => {
+  const vaultId = '1111111111111111', other = '2222222222222222';
+  const key = (path, id = vaultId) => workspace.documentKey(id, path);
+  const paths = [key('Old/note.md'), key('Older/note.md'), key('Old/note.md', other)];
+  const modes = { [paths[0]]: 'edit', [key('New/note.md')]: 'read', [key('Old/closed.md')]: 'read', [paths[2]]: 'live' };
+  const action = { type: 'rename-tree', vaultId, from: 'Old', to: 'New' };
+  for (const active of paths) {
+    const updated = workspace.workspaceAction({ paths, modes, active }, action);
+    assert.deepEqual(updated.paths, [key('New/note.md'), ...paths.slice(1)]);
+    assert.equal(updated.active, active === paths[0] ? key('New/note.md') : active);
+    assert.deepEqual(updated.modes, { [key('New/note.md')]: 'edit', [key('New/closed.md')]: 'read', [paths[2]]: 'live' });
+  }
+});

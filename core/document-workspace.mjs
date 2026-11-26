@@ -1,3 +1,5 @@
+import {renamedTreePath} from './file-tree.mjs';
+
 export const DOCUMENT_DRAG = 'application/x-dynote-document';
 export const TAB_DRAG = 'application/x-dynote-tab';
 
@@ -23,6 +25,20 @@ export function workspaceAction(value, action) {
     if (mode) modes[action.to] = mode;
     const paths = [...new Set(state.paths.map(key => key === path ? action.to : key))];
     return {...state, paths, active:state.active === path ? action.to : state.active, modes};
+  }
+  if (action.type === 'rename-tree') {
+    const moved = key => {
+      const ref = documentRef(key);
+      return ref.vaultId === action.vaultId ? documentKey(ref.vaultId, renamedTreePath(ref.path, action.from, action.to)) : key;
+    };
+    const modes = {...state.modes};
+    for (const [key, mode] of Object.entries(state.modes)) {
+      const next = moved(key);
+      if (next === key) continue;
+      delete modes[key];
+      modes[next] = mode;
+    }
+    return {...state, paths:[...new Set(state.paths.map(moved))], active:moved(state.active), modes};
   }
   if (action.type === 'remove-tree') {
     const keep = key => {
