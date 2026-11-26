@@ -2275,3 +2275,12 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .selection-format-menu button:hover { background: var(--soft); }
 .selection-format-menu button:first-child { font-weight: bold; }
 .selection-format-menu button[aria-label="선택 노란 형광펜"] { border-bottom: 3px solid #ffe58a; }
+
+.ai-suggestion { width: min(620px, calc(100vw - 40px)); max-height: 80vh; overflow: auto; box-sizing: border-box; padding: 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); }
+.ai-suggestion::backdrop { background: rgb(0 0 0 / 24%); }
+.ai-suggestion h2 { margin: 0; font-size: 18px; }
+.ai-suggestion .copilot-comparison:has(section:only-child) { grid-template-columns: 1fr; }
+.ai-suggestion label { display: inline-flex; align-items: center; gap: 6px; margin: 4px 12px 4px 0; }
+.ai-suggestion footer { display: flex; justify-content: flex-end; gap: 8px; }
+.ai-suggestion .ai-custom-prompt { display: flex; }
+.ai-custom-prompt input { flex: 1; min-width: 0; padding: 5px; }

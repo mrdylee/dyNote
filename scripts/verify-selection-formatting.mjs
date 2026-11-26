@@ -56,6 +56,63 @@ try {
   await app.evaluate(({ Menu }) => {
     Menu.prototype.popup = function () { globalThis.formattingMenu = this; };
   });
+  // Exercise the real menu and editor with a deterministic Copilot response.
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.editRequests = [];
+    ipcMain.removeHandler("notes:copilot-status");
+    ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, models: [{ id: "auto", name: "Auto" }] } }));
+    ipcMain.removeHandler("notes:copilot-send");
+    ipcMain.handle("notes:copilot-send", (event, args) => {
+      globalThis.editRequests.push(args);
+      event.sender.send("notes:copilot-event", { requestId: args.requestId, type: "done", content: "확인 필요" });
+      return { ok: true, value: { requestId: args.requestId } };
+    });
+  });
+  const proposal = page.getByRole("dialog", { name: "AI 제안" });
+  await select("여기서 단어만");
+  await chooseContextFormat("단어만", "ai-suggestion");
+  assert.equal(await proposal.locator("pre").innerText(), "여기서 단어만");
+  assert.equal(await app.evaluate(() => globalThis.editRequests.length), 0);
+  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("button", { name: "버리기" }).click();
+  assert.equal(await docText(), original);
+  await select("회의록");
+  await chooseContextFormat("확인할", "ai-suggestion");
+  assert.equal(await proposal.locator("pre").innerText(), "확인할 항목");
+  await proposal.getByLabel("작업").selectOption("간결하게");
+  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "원문에 적용" }).click();
+  assert.equal(await docText(), original.replace("확인할 항목", "확인 필요"));
+  await page.keyboard.press(modifier + "+z");
+  assert.equal(await docText(), original);
+  const request = await app.evaluate(() => globalThis.editRequests.at(-1));
+  assert.deepEqual(request.context, { kind: "selection", content: "확인할 항목", path: "선택.md" });
+  assert.equal(request.mode, "edit");
+  assert.equal(request.vaultAccess, false);
+  assert.match(request.prompt, /간결하게/);
+  assert.deepEqual(request.history, []);
+  assert.deepEqual(request.references, []);
+  await select("반복 색상");
+  await chooseContextFormat("반복", "ai-suggestion");
+  await proposal.getByLabel("작업").selectOption("직접 요청");
+  assert.equal(await proposal.getByRole("button", { name: "제안 받기" }).isEnabled(), false);
+  await proposal.getByLabel("요청 내용").fill("공손하게 써 줘");
+  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "원문에 적용" }).waitFor();
+  assert.equal(await app.evaluate(() => globalThis.editRequests.at(-1).prompt), "공손하게 써 줘");
+  // A sync or another editor can change the file while the review is open.
+  await page.locator(".cm-content").evaluate(el => {
+    const view = el.cmTile.root.view;
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "새 메모" } });
+  });
+  await proposal.getByRole("alert").filter({ hasText: "원문이 변경" }).waitFor();
+  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  await proposal.getByRole("button", { name: "버리기" }).click();
+  await page.locator(".cm-content").focus();
+  await page.keyboard.press(modifier + "+z");
+  assert.equal(await docText(), original);
+
   await select("회의록");
   await chooseContextFormat("확인할", "format-size-large");
   const sizedTask = original.replace("확인할 항목", '<span style="font-size:1.25em">확인할 항목</span>');
@@ -150,7 +207,7 @@ try {
   assert.ok(!reset.includes("font-size:"));
   assert.ok(reset.includes('<span style="color:#1565c0">**단어만**</span>'));
   assert.deepEqual(errors, []);
-  console.log("PASS: native context menu, line and selection formatting, drag selection toolbar, highlight removal and undo, saved highlights in reading and Live Preview after restart");
+  console.log("PASS: right-click AI requests, scope, retry, discard, stale protection, apply and undo, line and selection formatting, drag selection toolbar, highlight removal and undo, saved highlights in reading and Live Preview after restart");
 } finally {
   if (app) await app.close();
   await rm(root, { recursive: true, force: true });

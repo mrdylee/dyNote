@@ -57,3 +57,13 @@ test("only file views registered by the app identify the clicked document", () =
   fileLocationRef(null)(pane);
   assert.equal(fileForElement(content), null);
 });
+
+test("AI suggestion opens only from an editable Markdown surface", () => {
+  const actions = [];
+  const item = params => contextMenuTemplate(params, action => actions.push(action)).find(entry => entry.id === "ai-suggestion");
+  const common = { isEditable: true, formControlType: "none" };
+  assert.equal(item(common), undefined);
+  assert.equal(item({ ...common, markdownEditor: true, isEditable: false }), undefined);
+  item({ ...common, markdownEditor: true }).click();
+  assert.deepEqual(actions, ["ai-suggestion"]);
+});

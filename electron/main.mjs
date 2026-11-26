@@ -523,13 +523,16 @@ app
       const point = params.menuSourceType === "keyboard" ? null : { x: params.x / zoom, y: params.y / zoom };
       const contents = window.webContents;
       const subframe = params.frame !== contents.mainFrame;
-      const file = await contents.executeJavaScript(`window.dynoteContextFile?.(${subframe}, ${JSON.stringify(point)})`).catch(() => null);
+      const context = await contents.executeJavaScript(`({
+        file: window.dynoteContextFile?.(${subframe}, ${JSON.stringify(point)}),
+        markdownEditor: ${!subframe} && !!(${point ? `document.elementFromPoint(${point.x}, ${point.y})` : "document.activeElement"})?.closest('.code-editor .cm-content[contenteditable="true"]')
+      })`).catch(() => null);
       if (contents.isDestroyed()) return;
-      const menu = Menu.buildFromTemplate(contextMenuTemplate(params,
+      const menu = Menu.buildFromTemplate(contextMenuTemplate({ ...params, markdownEditor: context?.markdownEditor },
         format => window.webContents.send("notes:format-editor", format, point),
         () => window.webContents.send("notes:open-settings", "fonts"),
         () => window.webContents.send("notes:sync-vault"),
-        file ? () => revealFile(file).catch(error => dialog.showMessageBox(window, {
+        context?.file ? () => revealFile(context.file).catch(error => dialog.showMessageBox(window, {
           type: "error", message: "파일 위치를 열 수 없습니다.", detail: error.message,
         })) : undefined));
       menu.popup({ window });

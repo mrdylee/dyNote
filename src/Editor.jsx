@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { textSizeOptions } from "../core/text-size-options.mjs";
 import { runSelectionOrLine } from "./format-line.mjs";
 import { selectionToolbar } from "./selection-toolbar.mjs";
+import AiSuggestion from "./AiSuggestion.jsx";
 import TextColorPicker, { textColorPresets } from "./TextColorPicker.jsx";
 import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
@@ -72,6 +73,7 @@ export default function Editor({
   editorRef,
   pendingOriginal,
 }) {
+  const [suggestion, setSuggestion] = useState(null);
   const [textColor, setTextColor] = useState("#c62828");
   const [regionSelection, setRegionSelection] = useState({ selected: false, active: false });
   const [regionMode, setRegionMode] = useState("normal");
@@ -274,6 +276,16 @@ export default function Editor({
       if (!inside) view.dispatch({ selection: { anchor: position } });
       else if (!selection.eq(view.state.selection)) view.dispatch({ selection });
     }
+    if (format === "ai-suggestion") {
+      let range;
+      runSelectionOrLine(view, target => {
+        if (target.state.selection.ranges.length === 1) range = target.state.selection.main;
+        return true;
+      });
+      setSuggestion({ id: crypto.randomUUID(), path: latest.current.note.path, vaultId: latest.current.vaultId,
+        doc: view.state.doc, from: range?.from, to: range?.to });
+      return;
+    }
     applyFormat(view, format, textColor);
   }), [textColor]);
   useEffect(() => {
@@ -378,5 +390,7 @@ export default function Editor({
       <button type="button" title="앱 전체의 글꼴과 크기 설정" onClick={onFontSettings}>글꼴·크기</button>
     </div>
     <div className="editor-host" ref={host} />
+    {suggestion && suggestion.path === note.path && suggestion.vaultId === vaultId && <AiSuggestion key={suggestion.id}
+      target={suggestion} editor={editor.current} readOnly={readOnly} onClose={() => setSuggestion(null)} />}
   </div>;
 }
