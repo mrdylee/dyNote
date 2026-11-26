@@ -21,6 +21,10 @@ try {
   app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || electronPath,
     args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
   const page = await app.firstWindow(); page.setDefaultTimeout(10000);
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(...window.getMinimumSize());
+  });
   await page.getByRole("button", { name: "파일 목록", exact: true }).click();
   await page.locator(".file-tree").getByRole("button", { name: "Control", exact: true }).click();
   await page.evaluate(() => {
@@ -73,6 +77,9 @@ try {
   await previewTab.dragTo(reports);
   await tree.locator('[title="Reports/Report (복사본 2).HTM"]').waitFor();
   assert.equal(await readFile(path.join(vault, "Reports/Report (복사본 2).HTM"), "utf8"), html);
+  for (const height of await tree.evaluateAll(trees => trees.map(list => list.clientHeight))) {
+    assert.ok(height >= 34, `A drop target needs one visible file row, got ${height}px`);
+  }
   await page.locator(".tab-label").filter({ hasText: "Control" }).click();
   await page.locator(".tab.active .tab-label").filter({ hasText: "Control" }).waitFor();
   await previewTab.dragTo(tree.locator('.folder-row[data-tree-drop-folder="Shared"]'));
