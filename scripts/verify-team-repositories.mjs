@@ -1,3 +1,4 @@
+import { pauseDirectoryOperation } from "./pause-directory-operation.mjs";
 import { openVaultSection } from "./vault-settings-navigation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -164,6 +165,46 @@ try {
   await settings.locator("summary").filter({ hasText: "이 PC에만 있는 항목" }).click();
   await settings.getByText("File Storage/로컬.txt · 동기화에서 지원하지 않는 파일 형식").waitFor();
   assert.equal(git(path.join(root, "remote-1.git"), "ls-tree", selected.branch, "--", "File Storage/로컬.txt"), "");
+  // Hold the selected folder check inside the real registration IPC while another vault is edited.
+  for (const kind of ["team", "personal"]) {
+    const folder = path.join(root, "Background-" + kind);
+    await mkdir(folder);
+    await settings.getByRole("button", {name:"보관함", exact:true}).click();
+    await openVaultSection(page, kind === "team" ? "팀 노트" : "개인 노트");
+    await mockPicker(folder);
+    if (kind === "team") {
+      await settings.getByRole("button", {name:"모델 추가", exact:true}).click();
+      await teamRow(0).getByRole("textbox", {name:"저장소 주소", exact:true}).fill(repositories[0].remote);
+      await teamRow(0).getByRole("button", {name:"폴더 선택", exact:true}).click();
+      await teamRow(0).getByText(folder, {exact:true}).waitFor();
+    } else {
+      await settings.getByRole("button", {name:"기존 Git 저장소에서 가져오기", exact:true}).click();
+      const form = settings.getByRole("form", {name:"개인 노트 가져오기"});
+      await form.getByLabel("저장소 주소").fill(personalRemote);
+      await form.getByLabel("이 기기 이름").fill("Background import");
+    }
+    const pending = await pauseDirectoryOperation(app, "realpath", folder);
+    try {
+      if (kind === "team") await connect();
+      else await settings.getByRole("button", {name:"빈 폴더 선택하고 가져오기", exact:true}).click();
+      await pending.wait();
+      await settings.getByRole("button", {name:"닫기", exact:true}).click();
+      await settings.waitFor({state:"hidden", timeout:3000});
+      await modelTree.getByTitle("회의록.md", {exact:true}).click();
+      await page.getByRole("button", {name:"편집 보기",exact:true}).click();
+      await page.getByRole("textbox", {name:"Markdown 편집기"}).click();
+      await page.keyboard.insertText("Editing during " + kind);
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+      await page.locator(".save-status.saved").waitFor();
+      assert.ok((await readFile(path.join(selected.folder,"회의록.md"),"utf8")).includes("Editing during " + kind));
+    } finally { await pending.resume(); }
+    const label = (kind === "team" ? "팀 공유 노트 · " : "개인 노트 · ") + path.basename(folder);
+    await page.getByRole("region", {name:label, exact:true}).waitFor();
+    assert.equal((await page.evaluate(() => window.notes.vaults())).value.current, personal);
+    assert.equal(await settings.count(), 0);
+    assert.match(await page.locator(".tab.active").innerText(), /회의록/);
+    if (kind === "team") await openSettings();
+  }
   await app.close();
   app = null;
   app = await launch();
@@ -173,7 +214,10 @@ try {
     await reopened.getByRole("region", { name: `팀 공유 노트 · ${repository.name}`, exact: true }).waitFor({ timeout: 15000 });
   assert.deepEqual(errors, []);
   console.log("Verified team registration, clone retries, scoped note creation, two-way panel sync on the selected branch, local-only files, untouched sibling repositories, and restart.");
+} catch (error) {
+  app?.process().kill();
+  throw error;
 } finally {
-  await app?.close();
+  if (app && !app.process().killed) await app.close();
   await rm(root, { recursive: true, force: true });
 }

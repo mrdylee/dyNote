@@ -401,6 +401,27 @@ try{
   await pane.locator('.document-content.read .markdown-preview').waitFor();
   assert.equal(await page.evaluate(()=>window.captureTestReadHeading),captureDateHeading(to),'scroll to the latest date in the read view');
  });
+ await check('closing settings during a manual personal import allows team edits to save',async()=>{
+  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+  await page.getByRole('button',{name:'Copilot 대화 자동 저장 설정',exact:true}).click();
+  await pauseCaptureScan();
+  try {
+   await settings().getByRole('button',{name:'선택한 프로젝트 가져오기',exact:true}).click();
+   await waitForCaptureScan();
+   await settings().getByRole('button',{name:'닫기',exact:true}).click();
+   await settings().waitFor({state:'hidden'});
+   await page.getByRole('button',{name:'파일 목록',exact:true}).click();
+   await page.getByRole('region',{name:'팀 공유 노트 · team',exact:true}).getByTitle('Shared.md',{exact:true}).click();
+   await page.getByRole('button',{name:'편집 보기',exact:true}).click();
+   await page.getByRole('region',{name:'문서 Shared.md',exact:true}).getByRole('textbox',{name:'Markdown 편집기'}).click();
+   await page.keyboard.insertText('Manual import in progress');
+   await page.keyboard.press(`${mod}+s`);
+   await page.locator('.save-status.saved').waitFor();
+   assert.match(await readFile(path.join(team,'Shared.md'),'utf8'),/Manual import in progress/);
+  } finally { await resumeCaptureScan(); }
+  await page.getByRole('button',{name:'달력과 일지',exact:true}).click();
+  await page.getByRole('button',{name:'Copilot 대화 자동 저장 설정',exact:true,disabled:false}).waitFor();
+ });
  await check('team and stale-vault IPC cannot capture private chats',async()=>{
   const result=await page.evaluate(async team=>{const before=(await window.notes.snapshot()).value;const selected=await window.notes.selectVault({root:team});return [selected,await window.notes.syncCapture({vaultId:before.id,manual:true}),await window.notes.syncCapture({vaultId:selected.value.id,manual:true})];},team);
   assert.equal(result[0].ok,true);assert.equal(result[1].ok,false);assert.equal(result[2].ok,false);assert.match(result[2].error,/개인/);

@@ -57,10 +57,14 @@ export class VaultRegistry {
       throw new Error("연결된 보관함과 겹치지 않는 폴더를 선택해 주세요.");
     return canonical;
   }
+  async register(root, purpose) {
+    if (await this.checkConnection(root, purpose) !== root) throw new Error("폴더 위치가 변경되었습니다.");
+    await this.save(this.selected, [...new Set([...this.roots, root])], { ...this.purposes, ...(purpose ? { [root]: purpose } : {}) });
+  }
   async registerTeamRepository(folder) {
     if (await this.checkTeamRepositoryFolder(folder) !== folder)
       throw new Error("폴더 위치가 변경되었습니다. 폴더를 다시 선택해 주세요.");
-    await this.save(this.selected, [...this.roots, folder], { ...this.purposes, [folder]: "team" });
+    await this.register(folder, "team");
   }
   async setPurpose(root, purpose) {
     if (!this.roots.includes(root)) throw new Error("등록된 보관함을 선택해 주세요.");

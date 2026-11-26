@@ -515,6 +515,7 @@ export default function App() {
   const audioActive = useRef(false);
   const [audioNotice, setAudioNotice] = useState("");
   const [webUrl, setWebUrl] = useState("");
+  const [webOpening, setWebOpening] = useState(false);
   const [compositionRecovery, setCompositionRecovery] = useState(null);
   const [hover, setHover] = useState(null);
   const hoverTimer = useRef(null), hoverClose = useRef(null), hoverAnchor = useRef(null);
@@ -528,6 +529,9 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState("vault");
   const [gitSettingsId, setGitSettingsId] = useState(null);
   const gitVault = vaults[gitSettingsId] ?? vault;
+  const settingsView = useMemo(() => ({}), [modal, settingsTab, gitSettingsId]);
+  const currentSettingsView = useRef(settingsView);
+  currentSettingsView.current = settingsView;
   useEffect(() => { if (modal !== "settings") setGitSettingsId(null); }, [modal]);
   const [selectedPluginData, setPluginData] = useState({ entries: [] });
   const pluginData = vault?.id === selectedVaultId ? selectedPluginData : { entries: [] };
@@ -582,13 +586,15 @@ export default function App() {
     return [id, entries];
   })), [captureStates]);
   const [captureImportResult, setCaptureImportResult] = useState(null);
-  const [automaticCaptureId, setAutomaticCaptureId] = useState(null);
-  const captureLocked = !!vault?.id && automaticCaptureId === vault.id;
+  const [captureWritingId, setCaptureWritingId] = useState(null);
+  const [restoringVaults, setRestoringVaults] = useState([]);
+  const vaultWriteLocked = id => !!id && (captureWritingId === id || restoringVaults.includes(id));
+  const captureLocked = vaultWriteLocked(vault?.id);
   const captureState = captureStates[vault?.id] ?? null;
   const captureContext=useRef(null),captureWorking=useRef(false);
   const captureScanning = useRef(false);
   const [treeWrites, setTreeWrites] = useState([]);
-  const writingPath = (id, path) => treeWrites.some(target => target.vaultId === id && includesTreePath(target, path));
+  const writingPath = (id, path) => vaultWriteLocked(id) || treeWrites.some(target => target.vaultId === id && includesTreePath(target, path));
   const [fileTarget, setFileTarget] = useState(null);
   const dismissModal = useCallback(() => {
     setModal(null);
@@ -766,15 +772,27 @@ export default function App() {
     if (!queue.dirty) setStatus("saved");
   }, [acceptSnapshot, queue, workspace.dispatch]);
   const importGit = async (args) => {
-    await flush(); setBusy(true);
     try {
-      const snapshot = await invoke(api.cloneGit(args));
-      if (!snapshot) return;
-      install(snapshot, true); setSpaceFilter("all");
-      if (snapshot.importError) {
-        setGitSettingsId(snapshot.id); setSettingsTab("personal-sync"); setError(snapshot.importError);
-      } else setModal(null);
-    } finally { setBusy(false); }
+      const imported = await invoke(api.cloneGit(args));
+      if (!imported) return;
+      if (currentSettingsView.current !== settingsView) {
+        await loadSpaces();
+        if (imported.importError) setError(imported.importError);
+        return;
+      }
+      setBusy(true);
+      try {
+        await flush();
+        const snapshot = await invoke(api.selectVault({ root: imported.root }));
+        install(snapshot, true); setSpaceFilter("all");
+        if (imported.importError) {
+          setGitSettingsId(snapshot.id); setSettingsTab("personal-sync"); setError(imported.importError);
+        } else setModal(null);
+      } finally { setBusy(false); }
+    } catch (error) {
+      if (currentSettingsView.current !== settingsView) setError(error.message);
+      throw error;
+    }
   };
   const loadSpaces = useCallback(async ({ refresh = false } = {}) => {
     const selectedId = selectedVault.current;
@@ -812,7 +830,7 @@ export default function App() {
       const date = localDate();
       setToday(date);
       const key = documentKey(dailyVaultId, date);
-      if (!key || busy || automaticCaptureId === dailyVaultId || checking || completedJournal.current === key) return;
+      if (!key || busy || captureWritingId === dailyVaultId || restoringVaults.includes(dailyVaultId) || checking || completedJournal.current === key) return;
       checking = true;
       try {
         const scope = vaultsRef.current[dailyVaultId];
@@ -847,7 +865,7 @@ export default function App() {
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [dailyVaultId, busy, automaticCaptureId, vaultsRef, revisionMap, updateVault]);
+  }, [dailyVaultId, busy, captureWritingId, restoringVaults, vaultsRef, revisionMap, updateVault]);
 
   const flush = useCallback(async (allowDrafts = false, vaultId) => {
     if (!allowDrafts && editsRef.current.blocked(vaultId)) throw new Error("Copilot 변경을 먼저 유지하거나 되돌려 주세요.");
@@ -866,7 +884,7 @@ export default function App() {
   }, [queue]);
 
   const syncNow = async (vaultId, personalOnly) => {
-    await flush(false, personalOnly ? vaultId : undefined);
+    await flush(false, vaultId);
     const result = await invoke(api.syncGit({ vaultId, personalOnly }));
     acceptGitStatus(result);
     return result;
@@ -938,7 +956,7 @@ export default function App() {
   },[]);
   const updateInteraction = useRef(Date.now()), updateRequest = useRef(null), updateContext = useRef(null);
   const updateComposing = useRef(false);
-  updateContext.current = { treeWriting: treeWrites.length > 0, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
+  updateContext.current = { treeWriting: treeWrites.length > 0 || restoringVaults.length > 0 || !!captureWritingId, busy: busy || aiSession.activity.chat || aiSession.activity.planner || documentDrafts.some(draft => draft.running) || captureWorking.current, modal };
   const installUpdate = async (automatic = false) => {
     if (updateRequest.current) return;
     if (updateContext.current.treeWriting || updateContext.current.busy || audioActive.current || updateComposing.current) throw new Error("진행 중인 작업을 마친 뒤 업데이트해 주세요.");
@@ -1011,7 +1029,7 @@ export default function App() {
     });
   }, [install, flush, persistDocumentDraft]);
 
-  captureContext.current = { busy, modal, states: captureStates };
+  captureContext.current = { busy, modal, states: captureStates, restoringVaults };
   const updateCaptureState = useCallback((id, transform) => {
     setCaptureStates(old => ({ ...old, [id]: transform(old[id]) }));
   }, []);
@@ -1021,7 +1039,7 @@ export default function App() {
     const canStart = () => {
       const { busy, modal, states } = captureContext.current;
       const scope = vaultsRef.current[id];
-      return scope?.id && !captureWorking.current && !busy && (!automatic || (
+      return scope?.id && !captureWorking.current && !captureContext.current.restoringVaults.includes(id) && !busy && (!automatic || (
         !modal && scope.purpose === "personal" && states[id] === state && state?.enabled && state.personal
         && !queue.dirtyIn(id) && !editsRef.current.blocked(id)
       ));
@@ -1043,13 +1061,12 @@ export default function App() {
         }
       }
       writing = captureWorking.current = true;
-      if (automatic) setAutomaticCaptureId(id);
-      else {
-        setBusy(true);
+      setCaptureWritingId(id);
+      if (!automatic) {
         setCaptureImportResult(null);
         const targetEdits = editsRef.current.forVault(id);
         if (targetEdits.blocked() || targetEdits.working) throw new Error("개인 노트의 Copilot 변경을 먼저 검토해 주세요. 설정에서 미확정 변경 문서를 열 수 있습니다.");
-        await flush(true);
+        await flush(true, id);
       }
       const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
         ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
@@ -1070,8 +1087,7 @@ export default function App() {
       if (automatic) captureScanning.current = false;
       if (writing) {
         captureWorking.current = false;
-        if (automatic) setAutomaticCaptureId(null);
-        else setBusy(false);
+        setCaptureWritingId(null);
       }
     }
   }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef]);
@@ -1273,7 +1289,7 @@ export default function App() {
     const scope = vaultsRef.current[id];
     const field = documentKind(path) ? "documents" : "notes";
     const source = scope?.[field].find(file => file.path === path);
-    if (!scope || (!source && !allowCreate) || source?.content === content || busy || automaticCaptureId === id) return;
+    if (!scope || (!source && !allowCreate) || source?.content === content || busy) return;
     const revision = !source || source.revision === null ? null : revisionMap(id).get(path) ?? source.revision;
     queue.set(id, { path, content, revision });
     updateVault(id, old => ({ ...old, [field]: source
@@ -1938,21 +1954,44 @@ export default function App() {
       else setBusy(false);
     }
   };
-  const restoreLast = async () => {
-    setBusy(true);
+  const restoreVersion = async (vaultId, preview, filePath) => {
+    if (vaultWriteLocked(vaultId)) throw new Error("이 보관함의 저장 작업이 끝난 뒤 다시 시도해 주세요.");
+    setRestoringVaults(old => [...old, vaultId]);
     try {
-      await flush();
-      const snapshot = await invoke(
-        api.restoreTrash({ vaultId: lastTrash.vaultId, id: lastTrash.id }),
-      );
-      install(snapshot);
-      if (/\.(md|canvas|base)$/i.test(lastTrash.path)) openNote(lastTrash.path, lastTrash.vaultId);
-      else await openAttachment(lastTrash.path, "", lastTrash.vaultId);
-      setLastTrash(null);
+      await flush(false, vaultId);
+      const result = await invoke(api.restoreGit({ vaultId, filePath, commit: preview.commit, revision: preview.revision }));
+      queue.markChanged(vaultId);
+      if (vaultsRef.current[vaultId]) {
+        acceptSnapshot(result.snapshot);
+        setAttachment(old => old?.vaultId === vaultId && (!filePath || old.path === filePath) ? null : old);
+      }
+      return result;
+    } catch (error) { setError(error.message); throw error; }
+    finally { setRestoringVaults(old => old.filter(id => id !== vaultId)); }
+  };
+  const restoreLast = async () => {
+    const { vaultId, path, id } = lastTrash;
+    if (writingPath(vaultId, path)) return;
+    const operation = { vaultId, path, action: "restore" };
+    const interaction = updateInteraction.current;
+    setTreeWrites(old => [...old, operation]);
+    try {
+      const generation = queue.generation(vaultId);
+      const snapshot = await invoke(api.restoreTrash({ vaultId, id }));
+      if (!vaultsRef.current[vaultId]) return;
+      const changed = generation !== queue.generation(vaultId);
+      queue.markChanged(vaultId);
+      if (changed) await refreshSyncedVault(vaultId, acceptSnapshot);
+      else acceptSnapshot(snapshot);
+      setLastTrash(old => old?.id === id ? null : old);
+      if (updateInteraction.current === interaction && !modalRef.current) {
+        if (/\.(md|canvas|base)$/i.test(path)) openNote(path, vaultId);
+        else await openAttachment(path, "", vaultId);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setTreeWrites(old => old.filter(target => target !== operation));
     }
   };
 
@@ -2218,7 +2257,7 @@ export default function App() {
     return document && {
       note: document, notes, vault: scope, journalPaths: journalPaths.get(vaultId),
       scopeLabel: together ? spaceLabel(scope) : undefined,
-      captureLocked: automaticCaptureId === vaultId || writingPath(vaultId, path),
+      captureLocked: writingPath(vaultId, path),
       edits: editState.forVault(vaultId),
       jump: editorJump?.vaultId === vaultId ? editorJump : null,
     };
@@ -2819,8 +2858,9 @@ export default function App() {
                       : "변경사항 저장 대기 중"}
               </span>
             </div>
+            {restoringVaults.length > 0 && <span role="status">백업 복원 중…</span>}
             {treeWrites.map(target => <span key={documentKey(target.vaultId, target.path)} role="status" title={target.path}>
-              {target.action === "trash" ? "휴지통으로 이동 중…" : "이름 변경 중…"}
+              {target.action === "trash" ? "휴지통으로 이동 중…" : target.action === "restore" ? "휴지통에서 복원 중…" : "이름 변경 중…"}
             </span>)}
             <button className={`git-status ${gitStatus.phase}`} title={gitStatus.message} onClick={() => { setGitSettingsId(vault.id); setSettingsTab("git"); setModal("settings"); }}>{gitStatus.message}</button>
             {connectedSpaces.filter(scope => scope.id !== vault.id && scope.purpose === "personal" && gitStates[scope.id]?.phase === "saving").map(scope => {
@@ -3121,7 +3161,7 @@ export default function App() {
         <div className="undo-toast">
           {lastTrash.systemTrash ? "폴더를 시스템 휴지통으로 이동했습니다. 복구는 시스템 휴지통에서 할 수 있습니다." : "휴지통으로 이동했습니다."}{" "}
           {!lastTrash.systemTrash && <button
-            disabled={busy || !vaults[lastTrash.vaultId]}
+            disabled={busy || !vaults[lastTrash.vaultId] || writingPath(lastTrash.vaultId, lastTrash.path)}
             onClick={restoreLast}
           >
             되돌리기
@@ -3308,9 +3348,18 @@ export default function App() {
         }}/>
       </Modal>}
       {modal === "web" && <Modal title="웹 뷰어 열기" onClose={() => !busy && setModal(null)}>
-        <form onSubmit={async (event) => { event.preventDefault(); setBusy(true); setError(""); try { await invoke(api.openWebViewer({ url: webUrl.trim() })); setModal(null); } catch (err) { setError(err.message); } finally { setBusy(false); } }}>
-          <label>웹 주소<input autoFocus aria-label="웹 뷰어 주소" value={webUrl} onChange={e => setWebUrl(e.target.value)} placeholder="https://" disabled={busy}/></label>
-          {error && <p role="alert">{error}</p>}<button className="primary-button" disabled={busy || !webUrl.trim()}>웹 페이지 열기</button>
+        <form onSubmit={async event => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          setWebOpening(true); setError("");
+          try {
+            await invoke(api.openWebViewer({ url: webUrl.trim() }));
+            if (form.isConnected) setModal(null);
+          } catch (err) { setError(err.message); }
+          finally { setWebOpening(false); }
+        }}>
+          <label>웹 주소<input autoFocus aria-label="웹 뷰어 주소" value={webUrl} onChange={e => setWebUrl(e.target.value)} placeholder="https://" disabled={webOpening}/></label>
+          {error && <p role="alert">{error}</p>}<button className="primary-button" disabled={webOpening || !webUrl.trim()}>웹 페이지 열기</button>
         </form>
       </Modal>}
       {(modal === "new" || modal === "newMap") && (
@@ -3464,14 +3513,14 @@ export default function App() {
             onImportPersonal={config => importGit({ personalImport: true, config })}
             onPickTeamRepositoryFolder={() => invoke(api.pickTeamRepositoryFolder())}
             onConnectTeamRepositories={async (repositories) => {
-              setBusy(true);
-              try {
-                await flush();
-                const results = await invoke(api.connectTeamRepositories({ repositories }));
+              const results = await invoke(api.connectTeamRepositories({ repositories }));
+              if (currentSettingsView.current === settingsView) {
                 if (results.some(result => result.ok)) setSpaceFilter("all");
-                return results;
+              } else {
+                const errors = results.filter(result => !result.ok).map(result => result.error);
+                if (errors.length) setError(errors.join(" · "));
               }
-              finally { setBusy(false); }
+              return results;
             }}
             onPick={async (purpose) => {
               setBusy(true);
@@ -3485,7 +3534,7 @@ export default function App() {
             }}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
-            destination={captureVault?.root ?? captureVault?.name} importNotice={captureImportNotice} disabled={busy || automaticCaptureId === captureVaultId}
+            destination={captureVault?.root ?? captureVault?.name} importNotice={captureImportNotice} disabled={busy || captureWritingId === captureVaultId}
             pendingEdits={editState.drafts[captureVaultId] ?? emptyFiles}
             importBlocked={editState.blocked(captureVaultId) || editState.forVault(captureVaultId).working}
             onReviewEdit={path => { setModal(null); openNote(path, captureVaultId); }}
@@ -3541,21 +3590,14 @@ export default function App() {
             onReview={name=>openReview(gitVault.id,name)}
             onCopyDiagnostics={text=>invoke(api.copyText({vaultId:gitVault.id,text}))}
             onShowRecovery={id=>invoke(api.showPersonalSyncRecovery({vaultId:gitVault.id,id}))}
-            onConnect={async (config) => { await flush(); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (settingsTab === "personal-sync" && !["personal-sync","github-api"].includes(config.mode)) setSettingsTab("git"); }}
+            onConnect={async (config) => { await flush(false, gitVault.id); acceptGitStatus(await invoke(api.connectGit({ vaultId: gitVault.id, config }))); if (currentSettingsView.current === settingsView && settingsTab === "personal-sync" && !["personal-sync","github-api"].includes(config.mode)) setSettingsTab("git"); }}
             onClone={config => importGit({ vaultId: gitVault.id, config })}
             onSync={personalOnly => syncNow(gitVault.id, personalOnly)}
             onDisconnect={async () => acceptGitStatus(await invoke(api.disconnectGit({ vaultId: gitVault.id })))} />}
           {settingsTab === "history" && gitVault.id && <GitHistory key={gitVault.id} busy={busy}
             onList={(month) => invoke(api.gitHistory({ vaultId: gitVault.id, month }))}
-            onPreview={async (commit) => { await flush(); return invoke(api.previewGit({ vaultId: gitVault.id, commit })); }}
-            onRestore={async (preview) => {
-              setBusy(true);
-              try {
-                await flush();
-                const result = await invoke(api.restoreGit({ vaultId: gitVault.id, commit: preview.commit, revision: preview.revision }));
-                install(result.snapshot); return result;
-              } finally { setBusy(false); }
-            }}
+            onPreview={async (commit) => { await flush(false, gitVault.id); return invoke(api.previewGit({ vaultId: gitVault.id, commit })); }}
+            onRestore={preview => restoreVersion(gitVault.id, preview)}
             onRecovery={() => invoke(api.showRecovery({ vaultId: gitVault.id })).catch((e) => setError(e.message))} />}
         </Modal>
       )}
@@ -3566,15 +3608,8 @@ export default function App() {
       {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" className="version-dialog" onClose={() => setModal(null)}>
         <FileVersionHistory key={vault.id + ":" + displayedPath} path={displayedPath}
           onList={(skip, anchor) => invoke(api.gitHistory({vaultId:vault.id, filePath:displayedPath, skip, anchor}))}
-          onPreview={async commit => { await flush(); return invoke(api.previewGit({vaultId:vault.id, filePath:displayedPath, commit})); }}
-          onRestore={async item => {
-            setBusy(true);
-            try {
-              await flush();
-              const result = await invoke(api.restoreGit({vaultId:vault.id, filePath:item.path, commit:item.commit, revision:item.revision}));
-              install(result.snapshot);
-            } finally { setBusy(false); }
-          }}/>
+          onPreview={async commit => { await flush(false, vault.id); return invoke(api.previewGit({vaultId:vault.id, filePath:displayedPath, commit})); }}
+          onRestore={item => restoreVersion(vault.id, item, item.path)}/>
       </Modal>}
       {modal === "reload" && (
         <Modal title="디스크에서 다시 읽기" onClose={() => setModal(null)}>

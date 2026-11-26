@@ -895,17 +895,31 @@ app
         if (!newPersonal) checkVault(args, source);
         const purpose = personal ? "personal" : registry.purposes[source.root];
         const folder = await registry.checkConnection(result.filePaths[0], purpose);
-        if (personal) {
-          if ((await readdir(folder)).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
-          const target = new GitBackup(folder);
-          await target.repository();
-          if (!await target.initialPersonalRemote(config)) throw new Error("원격 저장소에 가져올 브랜치가 없습니다.");
-        } else await GitBackup.clone(folder, config);
-        const snapshot = await selectVault(folder, purpose);
-        let status;
-        try { status = await gitBackup.connect(vault.id, config); }
-        catch (error) { status = gitBackup.publish({ phase: "error", message: error.message }); }
-        return personal ? { ...await vault.snapshot(), importError: status.phase === "error" ? status.message : null } : snapshot;
+        const overlaps = registry.roots.filter(root => root === folder || root.startsWith(folder + path.sep) || folder.startsWith(root + path.sep));
+        const release = vaultOperations.begin([folder, ...overlaps], true);
+        try {
+          if (personal) {
+            if ((await readdir(folder)).length) throw new Error("기존 파일이 없는 빈 폴더를 선택해 주세요.");
+            const target = new GitBackup(folder);
+            await target.repository();
+            if (!await target.initialPersonalRemote(config)) throw new Error("원격 저장소에 가져올 브랜치가 없습니다.");
+          } else await GitBackup.clone(folder, config);
+          const imported = [...openedVaults.values()].find(entry => entry.vault.root === folder)?.vault ?? await Vault.open(folder, recovery, purpose);
+          if (imported.root !== folder) throw new Error("폴더 위치가 변경되었습니다.");
+          await registry.register(folder, purpose);
+          const entry = openVaultController(imported);
+          await entry.ready;
+          try {
+            const status = await entry.git.connect(imported.id, config);
+            return { root: folder, importError: status.phase === "error" ? status.message : null };
+          } catch (error) {
+            entry.git.publish({ phase: "error", message: error.message });
+            return { root: folder, importError: error.message };
+          } finally {
+            if (openedVaults.get(imported.id) !== entry) entry.git.close();
+            pruneVaultControllers();
+          }
+        } finally { release(); }
       },
       create: (args, vault) => {
         checkVault(args, vault);
@@ -1098,10 +1112,11 @@ app
     }))
       ipcMain.handle(`notes:${name}`, async (event, args) => {
         const checkingCapture = name === "capture-sync" && args?.checkOnly === true;
-        const globalOperation = ["pick-vault", "select-vault", "forget-vault", "set-vault-purpose", "git-clone", "connect-team-repositories"].includes(name);
+        const globalOperation = ["pick-vault", "select-vault", "forget-vault", "set-vault-purpose"].includes(name);
+        const registering = name === "git-clone" || name === "connect-team-repositories";
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
-        const exclusive = globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
+        const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let release;
         try {
@@ -1111,7 +1126,8 @@ app
           if (scoped) checkVault(args, target);
           if (!readOnly) {
             const roots = [];
-            if (target && !globalOperation) {
+            if (registering) roots.push(registry.file);
+            else if (target && !globalOperation) {
               const metadataOnly = name === "git-workspace-action" && ["fetch", "commit", "unstage", "delete-branch"].includes(args?.action?.kind);
               if (!metadataOnly) roots.push(target.root);
               if (metadataOnly || (exclusive && !transfer)) roots.push(path.join(target.root, ".git"));

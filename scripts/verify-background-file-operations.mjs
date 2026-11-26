@@ -1,3 +1,4 @@
+import { pauseDirectoryOperation } from "./pause-directory-operation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -93,10 +94,45 @@ try {
   assert.equal(execFileSync("git", ["-C", personal, "log", "-1", "--format=%s"], {encoding:"utf8"}).trim(), "background commit");
   assert.equal(execFileSync("git", ["-C", personal, "show", "HEAD:Keep.md"], {encoding:"utf8"}), "Keep");
   assert.match(await page.locator(".tab.active").innerText(), /Renamed/);
-  await page.getByRole("button", {name:"되돌리기",exact:true}).click();
+  const undo = await pauseDirectoryOperation(app, "readdir", personal);
+  try {
+    await page.getByRole("button", {name:"되돌리기",exact:true}).click();
+    await undo.wait();
+    await file("Team").click();
+    await page.getByRole("textbox", {name:"Markdown 편집기"}).click();
+    await page.keyboard.insertText("working during undo ");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+    await page.locator(".save-status.saved").waitFor();
+    assert.match(await readFile(path.join(team,"Team.md"), "utf8"), /working during undo/);
+  } finally { await undo.resume(); }
   await file("Remove").waitFor();
   assert.equal(await readFile(path.join(personal, "Remove.md"), "utf8"), "Remove");
-  console.log("PASS dismiss pending commit, copy between vaults, delete, edit both vaults during fetch, keep staged bytes, retain a tab opened during rename, undo delete");
+  assert.match(await page.locator(".tab.active").innerText(), /Team/);
+
+  await file("Keep").click();
+  await page.getByRole("button", {name:"공간 전환·관리",exact:true}).click();
+  const settings = page.getByRole("dialog", {name:"설정",exact:true});
+  await settings.getByRole("button",{name:"백업·복원",exact:true}).click();
+  await settings.getByRole("button",{name:"복원",exact:true}).click();
+  await settings.locator(".backup-record").filter({hasText:"background commit"}).click();
+  await settings.getByRole("checkbox", {name:"위 파일 변경 내용을 확인했습니다."}).check();
+  const restore = await pauseDirectoryOperation(app, "readdir", personal);
+  try {
+    await settings.getByRole("button", {name:"선택한 백업으로 돌아가기"}).click();
+    await restore.wait();
+    await settings.getByRole("button", {name:"닫기",exact:true}).click();
+    await settings.waitFor({state:"hidden"});
+    await file("Team").click();
+    await page.getByRole("textbox", {name:"Markdown 편집기"}).click();
+    await page.keyboard.insertText("working during restore ");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+    await page.locator(".save-status.saved").waitFor();
+    assert.match(await readFile(path.join(team,"Team.md"), "utf8"), /working during restore/);
+  } finally { await restore.resume(); }
+  await page.getByRole("status").filter({hasText:"백업 복원 중…"}).waitFor({state:"hidden"});
+  assert.equal(await readFile(path.join(personal, "Keep.md"), "utf8"), "Keep");
+  assert.match(await page.locator(".tab.active").innerText(), /Team/);
+  console.log("PASS dismiss pending commit, copy between vaults, delete, edit both vaults during fetch, keep staged bytes, retain a tab opened during rename, edit during undo and backup restore");
 } catch (error) {
   console.error(error);
   app?.process().kill();
