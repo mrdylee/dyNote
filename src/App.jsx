@@ -435,6 +435,12 @@ export default function App() {
   },[]);
   const [startup, setStartup] = useState(() => stored("dynote.startup", "journal"));
   const [tabs, setTabs] = useState([]);
+  const tabReadingPositions = useRef(new Map());
+  useEffect(() => {
+    const open = new Set(tabs);
+    for (const key of tabReadingPositions.current.keys())
+      if (!open.has(key)) tabReadingPositions.current.delete(key);
+  }, [tabs]);
   const [documentDrafts, setDocumentDrafts] = useState([]);
   const draftsRef = useRef([]), restoredDrafts = useRef(new Set());
   draftsRef.current = documentDrafts;
@@ -2848,7 +2854,7 @@ export default function App() {
               </div>
             ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || writingPath(vault.id, note.path) || edits.blocked()} onError={setError}/>
             : activeDocumentDraft ? null : note ? (
-              <DocumentWorkspace workspace={workspace} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
+              <DocumentWorkspace workspace={workspace} tabReadingPositions={tabReadingPositions.current} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
                 fonts={fonts} onFontSettings={()=>{setSettingsTab("fonts");setModal("settings");}}
                 onMakeDocument={(source, id) => makeCopilotDocument({ ...source, title: captureTreeEntries.get(id)?.get(source.path)?.label ?? source.title }, id)}

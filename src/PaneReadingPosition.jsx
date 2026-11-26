@@ -79,13 +79,16 @@ export default class PaneReadingPosition extends Component {
 
   // Capture while the old editor/preview and its original layout still exist.
   getSnapshotBeforeUpdate(previous) {
-    if (previous.mode === this.props.mode) return null;
+    return previous.mode === this.props.mode ? null : this.capture(previous.mode);
+  }
+
+  capture(mode) {
     if (this.pending) return this.pending;
     const header = this.props.header.current.closest(".pane-header");
     const pane = header.parentElement;
     if (pane.scrollTop <= 0) return { start: true };
     const y = header.getBoundingClientRect().bottom + 1;
-    if (this.usesPreview(previous.mode)) {
+    if (this.usesPreview(mode)) {
       const anchor = previewAnchor(this.props.preview.current, y);
       if (anchor) return anchor;
     }
@@ -98,7 +101,19 @@ export default class PaneReadingPosition extends Component {
 
   componentDidUpdate(previous, _state, anchor) {
     if (previous.content !== this.props.content || previous.jump !== this.props.jump) { this.cancel(); return; }
-    if (!anchor) return;
+    if (anchor) this.restore(anchor);
+  }
+
+  componentDidMount() {
+    const { positions, tabKey, readingPreview, jump } = this.props;
+    const saved = positions.get(tabKey);
+    if (!saved) return;
+    positions.delete(tabKey);
+    readingPreview.current = saved.preview;
+    if (!jump) this.restore(saved.anchor);
+  }
+
+  restore(anchor) {
     this.cancel();
     const header = this.props.header.current.closest(".pane-header");
     const pane = header.parentElement;
@@ -147,6 +162,11 @@ export default class PaneReadingPosition extends Component {
     this.events?.abort();
     this.pending = null;
   };
-  componentWillUnmount() { this.cancel(); }
+  componentWillUnmount() {
+    const { positions, tabKey, mode, readingPreview } = this.props;
+    const anchor = this.capture(mode);
+    if (anchor) positions.set(tabKey, { anchor, preview: readingPreview.current });
+    this.cancel();
+  }
   render() { return this.props.children; }
 }
