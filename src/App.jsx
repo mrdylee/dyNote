@@ -2375,7 +2375,7 @@ export default function App() {
               </span>
             </div>
             <div className="toolbar-actions">
-              {gitStatus.enabled && gitStatus.conflicts?.some(f=>f.name===displayedPath) && <button className="text-action" onClick={()=>openReview(vault.id,displayedPath)}>버전 확인 · {gitStatus.conflicts.find(f=>f.name===displayedPath).count}개</button>}
+              {section!=="journal" && gitStatus.enabled && gitStatus.conflicts?.some(f=>f.name===displayedPath) && <button className="text-action" onClick={()=>openReview(vault.id,displayedPath)}>버전 확인 · {gitStatus.conflicts.find(f=>f.name===displayedPath).count}개</button>}
               {displayedPath && (note || structured || attachment) && !showingWord && !activeDocumentDraft && <button className="text-action" disabled={busy}
                 onClick={() => setModal("file-versions")}>버전 기록</button>}
               {note && <button className="text-action" disabled={busy} onClick={()=>{setModal("compare");}}>문서 나란히 보기</button>}
@@ -2514,6 +2514,7 @@ export default function App() {
               <p>보관함에서 개인 노트를 연결해 주세요.</p>
               <button className="primary-button" disabled={busy} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>개인 노트 설정</button>
             </div> : <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
+              conflicts={gitStatus.enabled ? gitStatus.conflicts : undefined} onReview={path=>openReview(vault.id,path)}
               currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}
               onOpen={openNote} onChange={(path, content) => changeFile(path, content, vault.id, true)}
               onImportFiles={files => importFiles(files, vault.id)} onLink={followEditorLink}

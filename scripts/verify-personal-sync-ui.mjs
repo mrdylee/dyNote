@@ -138,6 +138,70 @@ async function verifySavingLocation(pc) {
   assert.deepEqual(await sample.jsonValue(), { count: 1, inTree: false });
   await pc.page.locator(".statusbar button").filter({ hasText: "변경사항 저장 중…" }).waitFor({ state: "hidden" });
 }
+async function verifyJournalConflict(a, b) {
+  const today = pc => pc.page.locator(".journal-feed article").first();
+  const editor = pc => today(pc).locator(".cm-content");
+  for (const pc of [a, b]) {
+    await pc.page.getByRole("button", { name: "저널", exact: true }).click();
+    await editor(pc).waitFor();
+  }
+  const journal = await today(a).getAttribute("data-document-path");
+  assert.equal(await today(b).getAttribute("data-document-path"), journal);
+  async function edit(pc, text) {
+    await editor(pc).click();
+    await editor(pc).press(cmd + "+a");
+    await editor(pc).press("Backspace");
+    await pc.page.keyboard.insertText(text);
+    const file = path.join(pc.root, journal);
+    const deadline = Date.now() + 10000;
+    while (await readFile(file, "utf8") !== text && Date.now() < deadline) await delay(50);
+    assert.equal(await readFile(file, "utf8"), text);
+  }
+  async function sync(pc) {
+    let status = await pc.sync();
+    const deadline = Date.now() + 10000;
+    while (status.phase === "pending" && Date.now() < deadline) {
+      await delay(100);
+      status = await pc.sync();
+    }
+    assert.equal(status.phase, "synced", status.message);
+  }
+  // Establish an unresolved conflict whose published text is 0.
+  await edit(a, "기준");
+  await sync(a);
+  await sync(b);
+  await editor(b).filter({ hasText: "기준" }).waitFor();
+  await edit(a, "0");
+  await edit(b, "이전 편집");
+  await sync(a);
+  await sync(b);
+  await sync(a);
+  for (const pc of [a, b]) {
+    await today(pc).getByRole("button", { name: "버전 확인 · 2개" }).waitFor();
+    assert.equal(await editor(pc).innerText(), "0");
+  }
+  await edit(a, "a");
+  await edit(b, "b");
+  await sync(b);
+  await sync(a);
+  await sync(b);
+  for (const pc of [a, b]) {
+    await today(pc).getByRole("button", { name: "버전 확인 · 4개" }).waitFor();
+    assert.equal(await editor(pc).innerText(), "0");
+    assert.equal(await readFile(path.join(pc.root, journal), "utf8"), "0");
+  }
+  await today(b).getByRole("button", { name: "버전 확인 · 4개" }).click();
+  const review = b.page.getByRole("dialog", { name: "버전 확인" });
+  await review.getByRole("radio", { name: /^b · Local/ }).waitFor();
+  await review.getByRole("radio", { name: /^a · Cloud/ }).check();
+  await review.getByRole("button", { name: "a로 적용" }).click();
+  await review.waitFor({ state: "hidden" });
+  await sync(a);
+  for (const pc of [a, b]) {
+    await today(pc).getByRole("button", { name: /버전 확인/ }).waitFor({ state: "hidden" });
+    assert.equal(await readFile(path.join(pc.root, journal), "utf8"), "a");
+  }
+}
 try {
   const a = await launch("Cloud", true),
     b = await launch("Local", false);
@@ -204,6 +268,7 @@ try {
   await dialog.waitFor({ state: "hidden" });
   await a.sync();
   assert.equal(await readFile(path.join(a.root, "회의록.md"), "utf8"), "회의 3시\n");
+  await verifyJournalConflict(a, b);
   const stored = path.join(a.root, "File Storage");
   await mkdir(stored, { recursive: true });
   await appendFile(path.join(a.root, ".git", "info", "exclude"), "\n/File Storage/local-only.txt\n");

@@ -89,6 +89,9 @@ test("Git failures distinguish a missing remote, fetch, porcelain policy rejecti
   await writeFile(hook, "#!/bin/sh\necho 'Write access denied for company.example' >&2\nexit 1\n");
   await chmod(hook, 0o755);
   await assert.rejects(push("HEAD"), error => error.syncStage === "push" && error.syncReason === "push-denied" && !error.message.includes("company.example"));
+  const expected = f.git(f.root, "rev-parse", "HEAD~1"), actual = f.git(f.root, "rev-parse", "HEAD");
+  await writeFile(hook, `#!/bin/sh\necho "error: cannot lock ref 'refs/heads/main': is at ${actual} but expected ${expected}" >&2\nexit 1\n`);
+  await assert.rejects(push("HEAD"), error => error.syncStage === "push" && error.syncReason === "non-fast-forward");
   await unlink(hook);
   await push("HEAD");
   await assert.rejects(push("HEAD~1"), error => error.syncStage === "push" && error.syncReason === "non-fast-forward");
