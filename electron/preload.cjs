@@ -96,6 +96,11 @@ contextBridge.exposeInMainWorld(
     gitWorkspaceAction: (args) => call("git-workspace-action", args),
     previewGit: (args) => call("git-preview", args),
     restoreGit: (args) => call("git-restore", args),
+    onSyncVault: callback => {
+      const listener = () => callback();
+      ipcRenderer.on("notes:sync-vault", listener);
+      return () => ipcRenderer.removeListener("notes:sync-vault", listener);
+    },
     onOpenSettings: (callback) => {
       const listener = (_event, tab) => callback(tab);
       ipcRenderer.on("notes:open-settings", listener);

@@ -23,3 +23,17 @@ test("reading menu cannot cut or paste and offers copy only when available", () 
   assert.equal(menu.find(item=>item.role==="copy").enabled,true);
   assert.ok(!menu.some(item=>item.label==="서식"));
 });
+test("workspace sync is available in the editor, form fields and reading view", () => {
+  for (const params of [
+    { isEditable: true, formControlType: "none" },
+    { isEditable: true, formControlType: "input-text" },
+    { isEditable: false },
+  ]) {
+    let calls = 0;
+    const menu = contextMenuTemplate(params, () => {}, () => {}, () => calls++);
+    const sync = menu.find(item => item.label === "지금 동기화");
+    assert.ok(sync);
+    sync.click();
+    assert.equal(calls, 1);
+  }
+});

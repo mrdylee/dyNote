@@ -511,7 +511,8 @@ app
       const point = params.menuSourceType === "keyboard" ? null : { x: params.x / zoom, y: params.y / zoom };
       const menu = Menu.buildFromTemplate(contextMenuTemplate(params,
         format => window.webContents.send("notes:format-editor", format, point),
-        () => window.webContents.send("notes:open-settings", "fonts")));
+        () => window.webContents.send("notes:open-settings", "fonts"),
+        () => window.webContents.send("notes:sync-vault")));
       menu.popup({ window });
     });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

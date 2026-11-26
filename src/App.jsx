@@ -25,6 +25,7 @@ import {
   PanelRight,
   PencilLine,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   ShieldCheck,
@@ -417,11 +418,12 @@ export default function App() {
   const [tabCloseRequest, setTabCloseRequest] = useState(null);
   const [tabMenu, setTabMenu] = useState(null);
   const tabMenuRef = useRef(null);
+  const tabVaultId = documentRef(tabMenu?.key, vault?.id).vaultId;
   const tabMenuIndex = tabs.indexOf(tabMenu?.key);
   useEffect(() => {
     if (tabMenuIndex < 0) return;
     const menu = tabMenuRef.current;
-    menu.querySelector("button")?.focus();
+    menu.querySelector("button:not(:disabled)")?.focus();
     const dismiss = event => { if (!menu.contains(event.target)) setTabMenu(null); };
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
@@ -474,6 +476,8 @@ export default function App() {
   const [hover, setHover] = useState(null);
   const hoverTimer = useRef(null), hoverClose = useRef(null), hoverAnchor = useRef(null);
   const [modal, setModal] = useState(null);
+  const modalRef = useRef(modal);
+  modalRef.current = modal;
   useEffect(() => {
     clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); hoverAnchor.current = null; setHover(null);
     return () => { clearTimeout(hoverTimer.current); clearTimeout(hoverClose.current); };
@@ -815,19 +819,26 @@ export default function App() {
     return result;
   };
   const openPanelSettings = (vaultId, setup = false) => {
+    // Setup can be requested after an asynchronous sync, while a dialog is being edited.
+    if (modalRef.current) return;
+    const purpose = vaultsRef.current[vaultId]?.purpose;
     setGitSettingsId(vaultId);
-    setSettingsTab(vaultsRef.current[vaultId]?.purpose === "team" ? (setup ? "team-sync-setup" : "git-workspace") : "personal-sync");
+    setSettingsTab(purpose === "team" ? (setup ? "team-sync-setup" : "git-workspace") : purpose === "personal" ? "personal-sync" : "vault");
     setModal("settings");
   };
-  const syncFromTree = async () => {
-    const { vaultId, origin } = treeMenu;
-    setTreeMenu(null);
-    origin.focus();
-    if (personalMenu && !menuSyncEnabled) { openPanelSettings(vaultId); return; }
+  const syncVault = async vaultId => {
+    if (busy || panelSyncs[vaultId]?.working) return;
+    const purpose = vaultsRef.current[vaultId]?.purpose;
+    if (!purpose) { openPanelSettings(vaultId); return; }
+    const git = gitStates[vaultId];
+    if (purpose === "personal" && git && !(git.enabled && ["personal-sync","github-api"].includes(git.config?.mode))) {
+      openPanelSettings(vaultId);
+      return;
+    }
     setPanelSyncs(old => ({ ...old, [vaultId]: { working: true } }));
     let message, teamResult;
     try {
-      if (teamMenu) {
+      if (purpose === "team") {
         await flush(false, vaultId);
         const { status } = await invoke(api.gitWorkspaceAction({ vaultId, action:{kind:"sync-team"} }));
         teamResult = status;
@@ -838,9 +849,12 @@ export default function App() {
         const result = await syncNow(vaultId, true);
         if (!result.enabled || !["personal-sync","github-api"].includes(result.config?.mode)) openPanelSettings(vaultId);
       }
-    } catch (cause) { message = cause.message; }
+    } catch (cause) { message = cause.message; setError(message); }
     setPanelSyncs(old => ({ ...old, [vaultId]: { message, teamResult } }));
   };
+
+  const syncCurrentVault = useEffectEvent(() => syncVault(vault?.id));
+  useEffect(() => api?.onSyncVault?.(() => { void syncCurrentVault(); }), []);
 
   const refreshSequence=useRef(new Map());
   const refreshSyncedVault = async vaultId => {
@@ -2466,6 +2480,10 @@ export default function App() {
               >
                 <MessageCircle size={16} />
               </IconButton>
+              <IconButton label={panelSyncs[vault.id]?.working ? "동기화 중…" : "지금 동기화"}
+                disabled={busy || panelSyncs[vault.id]?.working} onClick={() => syncVault(vault.id)}>
+                <RefreshCw size={16} className={panelSyncs[vault.id]?.working ? "spin" : undefined} />
+              </IconButton>
               <IconButton
                 label="오른쪽 패널 표시/숨기기"
                 active={right}
@@ -2901,6 +2919,11 @@ export default function App() {
             items[(items.indexOf(event.target) + step + items.length) % items.length]?.focus();
           }
         }}>
+        <button role="menuitem" tabIndex={-1} disabled={busy || panelSyncs[tabVaultId]?.working} onClick={() => {
+          setTabMenu(null);
+          tabMenu.origin.focus();
+          void syncVault(tabVaultId);
+        }}>{panelSyncs[tabVaultId]?.working ? "동기화 중…" : "지금 동기화"}</button>
         {[
           ["이 탭 닫기", [tabMenu.key]],
           ["다른 탭 모두 닫기", tabs.filter(key => key !== tabMenu.key)],
@@ -2918,7 +2941,7 @@ export default function App() {
       {treeMenu && <div ref={treeMenuRef} className="file-tree-menu" role="menu" aria-label="문서·폴더 작업" style={{left:treeMenu.x, top:treeMenu.y}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setTreeMenu(null);}}>
         {(personalMenu || teamMenu) && <button role="menuitem" disabled={panelWorking || personalMenu && !menuGit}
-          onClick={syncFromTree}>{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
+          onClick={() => { setTreeMenu(null); treeMenu.origin.focus(); void syncVault(treeMenu.vaultId); }}>{panelWorking ? "동기화 중…" : teamMenu || menuSyncEnabled ? "지금 동기화" : menuGit ? "동기화 설정…" : "동기화 설정 확인 중…"}</button>}
         {menuFileState && <p className="file-tree-menu-hint">{menuFileState.message}</p>}
         <button role="menuitem" onClick={() => {
           const parent = treeMenu.folder ? treeMenu.path : treeMenu.path.split("/").slice(0, -1).join("/");
