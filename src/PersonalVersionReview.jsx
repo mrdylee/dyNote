@@ -173,7 +173,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
             {hunks.map((h, i) => <option key={h.key} value={i}>겹친 구간 {i + 1}</option>)}
           </select>
         </label>}
-        <DocumentPanes panes={[{key:"original", id:"original"}, {key:"left", id:compared[0]}, {key:"right", id:compared[1]}]}
+        <DocumentPanes panes={[{key:"left", id:compared[0]}, {key:"original", id:"original"}, {key:"right", id:compared[1]}]}
           renderPane={({key, id}) => <ComparisonPane slot={key} id={id} rows={rows} other={compared[key === "left" ? 1 : 0]}
             parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
             onSwitch={id => setCompared(old => key === "left" ? [id, old[1]] : [old[0], id])}

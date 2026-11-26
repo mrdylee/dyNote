@@ -202,8 +202,10 @@ async function verifyJournalConflict(a, b) {
     assert.equal(await content.locator(".comparison-block > span").textContent(), value + "\n");
     assert((await content.textContent()).endsWith("다음 일정"));
   }
+  const panels = review.locator(".comparison-pane");
+  assert.equal(await panels.nth(1).getAttribute("aria-label"), "공통 원문");
   const width = await pane("공통 원문").boundingBox();
-  await review.getByRole("separator").first().press("ArrowRight");
+  await review.getByRole("separator").nth(1).press("ArrowRight");
   assert.notEqual((await pane("공통 원문").boundingBox()).width, width.width);
   const switcher = review.getByRole("combobox", {name: await pane("Cloud").getByRole("combobox").getAttribute("aria-label")});
   const before = await switcher.inputValue();
