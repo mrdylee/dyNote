@@ -7,6 +7,7 @@ import { syntaxTree } from "@codemirror/language";
 import MarkdownIt from "markdown-it";
 import { isMermaidFence } from "../core/diagram-tools.mjs";
 import { attachmentUrl } from "../core/knowledge.mjs";
+import { TablePreview } from "./live-table.mjs";
 import { renderMermaid } from "./mermaid-preview.mjs";
 
 const markdown = new MarkdownIt().disable("inline");
@@ -30,12 +31,13 @@ const config = Facet.define({ combine: (values) => values[0] ?? {} });
 export const composition = StateEffect.define();
 export const refreshLivePreview = StateEffect.define();
 const revealClickedCaret = StateEffect.define();
+const leaveTable = StateEffect.define();
 export const imageLayoutChanged = StateEffect.define();
 const formatting = { StrongEmphasis: "strong", Emphasis: "emphasis", Strikethrough: "strike", InlineCode: "code" };
-const literal = new Set(["FencedCode", "CodeBlock", "HTMLBlock", "HTMLTag", "Table", "LinkReference"]);
+const literal = new Set(["FencedCode", "CodeBlock", "HTMLBlock", "HTMLTag", "LinkReference"]);
 
 function selected(selection, from, to) {
-  return selection.ranges.some((r) => r.from <= to && r.to >= from);
+  return !!selection && selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
 function linkInfo(state, node) {
@@ -152,10 +154,10 @@ class MermaidPreview extends WidgetType {
 }
 
 class RevealRegion extends RangeValue {
-  constructor(replacements) { super(); this.replacements = replacements; }
+  constructor(replacements, table = false) { super(); this.replacements = replacements; this.table = table; }
 }
 
-function decorate(state, revealSelection = state.selection) {
+function decorate(state, revealSelection = state.selection, tableSelection = null) {
   const ranges = [], reveals = [], options = state.facet(config), context = options.getContext?.() ?? {};
   const source = state.doc.toString();
   const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(source)?.[0].length ?? 0;
@@ -197,6 +199,13 @@ function decorate(state, revealSelection = state.selection) {
         reveals.push(new RevealRegion([replacement]).range(from + 1, to - 1));
         if (!selected(revealSelection, from + 1, to - 1)) ranges.push(replacement);
       }
+      return false;
+    }
+    if (name === "Table") {
+      const widget = new TablePreview(state, node);
+      const replacement = Decoration.replace({ block: true, inclusive: false, widget }).range(from, to);
+      reveals.push(new RevealRegion([replacement], true).range(from, to));
+      if (!selected(tableSelection, from, to)) ranges.push(replacement);
       return false;
     }
     if (literal.has(name)) return false;
@@ -249,22 +258,22 @@ function decorate(state, revealSelection = state.selection) {
     }
     return finish();
   }});
-  return { decorations: Decoration.set(ranges, true), reveals: RangeSet.of(reveals, true), revealSelection };
+  return { decorations: Decoration.set(ranges, true), reveals: RangeSet.of(reveals, true), revealSelection, tableSelection };
 }
 
-function updateSelection(value, after) {
+function updateSelection(value, after, tableAfter) {
   const before = value.revealSelection;
-  if (before.eq(after)) return value;
+  if (before.eq(after) && tableAfter === value.tableSelection) return value;
   const seen = new Set(), removed = new Set(), add = [], intervals = [];
   // The index includes hidden and currently revealed syntax. Query both ends of
   // a move, including ancestors, without walking the document between them.
-  for (const selection of [...before.ranges, ...after.ranges]) {
+  for (const selection of [...before.ranges, ...after.ranges, ...(value.tableSelection?.ranges ?? []), ...(tableAfter?.ranges ?? [])]) {
     let from = selection.from, to = selection.to, filter = false;
     value.reveals.between(from, to, (start, end, region) => {
       if (seen.has(region)) return;
       seen.add(region);
-      const active = selected(after, start, end);
-      if (active === selected(before, start, end)) return;
+      const active = selected(region.table ? tableAfter : after, start, end);
+      if (active === selected(region.table ? value.tableSelection : before, start, end)) return;
       if (!active) { add.push(...region.replacements); return; }
       for (const range of region.replacements) {
         removed.add(range.value);
@@ -274,7 +283,7 @@ function updateSelection(value, after) {
     });
     if (filter) intervals.push({ from, to });
   }
-  if (!removed.size && !add.length) return { ...value, revealSelection: after };
+  if (!removed.size && !add.length) return { ...value, revealSelection: after, tableSelection: tableAfter };
   const merged = [];
   for (const interval of intervals.sort((a, b) => a.from - b.from)) {
     const last = merged.at(-1);
@@ -286,7 +295,7 @@ function updateSelection(value, after) {
     filterFrom: from, filterTo: to, filter: (_from, _to, decoration) => !removed.has(decoration),
   });
   if (add.length) decorations = decorations.update({ add, sort: true });
-  return { ...value, decorations, revealSelection: after };
+  return { ...value, decorations, revealSelection: after, tableSelection: tableAfter };
 }
 
 export const livePreviewState = StateField.define({
@@ -297,15 +306,20 @@ export const livePreviewState = StateField.define({
       if (effect.is(composition)) { composing = effect.value; refresh = true; }
       if (effect.is(refreshLivePreview)) refresh = true;
     }
-    if (composing) return { ...value, composing, revealSelection: tr.state.selection, decorations: value.decorations.map(tr.changes) };
+    if (composing) return { ...value, composing, revealSelection: tr.state.selection,
+      tableSelection: value.tableSelection && tr.state.selection, decorations: value.decorations.map(tr.changes) };
     // Keep glyphs under the mouse until the click ends or the next keyboard edit.
     const revealAtCaret = tr.effects.some(effect => effect.is(revealClickedCaret));
     const moved = tr.selection && !tr.selection.eq(tr.startState.selection);
     const followSelection = tr.docChanged || revealAtCaret || (moved && !tr.isUserEvent("select.pointer"));
     const revealSelection = followSelection ? tr.state.selection : value.revealSelection;
+    let tableSelection = value.tableSelection;
+    if (revealAtCaret || tr.isUserEvent("select.table") || (moved && !tr.isUserEvent("select.pointer")) || (tr.docChanged && tableSelection))
+      tableSelection = tr.state.selection;
+    if (tr.effects.some(effect => effect.is(leaveTable))) tableSelection = null;
     if (refresh || tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state) || tr.startState.readOnly !== tr.state.readOnly)
-      return { ...decorate(tr.state, revealSelection), composing };
-    return updateSelection(value, revealSelection);
+      return { ...decorate(tr.state, revealSelection, tableSelection), composing };
+    return updateSelection(value, revealSelection, tableSelection);
   },
   provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
 });
@@ -343,7 +357,12 @@ export function copyEditorSelection(event, view) {
         if (start === end) return;
         replaced = true;
         if (decoration.spec.widget) widgetSelected = true;
-        if (decoration.spec.widget instanceof Bullet) text += "•";
+        const widget = decoration.spec.widget;
+        if (widget instanceof Bullet) text += "•";
+        if (widget instanceof TablePreview) {
+          const table = widget.render(view.dom.ownerDocument).querySelector("table");
+          if (table) text += Array.from(table.rows, row => Array.from(row.cells, cell => cell.textContent).join("\t")).join("\n");
+        }
       },
     }, 1);
     if (widgetSelected && !styleMarks.length && ranges.length === 1 && from >= view.viewport.from && to <= view.viewport.to) {
@@ -358,6 +377,7 @@ export function copyEditorSelection(event, view) {
 
 export function livePreview(options = {}) {
   return [config.of(options), captureMarkerState, livePreviewState,
+    EditorView.focusChangeEffect.of((_state, focused) => focused ? null : leaveTable.of(null)),
     EditorView.editorAttributes.of({ class: "cm-live-preview" }),
     ViewPlugin.fromClass(class {
       constructor(view) { this.view = view; this.timer = null; }

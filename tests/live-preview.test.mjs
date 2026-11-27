@@ -93,10 +93,10 @@ test("a backwards drag across offscreen lines copies rendered labels and literal
   assert.equal(values.get("text/plain"), "앞 안내 크기\n\n```txt\n" + middle + "```\n\n뒤");
 });
 
-test("nested markup reveals its ancestors; code, frontmatter, HTML and tables remain literal", () => {
+test("nested markup reveals its ancestors while code, frontmatter and HTML stay literal", () => {
   const doc = '---\ntitle: "**raw**"\n---\n\n```md\n[[fake]] **raw**\n```\n\n<div>[[fake]]</div>\n\n| a | b |\n| - | - |\n| **raw** | [[fake]] |\n\n**outer *inner***\n\nend';
   const s = state(doc, doc.indexOf("inner") + 1);
-  assert.equal(hidden(s).length, 0);
+  assert.deepEqual(hidden(s).map(r => r.text), ["| a | b |\n| - | - |\n| **raw** | [[fake]] |"]);
   assert.equal(ranges(s).filter((r) => r.spec.attributes?.["data-live-target"]).length, 0);
   assert.equal(hidden(state("`[[fake]]`\n\nend")).length, 2);
 });
@@ -116,6 +116,29 @@ test("fenced and indented code lines receive the code font without hiding source
   assert.deepEqual(code.map((r) => s.doc.lineAt(r.from).text), ["```js", "const x = 1;", "```", "    const y = 2;"]);
   assert.equal(hidden(s).length, 0);
   assert.equal(s.doc.toString(), doc);
+});
+
+test("live tables use the reading renderer, map cells to source, and keep fenced examples literal", () => {
+  const lines = ["| 이름 | 값 |", "| :--- | ---: |", "| **A** | a\\|b |", "| | |"];
+  const quote = lines.map(line => "> " + line).join("\n");
+  const doc = quote + "\n\n```md\n" + lines.join("\n") + "\n```";
+  const initial = state(doc, 0);
+  const [replacement] = hidden(initial);
+  assert.equal(replacement.text, quote.slice(2));
+  const widget = replacement.spec.widget, dom = new JSDOM();
+  try {
+    const table = widget.render(dom.window.document).querySelector("table");
+    assert.equal(table.rows.length, 3);
+    assert.equal(table.rows[1].cells[1].style.textAlign, "right");
+    assert.equal(table.querySelector("strong").textContent, "A");
+    assert.equal(table.rows[1].cells[1].textContent, "a|b");
+    assert.equal(table.rows[2].cells.length, 2);
+  } finally { dom.window.close(); }
+  assert.equal(replacement.from + widget.cellOffset(1, 1), doc.indexOf("b |") + 1);
+  const editing = initial.update({ selection: { anchor: replacement.from }, userEvent: "select.table" }).state;
+  assert.equal(hidden(editing).length, 0);
+  const outside = editing.update({ selection: { anchor: doc.length } }).state;
+  assert.equal(hidden(outside).length, 1);
 });
 
 test("completed Mermaid fences become block widgets outside the selection", () => {

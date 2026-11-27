@@ -23,6 +23,8 @@ try {
   await writeFile(path.join(personal, "Inbox/Plan.md"), source);
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
+  const tableSource = "| 항목 | 상태 |\n| :--- | ---: |\n| **보고서** | 검토 중 |\n\n표 밖 문단";
+  await writeFile(path.join(personal, "Table.md"), tableSource);
   const selectionLine = "앞 선택 ```기호 `유지` 본문``` 마침 뒤";
   const styleLine = '앞 색상시작 <span style="background-color:#ffe58a"><span style="color:#c62828">강조</span></span> 색상끝 뒤';
   await writeFile(path.join(personal, "Selection.md"), styleLine + "\n\n" + selectionLine + "\n\n```txt\n첫 줄\n둘째 줄\n```\n");
@@ -437,6 +439,28 @@ try {
       await checkCopy(preview, "첫 줄", "둘째 줄", "첫 줄\n둘째 줄");
     }
   }
+  await row(personalTree, "Table.md").click();
+  await page.locator(".view-segments").getByRole("button", { name: "Live Preview", exact: true }).click();
+  const tableEditor = pane("Table.md").locator(".cm-content");
+  const table = tableEditor.locator(".cm-live-table table");
+  await table.locator("th").filter({ hasText: /^상태$/ }).waitFor();
+  assert.equal(await table.locator("td strong").innerText(), "보고서");
+  const cell = table.locator("td").filter({ hasText: /^검토 중$/ });
+  await checkCopy(cell, "검토", "중", "검토 중");
+  await cell.click();
+  await table.waitFor({ state: "detached" });
+  await page.keyboard.insertText("입니다");
+  await tableEditor.getByText("표 밖 문단", { exact: true }).click();
+  await table.locator("td").filter({ hasText: /^검토 중입니다$/ }).waitFor();
+  await page.keyboard.press(modifier + "+s");
+  assert.equal(await readFile(path.join(personal, "Table.md"), "utf8"), tableSource.replace("검토 중", "검토 중입니다"));
+  await table.locator("th").first().click();
+  await table.waitFor({ state: "detached" });
+  await page.keyboard.press("Home");
+  assert.equal(await table.count(), 0);
+  await row(personalTree, "Table.md").focus();
+  await table.waitFor();
+  console.log("Live table cell copy, source editing, saved Markdown and preview on blur passed.");
   console.log("Mouse selection copied the displayed text in live, source, split and reading views.");
   assert.deepEqual(errors, []);
   console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
