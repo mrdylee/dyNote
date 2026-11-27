@@ -3,6 +3,7 @@ import {getDocument,GlobalWorkerOptions,TextLayer} from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {parsePdfFragment,pdfWikiLink} from '../core/pdf-links.mjs';
 import {markerLines,markerOpacity,markerOutline} from '../core/pdf-marker.mjs';
+import PdfPenColors from './PdfPenColors.jsx';
 import PdfAnnotationTools from './PdfAnnotationTools.jsx';
 GlobalWorkerOptions.workerSrc=workerUrl;
 
@@ -32,10 +33,22 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
     }
     setPen(null);setStrokes([]);
   };
-  const pdfRects=(range,joinSpans=false)=>{
+  const pdfRects=(start,end,joinSpans=false)=>{
     const viewport=viewportRef.current,host=textHost.current?.getBoundingClientRect();
     if(!viewport||!host)return [];
-    const rects=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0);
+    // Fully selected PDF.js spans can include layout boxes and spacing between columns.
+    const rects=[],range=document.createRange();
+    for(let i=start[0];i<=end[0];i++){
+      const node=textLayer.current.textDivs[i]?.firstChild;
+      if(!node?.length)continue;
+      const from=i===start[0]?start[1]:0,to=i===end[0]?end[1]:node.length;
+      const text=node.data.slice(from,to);
+      if(!text.trim())continue;
+      const leadingSpaces=text.length-text.trimStart().length;
+      range.setStart(node,from+leadingSpaces);
+      range.setEnd(node,from+text.trimEnd().length);
+      for(const rect of range.getClientRects())if(rect.width>0&&rect.height>0)rects.push(rect);
+    }
     return (joinSpans?markerLines(rects):rects).map(r=>{
       const a=viewport.convertToPdfPoint(r.left-host.left,r.top-host.top),b=viewport.convertToPdfPoint(r.right-host.left,r.bottom-host.top);
       return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
@@ -150,6 +163,9 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       render=p.render({canvasContext:targetCanvas.getContext('2d'),viewport});
       layer=new TextLayer({textContentSource:content,container:host,viewport});textLayer.current=layer;
       await Promise.all([render.promise,layer.render()]);if(cancelled)return;
+      for(const span of layer.textDivs){
+        if(span.textContent && !span.textContent.trim())span.classList.add('pdf-spacing');
+      }
       setReady(true);
       const annotations=await p.getAnnotations();if(cancelled)return;setAnnotations(annotations);
       if(target?.page===page && target.selection) {
@@ -157,7 +173,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
         if(first?.firstChild&&last?.firstChild&&ao<=first.textContent.length&&bo<=last.textContent.length) {
           const range=window.document.createRange();range.setStart(first.firstChild,ao);range.setEnd(last.firstChild,bo);
           const browserSelection=window.getSelection();browserSelection.removeAllRanges();browserSelection.addRange(range);
-          setSelection({range:target.selection,text:browserSelection.toString(),rects:pdfRects(range)});
+          setSelection({range:target.selection,text:browserSelection.toString(),rects:pdfRects([a,ao],[b,bo])});
           if(edge==='target')first.scrollIntoView({block:'center',inline:'nearest'});
         } else setMessage('이 문서에서 링크의 선택 영역을 찾을 수 없습니다.');
       }
@@ -188,7 +204,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
     const start=locate(range.startContainer,range.startOffset),end=locate(range.endContainer,range.endOffset);
     if(pen){
       if(event.type!=='mouseup'||event.button!==0||!ready||!start||!end||!selected.toString().trim())return;
-      const rects=pdfRects(range,true);
+      const rects=pdfRects(start,end,true);
       if(!rects.length)return;
       const viewport=viewportRef.current;
       const styleRects=rects.map(rect=>{
@@ -212,7 +228,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       });
       return;
     }
-    setSelection(start&&end?{range:[...start,...end],text:selected.toString(),rects:pdfRects(range)}:null);
+    setSelection(start&&end?{range:[...start,...end],text:selected.toString(),rects:pdfRects(start,end)}:null);
   };
   const copy=async withSelection=>{
     try{await onCopy(pdfWikiLink(path,page,withSelection?selection?.range:null));setMessage('PDF 링크를 복사했습니다.');}
@@ -222,7 +238,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
     {error?<p role="alert">PDF를 열 수 없습니다: {error}</p>:<>
       <div className="pdf-toolbar">
         {onBeginHighlighting&&<button aria-pressed={!!pen} disabled={!ready||saving} onClick={togglePen}>형광펜</button>}
-        {pen&&<><input type="color" aria-label="형광펜 색상" value={penColor} onChange={e=>setPenColor(e.target.value)}/><span role="status">{saving?'저장 중…':strokes.length?'저장됨':'문장을 드래그하세요'}</span></>}
+        {pen&&<><PdfPenColors value={penColor} onChange={setPenColor}/><span role="status">{saving?'저장 중…':strokes.length?'저장됨':'문장을 드래그하세요'}</span></>}
         <button disabled={!pdf||page===1} onClick={()=>goToPage(page-1)}>이전 페이지</button>
         <label>PDF 페이지<input aria-label="PDF 페이지" type="number" min="1" max={pdf?.numPages||1} value={page} onChange={e=>{const n=Number(e.target.value);if(Number.isInteger(n)&&n>=1&&n<=pdf?.numPages&&n!==page)goToPage(n);}}/></label>
         <span>{pdf?`/ ${pdf.numPages}`:'PDF 불러오는 중…'}</span>
@@ -232,7 +248,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       </div>
       {message&&<p role="status" className="pdf-message">{message}</p>}
       {selection?.text&&<p className="pdf-selected-text">선택: {selection.text}</p>}
-      {onPreviewEdit&&!pen&&<PdfAnnotationTools path={path} page={page} selection={selection} annotations={annotations} onPreview={onPreviewEdit} onApply={onApplyEdit} onFollow={followFragment} onCopy={onCopy}/>}
+      {onPreviewEdit&&!pen&&<PdfAnnotationTools penColor={penColor} onPenColor={setPenColor} path={path} page={page} selection={selection} annotations={annotations} onPreview={onPreviewEdit} onApply={onApplyEdit} onFollow={followFragment} onCopy={onCopy}/>}
       <div ref={scrollArea} className="pdf-scroll-area">
         <div className="pdf-page" aria-busy={!ready}><canvas ref={canvas} aria-label={`PDF ${page}페이지`}/><div ref={textHost} className="native-pdf-text" style={pen?{'--pdf-selection-color':penColor}:undefined} onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="PDF 텍스트"/>
           {strokes.filter(stroke=>stroke.page===page).map(stroke=>stroke.styleRects.map((rect,i)=><div key={`${stroke.id}-${i}`} className="pdf-pen-stroke" style={{...rect,backgroundColor:stroke.color,opacity:markerOpacity}}/>))}

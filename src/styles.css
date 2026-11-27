@@ -2076,6 +2076,8 @@ kbd {
 .mindmap-error { padding: 24px; }
 .pdf-toolbar { flex-wrap: wrap; }
 .pdf-toolbar button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.pdf-pen-colors { display: inline-flex; align-items: center; gap: 4px; }
+.pdf-viewer .pdf-pen-colors button { width: 24px; height: 24px; margin: 0; padding: 0; border: 1px solid #0004; border-radius: 50%; color: #202020; }
 .pdf-pen-stroke { position: absolute; pointer-events: none; mix-blend-mode: multiply; }
 .pdf-toolbar input { width: 55px; padding: 3px; border: 1px solid var(--accent-line); border-radius: 4px; }
 .pdf-scroll-area { height: 70vh; overflow: auto; }
@@ -2085,6 +2087,7 @@ kbd {
 .native-pdf-text :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0 0; user-select: text; }
 .native-pdf-text > span { font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1)) scale(var(--min-font-size-inv)); }
 .native-pdf-text ::selection { background: color-mix(in srgb, var(--pdf-selection-color, var(--accent)) 44%, transparent); }
+.native-pdf-text :is(br, .pdf-spacing)::selection { background: transparent; }
 .pdf-annotation-target { position: absolute; background: #ffdd4370; outline: 2px solid #b08b0b; pointer-events: none; }
 .pdf-message, .pdf-selected-text { font-size: 12px; padding: 6px 12px; color: var(--accent-ink); }
 .pdf-backlinks { padding: 12px; border-top: 1px solid var(--border); font-size: 12px; }

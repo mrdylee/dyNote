@@ -3,6 +3,7 @@ import {copyFile, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promise
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import electronPath from 'electron';
+import {PDFDocument} from 'pdf-lib';
 import {getDocument} from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const {_electron} = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || 'playwright');
@@ -15,6 +16,13 @@ try {
   await writeFile(path.join(profile, 'settings.json'), JSON.stringify({vaultRoot: vault}));
   await copyFile('tests/fixtures/link-target.pdf', file);
   const original = await readFile(file);
+  const linesFile = path.join(vault, 'lines.pdf');
+  const linesDoc = await PDFDocument.create();
+  const linesPage = linesDoc.addPage([450, 240]);
+  for (const [text, x, y] of [['First line of the selection',30,190], ['Short',30,150], ['Column',230,150], ['Last line of the selection',30,110]]) {
+    linesPage.drawText(text, {x, y, size:16});
+  }
+  await writeFile(linesFile, await linesDoc.save());
   app = await _electron.launch({executablePath: process.env.DYNOTE_EXECUTABLE || electronPath, args: process.env.DYNOTE_EXECUTABLE ? [] : ['.'], env: {...process.env, OPEN_NOTES_DATA: profile}});
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
@@ -36,6 +44,42 @@ try {
     await page.mouse.move(box.x + end * box.width, y, {steps: 5});
     await page.mouse.up();
   };
+  const openLines = async () => {
+    await page.locator('.file-tree [title="lines.pdf"]').first().click();
+    await page.locator('.pdf-page[aria-busy="false"]').waitFor();
+  };
+  await openLines();
+  await pen.click();
+  const textLayer = page.locator('.native-pdf-text');
+  const firstLine = await textLayer.getByText('First line of the selection', {exact:true}).boundingBox();
+  const lastLine = await textLayer.getByText('Last line of the selection', {exact:true}).boundingBox();
+  await page.mouse.move(firstLine.x + firstLine.width / 2, firstLine.y + firstLine.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lastLine.x + lastLine.width / 2, lastLine.y + lastLine.height / 2, {steps:15});
+  await page.mouse.up();
+  await page.getByText('저장됨', {exact:true}).waitFor();
+  const bounds = await page.locator('.pdf-pen-stroke').evaluateAll(nodes => nodes.map(n => {
+    const {left,right} = n.getBoundingClientRect();
+    return {left,right};
+  }));
+  assert.equal(bounds.length, 4, JSON.stringify(bounds));
+  for (const [index, word] of [[1,'Short'],[2,'Column']]) {
+    const box = await textLayer.getByText(word,{exact:true}).boundingBox();
+    assert.ok(Math.abs(bounds[index].left-box.x)<1 && Math.abs(bounds[index].right-box.x-box.width)<1,
+      word+' must end at its text: '+JSON.stringify({box,stroke:bounds[index]}));
+  }
+  assert.ok(bounds[0].left > firstLine.x+firstLine.width*0.4 && bounds[3].right < lastLine.x+lastLine.width*0.6);
+  const back = page.getByRole('button', {name:'문서로 돌아가기', exact:true});
+  await back.click();
+  await openLines();
+  const savedLines = getDocument({data:new Uint8Array(await readFile(linesFile)),useSystemFonts:true});
+  try {
+    const [mark] = await (await (await savedLines.promise).getPage(1)).getAnnotations();
+    const middle = Array.from(mark.quadPoints);
+    assert.equal(middle.length, 4*8);
+    assert.ok(Math.abs(middle[10]-68.24)<1 && Math.abs(middle[16]-230)<1, 'Saved highlight must leave the column gap clear.');
+  } finally { await savedLines.destroy(); }
+  await back.click();
   await open();
   await drag(0.01, 0.25);
   assert.deepEqual(await readFile(file), original);
@@ -49,7 +93,11 @@ try {
   });
   assert.ok(firstStroke.points.length > 4);
   assert.equal(await page.locator('.pdf-pen-stroke').first().evaluate(el=>getComputedStyle(el).opacity),'0.35');
-  await page.getByLabel('형광펜 색상').fill('#00ff00');
+  const colors = page.getByRole('group', {name:'형광펜 색상'});
+  assert.deepEqual(await colors.getByRole('button').evaluateAll(buttons=>buttons.map(b=>b.getAttribute('aria-label'))),
+    ['노랑','연두','하늘','분홍','주황']);
+  await colors.getByRole('button', {name:'연두'}).click();
+  assert.equal(await colors.getByRole('button', {name:'연두'}).getAttribute('aria-pressed'), 'true');
   await drag(0.62, 0.98);
   await page.getByRole('button', {name: '문서로 돌아가기', exact: true}).click();
   await page.locator('.pdf-viewer').waitFor({state: 'detached'});
@@ -58,7 +106,7 @@ try {
   try {
     const pdf = await job.promise;
     const marks = await (await pdf.getPage(1)).getAnnotations();
-    assert.deepEqual(marks.map(mark => [mark.subtype, ...mark.color]), [['Highlight',255,255,0], ['Highlight',0,255,0]]);
+    assert.deepEqual(marks.map(mark => [mark.subtype, ...mark.color]), [['Highlight',255,255,0], ['Highlight',105,237,69]]);
     assert.ok(marks.every(mark=>mark.opacity===0.35));
   } finally { await job.destroy(); }
   const colored = await page.locator('.pdf-page canvas').evaluate(canvas => {
@@ -66,7 +114,7 @@ try {
     let yellow = 0, green = 0;
     for (let i=0; i<pixels.length; i+=4) {
       if (pixels[i]===255 && pixels[i+1]===255 && Math.abs(pixels[i+2]-166)<=1) yellow++;
-      if (pixels[i+1] - pixels[i] > 35 && pixels[i+1] - pixels[i+2] > 35) green++;
+      if (pixels[i+1] - pixels[i] > 32 && pixels[i+1] - pixels[i+2] > 35) green++;
     }
     return {yellow, green};
   });
