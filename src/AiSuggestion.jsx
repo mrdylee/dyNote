@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { AlignLeft, Check, ChevronDown, Eye, MessageSquareText, PenLine, RefreshCw, Sparkles, SpellCheck } from "lucide-react";
 import { isolateHistory } from "@codemirror/commands";
 import { defaultCopilotModel } from "../core/copilot-send-state.mjs";
 
-const instructions = {
-  "문장 다듬기": "원래 뜻과 사실, Markdown 형식을 유지하며 문장을 자연스럽고 명확하게 다듬어 주세요.",
-  "맞춤법 교정": "원문의 뜻과 어조, Markdown 형식을 유지하며 맞춤법, 띄어쓰기, 문법만 바로잡아 주세요.",
-  "간결하게": "핵심 내용과 Markdown 형식을 유지하며 중복을 줄이고 간결하게 써 주세요.",
+const actions = {
+  "문장 다듬기": { Icon: PenLine, instruction: "원래 뜻과 사실, Markdown 형식을 유지하며 문장을 자연스럽고 명확하게 다듬어 주세요." },
+  "맞춤법 교정": { Icon: SpellCheck, instruction: "원문의 뜻과 어조, Markdown 형식을 유지하며 맞춤법, 띄어쓰기, 문법만 바로잡아 주세요." },
+  "간결하게": { Icon: AlignLeft, instruction: "핵심 내용과 Markdown 형식을 유지하며 중복을 줄이고 간결하게 써 주세요." },
+  "직접 요청": { Icon: MessageSquareText },
 };
 function cancelActive(request) {
   const requestId = request.current;
@@ -20,7 +22,7 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
   const inserting = from != null && !original.trim();
   const [action, setAction] = useState(inserting ? "직접 요청" : "문장 다듬기");
   const [custom, setCustom] = useState(inserting ? "이곳에 넣을 짧은 문단 초안을 작성해 주세요." : "");
-  const prompt = instructions[action] ?? custom.trim();
+  const prompt = actions[action].instruction ?? custom.trim();
   const [connection, setConnection] = useState(null), [model, setModel] = useState("");
   const [running, setRunning] = useState(false), [answer, setAnswer] = useState(""), [error, setError] = useState("");
   const stale = () => readOnly || editor.state.readOnly || editor.state.doc !== doc;
@@ -91,33 +93,43 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
     close();
   };
   return <dialog className="ai-suggestion" ref={dialog} aria-label="AI 제안" onCancel={event => { event.preventDefault(); close(); }}>
-    <h2>AI 제안</h2>
-    {(!inserting || answer) && <div className="copilot-comparison">
-      {!inserting && <section><h3>보낼 원문</h3><pre>{original}</pre></section>}
-      {answer && <section><h3>{inserting ? "삽입할 내용" : "수정 제안"}</h3><pre>{answer}</pre></section>}
-    </div>}
-    <fieldset className="ai-actions" disabled={running}><legend>작업</legend>
-      {[...Object.keys(instructions), "직접 요청"].map(name => <label key={name}>
-        <input type="radio" name="suggestion-action" checked={action === name} disabled={inserting && name !== "직접 요청"}
-          onChange={() => { setAction(name); setAnswer(""); }} />{name}
-      </label>)}
-    </fieldset>
-    {action === "직접 요청" && <label className="ai-field">요청 내용
-      <textarea ref={promptField} value={custom} disabled={running} maxLength={2000} rows={3}
-        placeholder="예: 이 구간을 회의록에 쓸 세 줄 요약으로 바꿔 줘"
-        onChange={e => { setCustom(e.target.value); setAnswer(""); }} /></label>}
-    <label className="ai-field">Copilot 모델
-      <select value={model} disabled={running || !connection?.authenticated} onChange={e => { setModel(e.target.value); setAnswer(""); }}>
-        <option value="" disabled>모델 선택</option>{connection?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
-    </label>
-    <p>{inserting ? "요청 내용을 Copilot에 보냅니다. 제안을 적용하면 선택한 위치에 삽입됩니다." : "위 원문과 작업 지시를 GitHub Copilot에 보냅니다."}</p>
-    {running && <p role="status">Copilot이 제안을 작성하고 있습니다… (Esc로 취소)</p>}
-    {(invalid || error) && <p role="alert">{invalid || error}</p>}
+    <header className="ai-heading">
+      <h2><span className="ai-mark"><Sparkles size={20} aria-hidden="true" /></span>AI 제안</h2>
+      <label className="ai-model-field">Copilot 모델
+        <span><select value={model} disabled={running || !connection?.authenticated} onChange={e => { setModel(e.target.value); setAnswer(""); }}>
+          <option value="" disabled>모델 선택</option>{connection?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select><ChevronDown size={14} aria-hidden="true" /></span>
+      </label>
+    </header>
+    <div className="ai-body">
+      {(!inserting || answer) && <div className="copilot-comparison">
+        {!inserting && <section><h3>선택한 원문</h3><pre>{original}</pre></section>}
+        {answer && <section className="ai-result"><h3>{inserting ? "삽입할 내용" : "수정 제안"}</h3><pre>{answer}</pre></section>}
+      </div>}
+      <fieldset className="ai-actions" disabled={running}><legend>작업 선택</legend>
+        {Object.entries(actions).map(([name, { Icon }]) => <label key={name}>
+          <input type="radio" name="suggestion-action" checked={action === name} disabled={inserting && name !== "직접 요청"}
+            onChange={() => { setAction(name); setAnswer(""); }} />
+          <Icon size={18} aria-hidden="true" />{name}
+          {action === name && <Check className="ai-choice-check" size={13} aria-hidden="true" />}
+        </label>)}
+      </fieldset>
+      {action === "직접 요청" && <label className="ai-field">요청 내용
+        <textarea ref={promptField} value={custom} disabled={running} maxLength={2000} rows={3}
+          placeholder="예: 이 구간을 회의록에 쓸 세 줄 요약으로 바꿔 줘"
+          onChange={e => { setCustom(e.target.value); setAnswer(""); }} /></label>}
+      <p>{inserting ? "요청 내용을 Copilot에 보냅니다. 적용하면 이 위치에 삽입됩니다." : "선택한 원문과 작업 지시를 GitHub Copilot에 보냅니다."}</p>
+      {running && <p role="status">Copilot이 제안을 작성하고 있습니다… (Esc로 취소)</p>}
+      {(invalid || error) && <p role="alert">{invalid || error}</p>}
+    </div>
     <footer>
-      <button type="button" className={answer ? "secondary-button" : "primary-button"} disabled={running || !model || !prompt || !!invalid} onClick={send}>{answer ? "다시 생성" : "미리보기"}</button>
-      {answer && <button type="button" className="primary-button" disabled={running || !!invalid} onClick={apply}>{inserting ? "이 위치에 삽입" : "적용"}</button>}
-      <button type="button" className="secondary-button" onClick={close}>{running ? "요청 취소" : answer ? "버리기" : "닫기"}</button>
+      <button type="button" className="ai-close" onClick={close}>{running ? "요청 취소" : answer ? "버리기" : "닫기"}</button>
+      <button type="button" className={answer ? "secondary-button" : "primary-button"} disabled={running || !model || !prompt || !!invalid} onClick={send}>
+        {answer ? <RefreshCw size={15} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}{answer ? "다시 생성" : "미리보기"}
+      </button>
+      {answer && <button type="button" className="primary-button" disabled={running || !!invalid} onClick={apply}>
+        <Check size={16} aria-hidden="true" />{inserting ? "이 위치에 삽입" : "적용"}
+      </button>}
     </footer>
   </dialog>;
 }
