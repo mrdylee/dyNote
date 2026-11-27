@@ -96,16 +96,16 @@ try {
   await chooseContextFormat("단어만", "ai-suggestion");
   assert.equal(await proposal.locator("pre").innerText(), "여기서 단어만");
   assert.equal(await app.evaluate(() => globalThis.editRequests.length), 0);
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
   await app.evaluate(() => { globalThis.failReply = true; });
-  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("button", { name: "다시 생성" }).click();
   await proposal.getByRole("alert").filter({ hasText: "연결 끊김" }).waitFor();
   assert.equal(await proposal.locator("pre").last().innerText(), "확인 필요");
-  assert.ok(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled());
+  assert.ok(await proposal.getByRole("button", { name: "적용" }).isEnabled());
   await app.evaluate(() => { globalThis.failReply = false; globalThis.deferReply = true; });
-  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("button", { name: "다시 생성" }).click();
   await proposal.getByRole("status").waitFor();
-  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  assert.equal(await proposal.getByRole("button", { name: "적용" }).isEnabled(), false);
   const canceledId = await app.evaluate(() => globalThis.editRequests.at(-1).requestId);
   await page.keyboard.down("Escape");
   try {
@@ -116,7 +116,7 @@ try {
   assert.equal(await docText(), original);
   await select("검토");
   await chooseContextFormat("검토 예정", "ai-suggestion");
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
   await proposal.getByRole("status").waitFor();
   await app.evaluate((_electron, canceledId) => {
     globalThis.pendingReplies.get(canceledId)({ type: "done", content: "취소한 요청의 늦은 응답" });
@@ -131,8 +131,8 @@ try {
   await chooseContextFormat("확인할", "ai-suggestion");
   assert.equal(await proposal.locator("pre").innerText(), "확인할 항목");
   await proposal.getByRole("radio", { name: "간결하게" }).check();
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
-  await proposal.getByRole("button", { name: "원문에 적용" }).click();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
+  await proposal.getByRole("button", { name: "적용" }).click();
   assert.equal(await docText(), original.replace("확인할 항목", "확인 필요"));
   await page.keyboard.press(modifier + "+z");
   assert.equal(await docText(), original);
@@ -149,11 +149,11 @@ try {
     assert.ok(await proposal.getByRole("radio", { name }).isVisible());
   }
   await proposal.getByRole("radio", { name: "직접 요청" }).check();
-  assert.equal(await proposal.getByRole("button", { name: "제안 받기" }).isEnabled(), false);
+  assert.equal(await proposal.getByRole("button", { name: "미리보기" }).isEnabled(), false);
   const instruction = "공손하게 써 줘\n두 문장으로 정리해 줘";
   await proposal.getByLabel("요청 내용").fill(instruction);
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
-  await proposal.getByRole("button", { name: "원문에 적용" }).waitFor();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
+  await proposal.getByRole("button", { name: "적용" }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.editRequests.at(-1).prompt), instruction);
   // A sync or another editor can change the file while the review is open.
   await page.locator(".cm-content").evaluate(el => {
@@ -161,7 +161,7 @@ try {
     view.dispatch({ changes: { from: view.state.doc.length, insert: "새 메모" } });
   });
   await proposal.getByRole("alert").filter({ hasText: "원문이 변경" }).waitFor();
-  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  assert.equal(await proposal.getByRole("button", { name: "적용" }).isEnabled(), false);
   await proposal.getByRole("button", { name: "버리기" }).click();
   await page.locator(".cm-content").focus();
   await page.keyboard.press(modifier + "+z");
@@ -171,7 +171,7 @@ try {
     await select("회의록");
     await chooseContextFormat(word, "ai-suggestion", false, offset);
     assert.ok(await proposal.getByRole("radio", { name: "직접 요청" }).isChecked());
-    const send = proposal.getByRole("button", { name: "제안 받기" });
+    const send = proposal.getByRole("button", { name: "미리보기" });
     await proposal.getByRole("combobox", { name: "Copilot 모델" }).locator("option[value=auto]").waitFor({ state: "attached" });
     assert.ok(await send.isEnabled());
     const modelBox = proposal.getByRole("combobox", { name: "Copilot 모델" });

@@ -115,8 +115,8 @@ export default function AiSuggestion({ target, editor, readOnly, onClose }) {
     {running && <p role="status">Copilot이 제안을 작성하고 있습니다… (Esc로 취소)</p>}
     {(invalid || error) && <p role="alert">{invalid || error}</p>}
     <footer>
-      <button type="button" className={answer ? "secondary-button" : "primary-button"} disabled={running || !model || !prompt || !!invalid} onClick={send}>{answer ? "다시 제안" : "제안 받기"}</button>
-      {answer && <button type="button" className="primary-button" disabled={running || !!invalid} onClick={apply}>{inserting ? "이 위치에 삽입" : "원문에 적용"}</button>}
+      <button type="button" className={answer ? "secondary-button" : "primary-button"} disabled={running || !model || !prompt || !!invalid} onClick={send}>{answer ? "다시 생성" : "미리보기"}</button>
+      {answer && <button type="button" className="primary-button" disabled={running || !!invalid} onClick={apply}>{inserting ? "이 위치에 삽입" : "적용"}</button>}
       <button type="button" className="secondary-button" onClick={close}>{running ? "요청 취소" : answer ? "버리기" : "닫기"}</button>
     </footer>
   </dialog>;
