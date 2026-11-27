@@ -264,8 +264,8 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
               data-drop-label={undefined}
               style={{ paddingLeft: 17 + depth * 16 }}
               onClick={event => { if (!isMac || !event.ctrlKey) onOpen(path); }}
-              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false, word, other}); }}
-              onKeyDown={event => onEntryKey(event, {path, folder:false, word, other})}
+              onContextMenu={event => { event.preventDefault(); onContext(event, {path, folder:false}); }}
+              onKeyDown={event => onEntryKey(event, {path, folder:false})}
               onPointerDown={!draggable ? undefined : event => onCopyPointer(event, path)}
               title={path}
               disabled={disabled}
@@ -1926,7 +1926,7 @@ export default function App() {
     setTreeMenu(null);
     void prepareFile(target.path, "rename", target.folder, vaultId);
   };
-  const canTrashTreeTarget = (target, scope) => !!target.path && !target.word && !target.other &&
+  const canTrashTreeTarget = (target, scope) => !!target.path &&
     (!target.folder || canTrashFolder(target.path, protectedTreeFolders(scope.journalPreferences)));
   const trashTreeTarget = (target, vaultId, origin) => {
     const scope = vaultsRef.current[vaultId];
@@ -1945,7 +1945,7 @@ export default function App() {
     const plain = !event.ctrlKey && !event.metaKey && !event.shiftKey;
     const newFolderKey = event.shiftKey && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && event.key.toLowerCase() === "n";
     const trashKey = plain && event.key === "Delete" || isMac && event.metaKey && !event.ctrlKey && !event.shiftKey && event.key === "Backspace";
-    const renameKey = plain && event.key === "F2" && target.path && !target.other;
+    const renameKey = plain && event.key === "F2" && target.path;
     if (!newFolderKey && !trashKey && !renameKey) return;
     event.preventDefault();
     event.stopPropagation();
@@ -2024,11 +2024,10 @@ export default function App() {
   const prepareFile = async (path, action, folder = false, vaultId = vault.id, origin = null) => {
     try {
       let revision = revisionMap(vaultId).get(path);
-      if (action === "rename" && /\.docx$/i.test(path)) revision = vaultsRef.current[vaultId]?.wordDocuments?.find(file => file.path === path)?.revision;
-      else if (!folder && !/\.(md|canvas|base)$/i.test(path))
-        revision = (
-          await invoke(api.readAttachment({ vaultId, path }))
-        ).revision;
+      if (!folder && !/\.(md|canvas|base)$/i.test(path)) {
+        revision = action === "move" ? (await invoke(api.readAttachment({ vaultId, path }))).revision
+          : await invoke(api.treeFileRevision({ vaultId, path }));
+      }
       setError("");
       setFileTarget({ path, revision, folder, vaultId, origin });
       const leaf = path.split("/").at(-1);
@@ -2140,6 +2139,7 @@ export default function App() {
       setLastTrash(old => old?.id === id ? null : old);
       if (updateInteraction.current === interaction && !modalRef.current) {
         if (/\.(md|canvas|base)$/i.test(path)) openNote(path, vaultId);
+        else if (/\.docx$/i.test(path)) openWordDocument(path, vaultId);
         else await openAttachment(path, "", vaultId);
       }
     } catch (err) {
@@ -3301,8 +3301,8 @@ export default function App() {
           openNewDocument("", { vaultId: treeMenu.vaultId, folder: treeMenu.folder ? treeMenu.path : parentFolder(treeMenu.path) });
         }}>{isWindows && <Plus />}새 문서</button>
         <button role="menuitem" aria-keyshortcuts={isMac ? "Meta+Shift+N" : "Control+Shift+N"} onClick={() => newTreeFolder(treeMenu, treeMenu.vaultId)}>{isWindows && <FolderPlus />}폴더 추가 <kbd aria-hidden="true">{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd></button>
-        {treeMenu.path && !treeMenu.other && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>{isWindows && <PencilLine />}이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
-        {treeMenu.path && !treeMenu.other && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
+        {treeMenu.path && <button role="menuitem" aria-keyshortcuts="F2" aria-disabled={!!treeMenu.renameReason||busy} title={treeMenu.renameReason||undefined} onClick={()=>renameTreeTarget(treeMenu,treeMenu.vaultId)}>{isWindows && <PencilLine />}이름 바꾸기 <kbd aria-hidden="true">F2</kbd></button>}
+        {treeMenu.path && treeMenu.renameReason && <p className="file-tree-menu-hint">{treeMenu.renameReason}</p>}
         {isWindows && treeMenu.canTrash && <hr />}
         {treeMenu.canTrash && <button className="tree-trash" role="menuitem" aria-keyshortcuts={isMac ? "Delete Meta+Backspace" : "Delete"} disabled={busy || editState.forVault(treeMenu.vaultId).blocked()} onClick={() => trashTreeTarget(treeMenu, treeMenu.vaultId, treeMenu.origin)}>{isWindows && <Trash2 />}휴지통으로 이동 <kbd aria-hidden="true">{isMac ? "⌘⌫" : "Delete"}</kbd></button>}
       </div>}
@@ -3650,10 +3650,15 @@ export default function App() {
           </fieldset>}
           {settingsTab === "shortcuts" && <section className="settings-section">
             <h3>파일과 폴더</h3>
+            <p><strong>복사 · 잘라내기 · 붙여넣기</strong> <kbd>{shortcut}+C</kbd> · <kbd>{shortcut}+X</kbd> · <kbd>{shortcut}+V</kbd> · 문서를 선택한 뒤 대상 폴더에 붙여넣으세요.</p>
             <p><strong>이름 바꾸기</strong> <kbd>F2</kbd> · 왼쪽 파일 목록의 항목을 선택한 상태에서 누르세요.</p>
             <p><strong>휴지통으로 이동</strong> <kbd>Delete</kbd>{isMac && <> 또는 <kbd>⌘⌫</kbd></>} · 확인 후 이동합니다.</p>
             <p><strong>폴더 추가</strong> <kbd>{isMac ? "⌘" : "Ctrl"}+Shift+N</kbd> · 선택한 폴더 안에 만듭니다. 파일을 선택하면 같은 위치에 만듭니다.</p>
             <p><strong>목록 탐색</strong> ↑ ↓ 항목 이동 · ← → 폴더 접기·펼치기 · Home / End 처음·마지막 항목 · Enter 열기</p>
+            <h3>문서와 앱</h3>
+            <p>새 문서 <kbd>{shortcut}+N</kbd> · 파일 열기 <kbd>{shortcut}+O</kbd> · 저장 <kbd>{shortcut}+S</kbd></p>
+            <p>문서 전환 <kbd>{shortcut}+K</kbd> · 문서 안에서 찾기 <kbd>{shortcut}+F</kbd></p>
+            <p>명령 팔레트 <kbd>{shortcut}+P</kbd> · 설정 <kbd>{shortcut}+,</kbd> · 대화상자 닫기 <kbd>Esc</kbd></p>
             <h3>Sticky Note</h3>
             <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>

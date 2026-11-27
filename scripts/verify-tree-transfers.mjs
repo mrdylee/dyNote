@@ -23,6 +23,7 @@ try {
   await writeFile(path.join(personal, "Inbox/Plan.md"), source);
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
+  await writeFile(path.join(personal, "Manual.txt"), "ordinary file");
   await writeFile(path.join(personal, "Deliver.md"), "# Hand-off\n");
   await writeFile(path.join(personal, "Linked.md"), "[Reference](Reference.md)\n");
   await writeFile(path.join(team, "Shared/Reference.md"), "# Another reference\n");
@@ -77,7 +78,7 @@ try {
   const keyCopy = row(personalTree, "Copies/Keyboard.md");
   const moveDialog = page.getByRole("dialog", { name: "이동할까요?", exact: true });
   await app.evaluate(async ({ clipboard, ClipboardItem }) => {
-    globalThis.previousTreeClipboard = await Promise.all((await clipboard.read()).map(async item =>
+    globalThis.previousTreeClipboard = await Promise.all((await clipboard.read()).filter(item => item.types.length).map(async item =>
       new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
   });
   const external = path.join(root, "외부 문서.txt");
@@ -296,11 +297,56 @@ try {
   await row(personalTree,"Journal").press("F2");
   await page.getByText("앱에서 사용하는 기본 폴더입니다.",{exact:true}).waitFor();
   assert.equal(await renameDialog.count(),0);
+  await renameWithF2(personalTree, "Manual.txt", "Renamed.txt");
+  const undo = page.locator(".undo-toast").getByRole("button", { name: "되돌리기", exact: true });
+  for (const [tree, directory, name] of [[personalTree, personal, "Renamed.txt"], [teamTree, team, "Taken/Original.docx"]]) {
+    const file = row(tree, name);
+    await file.waitFor();
+    const bytes = await readFile(path.join(directory, name));
+    await file.press("Delete");
+    await trashDialog.getByRole("button", { name: "취소" }).click();
+    assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+    await file.press("Delete");
+    await trashDialog.getByRole("button", { name: "휴지통으로 이동" }).click();
+    await file.waitFor({ state: "detached" });
+    await assert.rejects(readFile(path.join(directory, name)), { code: "ENOENT" });
+    await undo.click();
+    await file.waitFor();
+    assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+  }
+  await row(personalTree, "Deliver.md").press("Enter");
+  const shortcutEditor = pane("Deliver.md").getByRole("textbox", { name: "Markdown 편집기", exact: true });
+  await shortcutEditor.press(modifier + "+f");
+  await page.locator(".cm-search").waitFor();
+  await page.keyboard.press("Escape");
+  await shortcutEditor.press(modifier + "+End");
+  await page.keyboard.insertText("Saved by shortcut");
+  await shortcutEditor.press(modifier + "+s");
+  await page.waitForFunction(async id => (await window.notes.snapshot({ vaultId: id, workspace: true })).value.notes
+    .some(file => file.path === "Deliver.md" && file.content.includes("Saved by shortcut")), await personalTree.getAttribute("data-tree-drop-vault"));
+  for (const [key, title] of [["k", "문서로 이동"], ["p", "명령 팔레트"], ["n", "새로운 생각 기록하기"]]) {
+    await shortcutEditor.press(modifier + "+" + key);
+    const dialog = page.getByRole("dialog", { name: title, exact: true });
+    await dialog.waitFor();
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+  }
+  const settingsKey = await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu().getMenuItemById("dynote-settings");
+    item.click();
+    return item.accelerator;
+  });
+  assert.equal(settingsKey, "CmdOrCtrl+,");
+  const settings = page.getByRole("dialog", { name: "설정", exact: true });
+  await settings.getByRole("button", { name: "단축키", exact: true }).click();
+  await settings.getByText("복사 · 잘라내기 · 붙여넣기", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
   assert.deepEqual(errors, []);
   console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
 } finally {
   await app?.evaluate(async ({ clipboard }) => {
-    if (globalThis.previousTreeClipboard) await clipboard.write(globalThis.previousTreeClipboard);
+    if (globalThis.previousTreeClipboard?.length) await clipboard.write(globalThis.previousTreeClipboard);
+    else if (globalThis.previousTreeClipboard) clipboard.clear();
   }).catch(() => {});
   await app?.close();
   await rm(root, { recursive: true, force: true });

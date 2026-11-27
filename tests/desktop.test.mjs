@@ -97,6 +97,23 @@ test("trash has an explicit undo without overwriting an existing file", async (t
   await store.create("A.md");
   await assert.rejects(store.restoreTrash(again.id));
 });
+test("file tree trash restores ordinary files independent of preview size or format", async t => {
+  const { root, store } = await fixture(t);
+  const name = "large.bin", file = join(root, name);
+  const bytes = Buffer.alloc(26 * 1024 * 1024, 0xa5);
+  await writeFile(file, bytes);
+  const stale = await store.treeFileRevision(name);
+  await writeFile(file, "replaced");
+  await assert.rejects(store.trashFile(name, stale), /변경/);
+  assert.equal(await readFile(file, "utf8"), "replaced");
+  await writeFile(file, bytes);
+  const item = await store.trashFile(name, await store.treeFileRevision(name));
+  await assert.rejects(readFile(file), { code: "ENOENT" });
+  await store.restoreTrash(item.id);
+  assert.deepEqual(await readFile(file), bytes);
+  await assert.rejects(store.restoreTrash(item.id));
+});
+
 test("metadata is parsed separately, aliases resolve, and edits preserve the body", () => {
   assert.equal(typeof knowledge.parseMetadata, "function");
   const content =

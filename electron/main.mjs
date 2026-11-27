@@ -641,7 +641,7 @@ app
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "github-login", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
-      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
+      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "tree-file-revision", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
@@ -1044,6 +1044,10 @@ app
         return result;
       },
       "reveal-file": revealFile,
+      "tree-file-revision": (args, vault) => {
+        checkVault(args, vault);
+        return vault.treeFileRevision(args.path);
+      },
       "read-other-file": (args, vault) => {
         checkVault(args, vault);
         return vault.readOtherFile(args.path);
@@ -1156,7 +1160,7 @@ app
         if (folder && (!canTrashFolder(from, args.protectedFolders) || !canTrashFolder(to, args.protectedFolders) ||
             from === "포스트잇" || stickyNotes?.hasNotesWithin(vault, from)))
           throw new Error("저널, 첨부파일 또는 Sticky Note가 사용하는 폴더는 이름을 바꿀 수 없습니다.");
-        if (folder || /\.docx$/i.test(from)) return vault.renameTreeEntry(from, to, { folder, revision });
+        if (folder || (!validNotePath(from) && !documentKind(from))) return vault.renameTreeEntry(from, to, { folder, revision });
         return stickyNotes && validNotePath(from) ? stickyNotes.moveFile(vault, from, to, revision) : vault.moveFile(from, to, revision);
       }),
       "copy-file": async (args, target) => {
@@ -1203,7 +1207,7 @@ app
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
         const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "tree-file-revision", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let release;
         try {
           validateSender(event);
