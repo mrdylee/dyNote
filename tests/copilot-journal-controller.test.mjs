@@ -810,6 +810,23 @@ test('background capture returns only journals it needs and retries without dupl
   assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,name),'utf8')).length,1);
 });
 
+test('manual reimport asks for conflict review only when the protected note needs a write',async t=>{
+ const f=await fixture(t);await f.configure(false);await f.put();
+ const options={allSessions:true,projectIds:['project']};
+ const initial=await f.controller.sync(f.vault,{},true,options);
+ const name=initial.status.records[0].sessions[0].path;
+ const again=()=>f.controller.sync(f.vault,{},true,{...options,protectedPaths:new Set([name])});
+ const unchanged=await again();
+ assert.equal(unchanged.changed,false);
+ assert.equal(unchanged.blockedPaths,undefined);
+ await f.put('second','새 질문');
+ assert.deepEqual((await again()).blockedPaths,[name]);
+ await rm(f.sourceFile);
+ assert.equal((await again()).blockedPaths,undefined);
+ await rm(path.join(f.vault.root,name));
+ assert.deepEqual((await again()).blockedPaths,[name]);
+});
+
 test('manual reimport explains a pending Git conflict and succeeds after resolution',async t=>{
  const f=await deletedProject(t);
  const result=await f.importProject('project',{protectedPaths:new Set([f.relative])});

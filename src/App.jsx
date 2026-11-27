@@ -1180,13 +1180,13 @@ export default function App() {
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
   const continueCapture = async ({keepsDeletion = false} = {}) => {
     const id = reviewFile.id;
-    if (modalRef.current !== "personal-review") return;
     if (keepsDeletion) {
-      setCaptureConflicts(old => ({...old, [id]:null}));
+      setCaptureConflicts(old => old[id] === captureReview ? {...old, [id]:null} : old);
       setCaptureImportResult({vaultId:id, notice:"선택한 파일의 삭제를 유지하고 이번 가져오기를 중단했습니다."});
-      captureSettings();
+      if (modalRef.current === "personal-review") captureSettings();
       return;
     }
+    if (modalRef.current !== "personal-review") return;
     if (captureReview.index + 1 < captureReview.paths.length) {
       setCaptureConflicts(old => ({...old, [id]: {...captureReview, index:captureReview.index + 1}}));
       return;

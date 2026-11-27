@@ -327,6 +327,26 @@ async function verifyJournalConflict(a, b) {
   await settings.getByRole("button",{name:"닫기",exact:true}).click();
   await sync(b);
   await sync(a);
+
+  // Another device can settle a deletion while the import review is open.
+  const notePath = captured.records[0].sessions[0].path;
+  await rm(path.join(a.root,notePath));
+  await appendFile(path.join(b.root,notePath),"\nLocal edit\n");
+  await sync(a); await sync(b); await sync(a);
+  const versions = await a.invoke("personalSyncAction",{action:"versions",path:notePath});
+  const deletion = versions.versions.find(v=>!v.blob);
+  assert.ok(deletion);
+  session.requests.push({...session.requests[0],requestId:"later",timestamp:Date.now(),message:{text:"Follow-up"}});
+  await writeFile(sessionFile,JSON.stringify(session));
+  await b.page.getByRole("button",{name:"Copilot 대화 자동 저장 설정"}).click();
+  await settings.getByRole("button",{name:"선택한 프로젝트 가져오기"}).click();
+  await popup.getByRole("heading",{name:notePath,exact:true}).waitFor();
+  await a.invoke("personalSyncAction",{action:"resolve",path:notePath,basis:versions.basis,commit:deletion.commit});
+  await sync(a); await sync(b);
+  await popup.getByRole("button",{name:"삭제 유지하고 가져오기 중단",exact:true}).click();
+  await settings.getByText("선택한 파일의 삭제를 유지하고 이번 가져오기를 중단했습니다.",{exact:true}).waitFor();
+  await assert.rejects(readFile(path.join(b.root,notePath)),{code:"ENOENT"});
+  await settings.getByRole("button",{name:"닫기",exact:true}).click();
 }
 try {
   const a = await launch("Cloud", true, "개인 노트 장기 보관함 ".repeat(4).trim()),

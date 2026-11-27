@@ -1219,7 +1219,12 @@ app
                 if (args.source.startsWith(source.root + path.sep)) roots.push(source.root);
               }
             }
-            release = vaultOperations.begin(roots, exclusive, selecting || exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry");
+            const reviewRead = name === "personal-sync-action" && ["versions", "comparison", "hunks", "preview"].includes(args?.action);
+            if (target && exclusive && name.startsWith("capture-")) {
+              await vaultOperations.waitForReviewReads(target.root);
+              if (target !== (scoped ? workspaceVault(args.vaultId) : vault)) throw new Error("보관함 위치가 변경되었습니다.");
+            }
+            release = vaultOperations.begin(roots, exclusive, selecting || exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry", reviewRead ? target?.root : undefined);
           }
           const entry = openedVaults.get(target?.id);
           if (entry && scoped) {

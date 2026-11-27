@@ -167,7 +167,11 @@ export default function PersonalVersionReview({ path, count, action, onClose, on
   async function continueResolved() {
     setBusy(true);
     setError("");
-    try { await onResolved(); }
+    try {
+      const latest = await action({action:"versions", path});
+      if (latest.basis.length || latest.current !== current) setReload(n => n + 1);
+      else await onResolved({keepsDeletion:latest.current === null});
+    }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -231,7 +235,10 @@ export default function PersonalVersionReview({ path, count, action, onClose, on
       <h3>{path}</h3>
       {loading && <p role="status">{count ? `버전 ${count}개 불러오는 중…` : "버전 불러오는 중…"}</p>}
       {loadError && <p role="alert">{loadError} <button onClick={() => setReload(n => n + 1)}>다시 불러오기</button></p>}
-      {!loading && !loadError && !basis.length && <p role="status">이 노트에 남은 충돌이 없습니다. {onResolved && <button disabled={busy} onClick={continueResolved}>계속</button>}</p>}
+      {!loading && !loadError && !basis.length && <p role="status">
+        {onResolved && current === null ? "충돌이 해결되었고 현재 버전에서 이 파일은 삭제되었습니다." : "이 노트에 남은 충돌이 없습니다."}
+        {onResolved && <button disabled={busy} onClick={continueResolved}>{current === null ? "삭제 유지하고 가져오기 중단" : "가져오기 계속"}</button>}
+      </p>}
       {parts && compared.length === 2 && compared.every(id => rows.some(v => v.commit === id)) && <div className="version-workspace">
         {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
           <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>

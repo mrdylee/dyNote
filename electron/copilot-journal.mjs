@@ -453,9 +453,12 @@ export class CopilotJournal{
     if(next.blocked.includes(`s:${id}`)||next.blocked.includes(`s:${key}`))continue;
     cachedInScope++;
     matched.add(key);
-    if(protectedPaths?.has(session.path)){conflicts.add(session.path);continue;}
     try{await lstat(path.join(vault.root,session.path));}
-    catch(error){if(error.code!=='ENOENT')throw error;recreate.add(id);}
+    catch(error){
+     if(error.code!=='ENOENT')throw error;
+     if(protectedPaths?.has(session.path))conflicts.add(session.path);
+     else recreate.add(id);
+    }
    }
   }
   const sources=await this.projectSessions(previous,migrateOnly?[]:projects.filter(p=>!deferredKeys.has(p.key)),selected!==null||importAll);
@@ -472,17 +475,14 @@ export class CopilotJournal{
     let existing=sessions.get(sessionId);
     const documentPath=existing?.path ?? `${folder}/${project.key}/${sessionId}.md`;
     const since=selectionFor(previous,project)?.since??previous.since??this.now();
-    if(protectedPaths?.has(documentPath)){
-     if(manual||source.messages.some(message=>message.at>=since&&!existing?.messages.has(message.id)))conflicts.add(documentPath);
-     continue;
-    }
-    if(protectedPaths) {
+    const protectedDocument=protectedPaths?.has(documentPath);
+    if(protectedPaths&&!protectedDocument) {
       const received=await vault.readNote(documentPath).catch(error=>{if(error.code!=="ENOENT")throw error;return null;});
       if(received && (!existing || (received.content!==renderSessionCapture(existing) && received.content!==renderSessionCapture(existing,{legacy:true}))))continue;
     }
     const seen=existing?.messages??new Map();
     let compatible;
-    if(existing&&sessionId!==sourceKey&&!existing.sourceKey){
+    if(!protectedDocument&&existing&&sessionId!==sourceKey&&!existing.sourceKey){
      compatible=compatibleSource(existing,source);
      if(compatible){
       existing.sourceKey=sourceKey;
@@ -496,6 +496,7 @@ export class CopilotJournal{
      const id=captureId(project.key,date);if(next.blocked.includes(`g:${id}`))continue;
      compatible??=compatibleSource(existing,source);
      if(!compatible){incompatible=true;break;}
+     if(protectedDocument){conflicts.add(documentPath);break;}
      const record=next.records[id]??={id,date,label:project.label,projectPath:project.path,path:`${folder}/${project.key}/${date}.md`,journalPath:periodicNote('daily',date,{folder:'Journal',...daily}).path,sessions:{}};
      let session=record.sessions[sessionId];
      if(!session){

@@ -20,3 +20,20 @@ test("a vault checkout excludes only overlapping writes and releases its locks",
   assert.throws(() => ops.begin(["team"]));
   transfer();
 });
+
+test("capture waits for dismissed version reads in its own vault and still respects active writes", async () => {
+  const ops = new VaultOperations();
+  const first = ops.begin(["a"],false,false,"a"), second = ops.begin(["a"],false,false,"a");
+  const other = ops.begin(["b"],false,false,"b"), write = ops.begin(["a"]);
+  let ready = false;
+  const waiting = ops.waitForReviewReads("a").then(() => { ready = true; });
+  first();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ready,false);
+  second();
+  await waiting;
+  assert.throws(() => ops.begin(["a"],true), /저장 작업/);
+  write();
+  ops.begin(["a"],true)();
+  other();
+});
