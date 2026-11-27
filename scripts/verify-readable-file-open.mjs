@@ -21,6 +21,9 @@ try {
   samples.set("source.py", Buffer.from('print("source preview")'));
   samples.set("이미지.png", Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b4944415478da6364f80f00010501012718e3660000000049454e44ae426082", "hex"));
   const pdf = await PDFDocument.create(); pdf.addPage().drawText("External PDF preview");
+  pdf.addPage([480, 180]).drawText("Second PDF page");
+  pdf.addPage([480, 180]).drawText("Third PDF page");
+  pdf.addPage([2000, 4000]).drawText("Large PDF page");
   samples.set("문서.pdf", Buffer.from(await pdf.save()));
   const wav = Buffer.alloc(44 + 1600);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16);
@@ -84,6 +87,82 @@ try {
   await page.waitForFunction(() => document.querySelector(".external-file-image")?.naturalWidth === 1);
   dialog = await drop("문서.pdf");
   await dialog.getByLabel("PDF 텍스트", { exact: true }).getByText("External PDF preview").waitFor();
+  const pdfPage = dialog.getByLabel("PDF 페이지", { exact: true });
+  const pdfArea = dialog.locator(".pdf-scroll-area");
+  await pdfArea.hover();
+  const box = await pdfArea.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 40);
+  await page.mouse.wheel(0, 100);
+  await page.waitForFunction(() => document.querySelector(".pdf-scroll-area")?.scrollTop > 0);
+  assert.equal(await pdfPage.inputValue(), "1");
+  await page.mouse.wheel(0, 2000);
+  const atBottom = () => {
+    const area = document.querySelector(".pdf-scroll-area");
+    return area && area.scrollHeight - area.clientHeight - area.scrollTop <= 1;
+  };
+  await page.waitForFunction(atBottom);
+  await page.mouse.wheel(0, 100);
+  await dialog.getByText("Second PDF page", { exact: true }).waitFor();
+  assert.equal(await pdfPage.inputValue(), "2");
+  assert.equal(await pdfArea.evaluate(area => area.scrollTop), 0);
+  for (const delta of [18, 14, 10, 8, 4, 2]) await page.mouse.wheel(0, delta);
+  assert.equal(await pdfPage.inputValue(), "2");
+  await page.mouse.wheel(0, 100);
+  await dialog.getByText("Third PDF page", { exact: true }).waitFor();
+  const windowZoom = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomFactor());
+  const originalZoom = await windowZoom();
+  await page.keyboard.down("Control");
+  try {
+    await page.mouse.wheel(0, -100);
+    await dialog.getByText("150%", { exact: true }).waitFor();
+    await page.mouse.wheel(0, 100);
+    await dialog.getByText("125%", { exact: true }).waitFor();
+    for (let tick = 0; tick < 9; tick++) await page.mouse.wheel(0, -100);
+    await dialog.getByText("300%", { exact: true }).waitFor();
+    assert.ok(await dialog.getByLabel("PDF 확대", { exact: true }).isDisabled());
+    for (let tick = 0; tick < 12; tick++) await page.mouse.wheel(0, 100);
+    await dialog.getByText("50%", { exact: true }).waitFor();
+    assert.ok(await dialog.getByLabel("PDF 축소", { exact: true }).isDisabled());
+    for (let tick = 0; tick < 3; tick++) await page.mouse.wheel(0, -100);
+    await dialog.getByText("125%", { exact: true }).waitFor();
+    assert.equal(await pdfPage.inputValue(), "3");
+    assert.equal(await windowZoom(), originalZoom);
+  } finally { await page.keyboard.up("Control"); }
+  await page.mouse.wheel(0, -100);
+  await dialog.getByText("Second PDF page", { exact: true }).waitFor();
+  await page.mouse.wheel(0, -100);
+  await dialog.getByText("External PDF preview", { exact: true }).waitFor();
+  assert.equal(await pdfPage.inputValue(), "1");
+  assert.ok(await page.evaluate(atBottom));
+  await pdfPage.fill("2");
+  await dialog.getByText("Second PDF page", { exact: true }).waitFor();
+  await pdfArea.hover();
+  for (let tick = 0; tick < 6; tick++) await page.mouse.wheel(0, 20);
+  assert.equal(await pdfPage.inputValue(), "3");
+  for (let tick = 0; tick < 12; tick++) await page.mouse.wheel(0, 20);
+  await dialog.getByText("Large PDF page", { exact: true }).waitFor();
+  await page.mouse.wheel(700, 3000);
+  await page.waitForFunction(() => {
+    const area = document.querySelector(".pdf-scroll-area");
+    return area.scrollLeft > 500 && area.scrollTop > 2500;
+  });
+  const bounds = await pdfArea.boundingBox();
+  const pointer = { x: Math.floor(bounds.x + bounds.width / 3), y: Math.floor(bounds.y + bounds.height / 3) };
+  await page.mouse.move(pointer.x, pointer.y);
+  const pdfPoint = () => dialog.locator(".pdf-page canvas").evaluate((canvas, pointer) => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (pointer.x - rect.left) * 2000 / rect.width, y: (pointer.y - rect.top) * 4000 / rect.height };
+  }, pointer);
+  const beforeZoom = await pdfPoint();
+  await page.keyboard.down("Control");
+  try {
+    for (const [delta, width] of [[-100, 3000], [100, 2500]]) {
+      await page.mouse.wheel(0, delta);
+      await page.waitForFunction(width => document.querySelector(".pdf-page canvas").width === width, width);
+      const point = await pdfPoint();
+      assert.ok(Math.abs(point.x - beforeZoom.x) < 1 && Math.abs(point.y - beforeZoom.y) < 1, "PDF point under the pointer moved");
+    }
+  } finally { await page.keyboard.up("Control"); }
   assert.equal(await dialog.getByRole("button", { name: "페이지 링크 복사", exact: true }).count(), 0);
   dialog = await drop("녹음.wav");
   await dialog.getByLabel("오디오 재생").waitFor();
