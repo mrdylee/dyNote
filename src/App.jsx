@@ -177,6 +177,7 @@ function IconButton({ label, children, onClick, active = false, ...props }) {
   );
 }
 
+const withExtension = (name, extension) => name.toLowerCase().endsWith(extension.toLowerCase()) ? name : name + extension;
 const copilotSessionPath = /^(?:Copilot Note|AI Conversations)\/[a-f0-9]{20}\/[a-f0-9]{20}\.md$/;
 
 function FileTree({ notes, folders, journalPreferences, captureEntries, active, reveal, onCreatedFolderMount, onOpen, onContext, onEntryKey, onDragDocument, onDragEnd, onCopyPointer, dropProps, disabled }) {
@@ -272,7 +273,7 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
               onDragEnd={!draggable ? undefined : onDragEnd}
             >
               <FileText size={14} />
-              <span title={label}>{label ?? name.replace(/\.md$/i, "")}</span>
+              <span title={label}>{label ?? name.replace(/\.(?:md|canvas|base)$/i, "")}</span>
               {active === path && <span className="active-file-dot" />}
             </button>
           );
@@ -1391,8 +1392,8 @@ export default function App() {
     setError("");
     setModal("new");
   }, [vault?.id]);
-  const newSidebarDocument = useCallback((name = "") => {
-    openNewDocument(name, { vaultId: sidebarCreateVault?.id });
+  const newSidebarDocument = useCallback((name = "", kind) => {
+    openNewDocument(name, { vaultId: sidebarCreateVault?.id, kind });
   }, [sidebarCreateVault?.id, openNewDocument]);
   const destination = modal === "new" ? newDocumentTarget : null;
   const createNote = async (e) => {
@@ -1400,9 +1401,10 @@ export default function App() {
     setBusy(true);
     try {
       const vaultId = destination?.vaultId ?? vault.id;
-      const name = /\.(md|canvas|base)$/i.test(newName.trim())
-        ? newName.trim()
-        : newName.trim() + ".md";
+      const input = newName.trim();
+      const name = destination?.kind
+        ? withExtension(input, "." + destination.kind)
+        : /\.(md|canvas|base)$/i.test(input) ? input : input + ".md";
       const path = destination?.folder ? `${destination.folder}/${name}` : name;
       const content = modal === "newMap" ? "---\nmindmap-plugin: basic\n---\n# 새 마인드맵\n\n## 생각\n" : undefined;
       const created = await invoke((documentKind(path) ? api.createDocument : api.createNote)({ vaultId, path, content }));
@@ -1988,7 +1990,8 @@ export default function App() {
         ).revision;
       setError("");
       setFileTarget({ path, revision, folder, vaultId, origin });
-      setNewName(action === "rename" ? path.split('/').at(-1) : path);
+      const leaf = path.split("/").at(-1);
+      setNewName(action === "rename" ? (folder ? leaf : leaf.replace(/\.(?:canvas|base)$/i, "")) : path);
       setModal(action);
     } catch (err) {
       setError(err.message);
@@ -2000,10 +2003,13 @@ export default function App() {
     const action = modal;
     const background = action === "trash" || action === "rename";
     const scope = vaultsRef.current[vaultId];
+    const renameInput = !folder && documentKind(path) && newName.trim()
+      ? withExtension(newName.trim(), path.slice(path.lastIndexOf(".")))
+      : newName;
     let to;
     if (action === "rename") {
       try {
-        to = treeRenameDestination(path, newName, folder);
+        to = treeRenameDestination(path, renameInput, folder);
         if (to === path) throw new Error("현재 이름과 다른 이름을 입력해 주세요.");
         const existing = [...scope.notes, ...scope.documents, ...scope.attachments, ...(scope.otherFiles ?? []), ...(scope.wordDocuments ?? [])];
         if (scope.folders.includes(to) || existing.some(file => file.path === to)) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
@@ -2026,7 +2032,7 @@ export default function App() {
       const revision = revisionMap(vaultId).get(path) ?? fileTarget.revision;
       const protectedFolders = protectedTreeFolders(scope.journalPreferences);
       if (action === "rename") {
-        const snapshot = await invoke(api.renameTreeEntry({ vaultId, from: path, name: newName, folder, revision, protectedFolders }));
+        const snapshot = await invoke(api.renameTreeEntry({ vaultId, from: path, name: renameInput, folder, revision, protectedFolders }));
         if (!vaultsRef.current[vaultId]) return;
         queue.markChanged(vaultId);
         applyWorkspaceRename(vaultId, path, to, snapshot);
@@ -2336,7 +2342,7 @@ export default function App() {
         onClick={() => external ? activateExternal(key) : draft ? openDocumentDraft(draft) : openNote(path, vaultId)}>
         {draft?.running ? <LoaderCircle size={13} className="document-generating-icon" aria-label="문서 생성 중" /> : <FileText size={13} />}
         <span className={label ? "tab-document" : undefined}>
-          <span>{external ? path : draft ? draft.fileName : path.split("/").at(-1).replace(/\.md$/i, "")}</span>
+          <span>{external ? path.replace(/\.(?:canvas|base)$/i, "") : draft ? draft.fileName : path.split("/").at(-1).replace(/\.(?:md|canvas|base)$/i, "")}</span>
           {label && <small className="tab-space">{label}</small>}
         </span>
       </button>
@@ -2596,8 +2602,8 @@ export default function App() {
               onSyncDetails={id => openPanelSettings(id, panelSyncs[id]?.teamResult?.phase === "setup")}/>
           )}
           <div className="structured-create-actions">
-            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Canvas.canvas")}>+ Canvas</button>
-            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Bases.base")}>+ Bases</button>
+            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Canvas", "canvas")}>+ Canvas</button>
+            <button disabled={busy || !sidebarCreateVault} onClick={() => newSidebarDocument("새 Bases", "base")}>+ Bases</button>
           </div>
           <div className="attachments-list">
             <div className="nav-section-title">
@@ -2668,7 +2674,7 @@ export default function App() {
               <span>
                 {section === "journal" ? "저널" : section === "graph"
                   ? "문서 그래프"
-                  : externalDocument ? externalDocument.name : (activeDocumentDraft ? `${activeDocumentDraft.fileName} · 임시 문서` : displayedPath?.replace(/\.md$/i, "") ?? "문서 선택")}
+                  : externalDocument ? externalDocument.name.replace(/\.(?:canvas|base)$/i, "") : (activeDocumentDraft ? `${activeDocumentDraft.fileName} · 임시 문서` : displayedPath?.replace(/\.(?:md|canvas|base)$/i, "") ?? "문서 선택")}
               </span>
             </div>
             <div className="toolbar-actions">
@@ -3305,7 +3311,7 @@ export default function App() {
                   onChange={(e) => setNewName(e.target.value)}
                 />
                 <p className="muted">
-                  {!fileTarget?.folder && "확장자를 유지하세요. "}연결 문서의 링크도 함께 갱신합니다.
+                  {!fileTarget?.folder && (modal === "move" || !documentKind(fileTarget?.path)) && "확장자를 유지하세요. "}연결 문서의 링크도 함께 갱신합니다.
                 </p>
               </>
             ) : (
@@ -3485,7 +3491,7 @@ export default function App() {
               placeholder="예: 오늘의 아이디어"
             />
             <p className="muted">
-              폴더/문서 이름으로 입력하면 폴더도 함께 만듭니다. .canvas 또는 .base 확장자로 해당 문서를 만들 수 있습니다.
+              폴더/문서 이름으로 입력하면 폴더도 함께 만듭니다.{!destination?.kind && " .canvas 또는 .base 확장자로 해당 문서를 만들 수 있습니다."}
             </p>
             {error && <p role="alert">{error}</p>}
             <div className="modal-actions">
