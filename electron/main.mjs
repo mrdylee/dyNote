@@ -20,6 +20,7 @@ import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault, validNotePath } from "../core/vault.mjs";
+import { documentKind } from "../core/documents.mjs";
 import { canTrashFolder, managedCopilotPath, treeRenameDestination } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
@@ -43,6 +44,7 @@ import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
 import { ExternalDocuments } from "../core/external-documents.mjs";
+import { readExplorerClipboard } from "./explorer-clipboard.mjs";
 import { createStartupLog } from "./startup-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -629,6 +631,10 @@ app
     });
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
+    if (process.platform === "win32") ipcMain.handle("notes:explorer-clipboard", event => {
+      validateSender(event);
+      return readExplorerClipboard();
+    });
     const scopedActions = new Set([
       "open-sticky", "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
@@ -1131,6 +1137,8 @@ app
       },
       "move-file": (args, vault) => {
         checkVault(args, vault);
+        if (args.moveAsset && !validNotePath(args.from) && !documentKind(args.from))
+          return vault.renameTreeEntry(args.from, args.to, { moveAsset: true });
         return stickyNotes && validNotePath(args.from)
           ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
           : vault.moveFile(args.from, args.to, args.revision);
@@ -1160,6 +1168,8 @@ app
           if (workspaceVault(source.id) !== source || await realpath(source.root) !== source.root)
             throw new Error("원본 보관함 위치가 변경되었습니다.");
         }
+        if (!validNotePath(args.from) && !documentKind(args.from))
+          return target.transferDroppedFile(await source.fileLocation(args.from), args.folder, "copy");
         return target.copyDocument(args.from, args.folder, args.revision, source);
       },
       "trash-file": (args, vault) => {

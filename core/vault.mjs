@@ -874,7 +874,7 @@ export class Vault {
 
   async moveDocumentTo(from, folder, revision, target) {
     const snapshot = await this.documentSnapshot();
-    const entries = [...snapshot.notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...snapshot.documents, ...snapshot.attachments];
+    const entries = [...snapshot.notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...snapshot.documents, ...snapshot.attachments, ...snapshot.wordDocuments, ...snapshot.otherFiles];
     for (const file of [...snapshot.notes, ...snapshot.documents]) {
       if (file.path === from) continue;
       const links = file.kind === 'canvas' ? (parseCanvas(file.content).data.nodes ?? []).flatMap(node =>
@@ -884,9 +884,13 @@ export class Vault {
     }
     const destination = folder ? `${folder}/${path.basename(from)}` : path.basename(from);
     const existing = await target.documentSnapshot();
-    if ([...existing.notes, ...existing.documents, ...existing.attachments, ...(existing.folders ?? []).map(path => ({ path }))]
+    if ([...existing.notes, ...existing.documents, ...existing.attachments, ...existing.wordDocuments, ...existing.otherFiles, ...(existing.folders ?? []).map(path => ({ path }))]
       .some(file => file.path.normalize('NFC').toLowerCase() === destination.normalize('NFC').toLowerCase()))
       throw new Error('대상 폴더에 같은 이름의 문서가 있습니다.');
+    if (!validNotePath(from) && !documentKind(from)) {
+      const saved = await target.transferDroppedFile(await this.fileLocation(from), folder, "move");
+      return { saved };
+    }
     const saved = await target.copyDocument(from, folder, revision, this);
     try {
       const trash = await this.trashFile(from, revision);
@@ -910,11 +914,12 @@ export class Vault {
     });
   }
 
-  renameTreeEntry(from, to, { folder, revision } = {}) {
+  renameTreeEntry(from, to, { folder, revision, moveAsset = false } = {}) {
     return this.#enqueue(async () => {
       const word = !folder && validWordPath(from);
-      const valid = folder ? validRelativePath : word ? validWordPath : validFilePath;
-      if (!valid(from) || !valid(to) || from === to || path.posix.dirname(from) !== path.posix.dirname(to))
+      const valid = folder || moveAsset ? validRelativePath : word ? validWordPath : validFilePath;
+      const unchangedPart = moveAsset ? path.posix.basename : path.posix.dirname;
+      if (!valid(from) || !valid(to) || from === to || unchangedPart(from) !== unchangedPart(to))
         throw new Error("같은 위치에서 사용할 수 있는 다른 이름을 입력해 주세요.");
       if (!folder && path.extname(from).toLowerCase() !== path.extname(to).toLowerCase())
         throw new Error("기존 확장자를 유지해 주세요.");
@@ -925,9 +930,9 @@ export class Vault {
       const entry = await lstat(source, { bigint: true });
       if (entry.isSymbolicLink() || !(folder ? entry.isDirectory() : entry.isFile()))
         throw new Error("보관함 안의 일반 파일이나 폴더를 선택해 주세요.");
-      if (!folder && (revision || !word) && (word ? wordRevision(entry) : (await this.#binary(from)).revision) !== revision)
+      if (!folder && !moveAsset && (revision || !word) && (word ? wordRevision(entry) : (await this.#binary(from)).revision) !== revision)
         throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
-      const destination = path.join(this.root, to);
+      const destination = moveAsset ? await checkedPath(to) : path.join(this.root, to);
       const existing = await lstat(destination, { bigint: true }).catch(error => {
         if (error.code !== "ENOENT") throw error;
         return null;
@@ -935,7 +940,7 @@ export class Vault {
       const sameName = from.normalize('NFC').toLowerCase() === to.normalize('NFC').toLowerCase();
       if (existing && !(sameName && sameEntry(entry, existing))) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
       const snapshot = await this.#snapshot();
-      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.wordDocuments, ...snapshot.attachments];
+      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.wordDocuments, ...snapshot.attachments, ...snapshot.otherFiles];
       const index = createLinkIndex(files), moved = name => renamedTreePath(name, from, to);
       const edits = [...snapshot.notes, ...snapshot.documents].flatMap(file => {
         const content = file.kind === "canvas" ? rewriteCanvasPaths(file.content, file.path, moved, files, index)

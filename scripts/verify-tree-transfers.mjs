@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { localDate } from "../core/periodic-notes.mjs";
 
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
@@ -72,8 +74,82 @@ try {
   const folderDialog = page.getByRole("dialog", { name: "폴더 추가", exact: true });
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   const keyboardFile = row(teamTree, "Shared/Keyboard.md");
+  const keyCopy = row(personalTree, "Copies/Keyboard.md");
+  const moveDialog = page.getByRole("dialog", { name: "이동할까요?", exact: true });
+  await app.evaluate(async ({ clipboard, ClipboardItem }) => {
+    globalThis.previousTreeClipboard = await Promise.all((await clipboard.read()).map(async item =>
+      new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
+  });
+  const external = path.join(root, "외부 문서.txt");
+  await writeFile(external, "File from Explorer");
+  for (const operation of process.platform === "win32" ? ["copy", "move"] : process.platform === "darwin" ? ["copy"] : []) {
+    if (process.platform === "win32") {
+      execFileSync("powershell.exe", ["-NoProfile", "-STA", "-Command", `
+        Add-Type -AssemblyName System.Windows.Forms
+        $data = New-Object Windows.Forms.DataObject
+        $paths = New-Object Collections.Specialized.StringCollection
+        [void]$paths.Add($env:DYNOTE_CLIPBOARD_FIXTURE)
+        $data.SetFileDropList($paths)
+        $effect = [IO.MemoryStream]::new([BitConverter]::GetBytes([int]${operation === "move" ? 2 : 1}))
+        $data.SetData('Preferred DropEffect', $effect)
+        [Windows.Forms.Clipboard]::SetDataObject($data, $true)
+      `], { env: { ...process.env, DYNOTE_CLIPBOARD_FIXTURE: external } });
+    } else {
+      await app.evaluate(async ({ clipboard, ClipboardItem }, url) => {
+        await clipboard.write([new ClipboardItem({ 'electron application/osclipboard;format="public.file-url"': new Blob([url]) })]);
+      }, pathToFileURL(external).href);
+    }
+    const folder = operation === "copy" ? "Copies" : "Archive";
+    await row(personalTree, folder).press(modifier + "+v");
+    await row(personalTree, folder + "/" + path.basename(external).normalize(process.platform === "darwin" ? "NFD" : "NFC")).waitFor();
+    assert.equal(await readFile(path.join(personal, folder, "외부 문서.txt"), "utf8"), "File from Explorer");
+    if (operation === "copy") assert.equal(await readFile(external, "utf8"), "File from Explorer");
+    else await assert.rejects(readFile(external), { code: "ENOENT" });
+  }
+  await row(teamTree, "Shared/Original.docx").press(modifier + "+c");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await row(personalTree, "Copies/Original.docx").press(modifier + "+x");
+  await row(personalTree, "Archive").press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(personalTree, "Archive/Original.docx").waitFor();
+  assert.deepEqual(await readFile(path.join(personal, "Archive/Original.docx")), await readFile(path.join(team, "Shared/Original.docx")));
+  await row(personalTree, "Archive/Original.docx").press(modifier + "+x");
+  await row(teamTree, "Taken").press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(teamTree, "Taken/Original.docx").waitFor();
+  await assert.rejects(readFile(path.join(personal, "Archive/Original.docx")), { code: "ENOENT" });
+  assert.deepEqual(await readFile(path.join(team, "Taken/Original.docx")), await readFile(path.join(team, "Shared/Original.docx")));
+  await keyboardFile.click();
+  await page.keyboard.press(modifier + "+c");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await keyCopy.waitFor();
+  await keyCopy.press(modifier + "+v");
+  await row(personalTree, "Copies/Keyboard (복사본).md").waitFor();
+  await keyCopy.press(modifier + "+x");
+  const rootHeading = personalTree.locator("h3");
+  await rootHeading.press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "취소" }).click();
+  assert.equal(await readFile(path.join(personal, "Copies/Keyboard.md"), "utf8"), "# Keyboard\n");
+  await rootHeading.press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(personalTree, "Keyboard.md").waitFor();
+  await assert.rejects(readFile(path.join(personal, "Copies/Keyboard.md")), { code: "ENOENT" });
+  assert.equal(await readFile(path.join(personal, "Keyboard.md"), "utf8"), "# Keyboard\n");
+  await row(teamTree, "Shared").press(modifier + "+v");
+  assert.equal(await moveDialog.count(), 0);
   await keyboardFile.click();
   const keyboardEditor = pane("Shared/Keyboard.md").getByRole("textbox", { name: "Markdown 편집기", exact: true });
+  await keyboardFile.press(modifier + "+c");
+  await keyboardEditor.press(modifier + "+a");
+  await keyboardEditor.press(modifier + "+x");
+  assert.equal(await keyboardEditor.evaluate(el => el.cmTile.root.view.state.doc.toString()), "");
+  await keyboardEditor.press(modifier + "+v");
+  assert.equal(await keyboardEditor.evaluate(el => el.cmTile.root.view.state.doc.toString()), "# Keyboard\n");
+  await keyboardEditor.press(modifier + "+a");
+  await keyboardEditor.press(modifier + "+c");
+  await row(personalTree, "Archive").press(modifier + "+v");
+  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), "# Keyboard\n");
+  assert.equal(await row(personalTree, "Archive/Keyboard.md").count(), 0);
   await keyboardEditor.press("Home");
   await keyboardEditor.press("Delete");
   assert.equal(await trashDialog.count(), 0);
@@ -223,6 +299,9 @@ try {
   assert.deepEqual(errors, []);
   console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
 } finally {
+  await app?.evaluate(async ({ clipboard }) => {
+    if (globalThis.previousTreeClipboard) await clipboard.write(globalThis.previousTreeClipboard);
+  }).catch(() => {});
   await app?.close();
   await rm(root, { recursive: true, force: true });
 }

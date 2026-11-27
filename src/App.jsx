@@ -259,6 +259,7 @@ function FileTree({ notes, folders, journalPreferences, captureEntries, active, 
             <button
               key={path}
               className={`file-row ${active === path ? "selected" : ""}`}
+              data-tree-document={path}
               {...dropProps(path.split("/").slice(0, -1).join("/"))}
               data-drop-label={undefined}
               style={{ paddingLeft: 17 + depth * 16 }}
@@ -614,6 +615,8 @@ export default function App() {
     if (modal === "trash") fileTarget?.origin?.focus();
   }, [modal, fileTarget]);
   const treeDrag = useRef(null);
+  const treeClipboard = useRef(null);
+  const pastingFiles = useRef(false);
   const [newFolder, setNewFolder] = useState(null);
   const macCopyDrag = useRef(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -1717,8 +1720,8 @@ export default function App() {
     }
     setError(snapshot.warnings.join(" · "));
   };
-  const moveWorkspaceFile = async (vaultId, from, to, revision) => {
-    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision }));
+  const moveWorkspaceFile = async (vaultId, from, to, revision, moveAsset = false) => {
+    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision, moveAsset }));
     applyWorkspaceRename(vaultId, from, to, snapshot);
   };
   const transferTreeFile = async ({ source, vaultId, folder, operation, confirmed = false }) => {
@@ -1734,25 +1737,35 @@ export default function App() {
     try {
       await flush();
       const revision = revisionMap(source.vaultId).get(source.path);
-      if (!revision) throw new Error("원본 문서를 새로고침해 주세요.");
+      const asset = !/\.(?:md|canvas|base)$/i.test(source.path);
+      if (!asset && !revision) throw new Error("원본 문서를 새로고침해 주세요.");
       const name = source.path.split("/").at(-1);
       if (operation === "move" && source.vaultId !== vaultId) {
         const { saved } = await invoke(api.moveAcrossVaults({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
+        if (saved.warning) {
+          acceptSnapshot(await invoke(api.snapshot({ vaultId })));
+          throw new Error(saved.warning);
+        }
         const from = documentKey(source.vaultId, source.path), to = documentKey(vaultId, saved.path);
         workspace.dispatch({ type: "rename", path: from, to });
         setTabs(old => [...new Set(old.map(key => key === from ? to : key))]);
+        if (asset) setAttachment(old => old?.vaultId === source.vaultId && old.path === source.path ? { ...old, vaultId, path: saved.path } : old);
         acceptSnapshot(await invoke(api.snapshot({ vaultId: source.vaultId })));
         acceptSnapshot(await invoke(api.snapshot({ vaultId })));
       } else if (operation === "move") {
-        await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision);
+        await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision, asset);
       } else {
         const saved = await invoke(api.copyFile({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
-        const field = saved.kind ? "documents" : "notes";
-        revisionMap(vaultId).set(saved.path, saved.revision);
-        updateVault(vaultId, old => old && ({ ...old, [field]: [...old[field].filter(file => file.path !== saved.path), saved] }));
+        if (asset) acceptSnapshot(await invoke(api.snapshot({ vaultId })));
+        else {
+          const field = saved.kind ? "documents" : "notes";
+          revisionMap(vaultId).set(saved.path, saved.revision);
+          updateVault(vaultId, old => old && ({ ...old, [field]: [...old[field].filter(file => file.path !== saved.path), saved] }));
+        }
         setError("");
       }
       setTreeReveal({ vaultId, folder });
+      if (treeClipboard.current?.source === source && operation === "move") treeClipboard.current = null;
       if (confirmed) setModal(null);
     } catch (error) {
       if (confirmed) setModal(null);
@@ -1807,6 +1820,34 @@ export default function App() {
     return { vaultId: row?.dataset.treeDropVault ?? (together && visibleSpaces.length === 1 ? visibleSpaces[0].id : vault.id),
       folder: row?.dataset.treeDropFolder ?? "" };
   };
+  const copyTreeSelection = event => {
+    const row = event.target;
+    if (busy || modal || !row.dataset.treeDocument) return;
+    const source = { vaultId: row.dataset.treeDropVault, path: row.dataset.treeDocument };
+    const operation = event.type === "cut" ? "move" : "copy";
+    const token = crypto.randomUUID();
+    event.preventDefault();
+    event.clipboardData.setData(FILE_TREE_DRAG, token);
+    treeClipboard.current = { source, operation, token };
+  };
+  const pasteTreeSelection = async event => {
+    if (busy || modal || !event.target.matches(".file-row, .folder-row, .space-tree h3")) return;
+    const { vaultId, folder } = sidebarTarget(event);
+    const pending = treeClipboard.current;
+    event.preventDefault();
+    if (pending && event.clipboardData.getData(FILE_TREE_DRAG) === pending.token) {
+      if (pending.operation === "move" && pending.source.vaultId === vaultId && parentFolder(pending.source.path) === folder) return;
+      return transferTreeFile({ source: pending.source, operation: pending.operation, vaultId, folder });
+    }
+    if (pastingFiles.current || event.clipboardData.types.includes("text/plain") && !event.clipboardData.types.includes("Files")) return;
+    pastingFiles.current = true;
+    try {
+      const { files, operation } = api.readExplorerFiles ? await api.readExplorerFiles()
+        : { files: Array.from(event.clipboardData.files), operation: "copy" };
+      if (files.length) await transferSidebarFiles(files, { vaultId, folder }, operation);
+    } catch (error) { setError(error.message); }
+    finally { pastingFiles.current = false; }
+  };
   const transferSidebarFiles = async (files, { vaultId, folder }, operation) => {
     const verb = operation === "save" ? "저장" : operation === "copy" ? "복사" : "이동";
     const completed = [], failed = [], refresh = new Set();
@@ -1819,7 +1860,7 @@ export default function App() {
         try {
           const result = await invoke(operation === "save"
             ? api.copyExternalFile({ vaultId, folder, id: file.id, revision: file.revision })
-            : api.transferDroppedFile({ vaultId, folder, operation }, file));
+            : file.pasteTo ? file.pasteTo({ vaultId, folder }) : api.transferDroppedFile({ vaultId, folder, operation }, file));
           if (!result.unchanged) refresh.add(vaultId);
           if (result.sourceVaultId) refresh.add(result.sourceVaultId);
           if (result.warning) failed.push(file.name + " · " + result.warning);
@@ -2489,6 +2530,7 @@ export default function App() {
           </div>
         </nav>
         <aside className="navigator" style={{ width: panelLayout.left }} data-sidebar-copy="" data-copy-active={treeDrop?.operation.startsWith("import-")}
+          onCopy={copyTreeSelection} onCut={copyTreeSelection} onPaste={pasteTreeSelection}
           onDragOverCapture={event => {
             const preview = event.dataTransfer.types.includes(EXTERNAL_TAB_DRAG);
             if (!preview && !event.dataTransfer.types.includes("Files")) return;
