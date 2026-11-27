@@ -1,6 +1,7 @@
 import {installCaptureMarkers} from './copilot-journal-links.mjs';
 import { textWithoutStyleMarkup } from "./text-color.mjs";
 import MarkdownIt from "markdown-it";
+import { highlightFence } from "./code-highlighting.mjs";
 import footnote from "markdown-it-footnote";
 import { katex } from "@mdit/plugin-katex";
 import { createLinkIndex, resolvePath, scanLinks } from "./links.mjs";
@@ -11,7 +12,10 @@ import { installMarkdownExtensions } from "./markdown-extensions.mjs";
 import { headingText, headingId } from "./headings.mjs";
 export { parseMetadata, updateMetadata, toggleTask } from "./metadata.mjs";
 
-const md = new MarkdownIt({ html: false, breaks: true, linkify: false })
+const md = new MarkdownIt({
+  html: false, breaks: true, linkify: false,
+  highlight: (source, name) => highlightFence(source, name, md.utils.escapeHtml),
+})
   .use(footnote)
   .use(katex, { trust: false, throwOnError: false, output: "html" });
 

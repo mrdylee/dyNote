@@ -22,6 +22,7 @@ import {
   redo,
   indentWithTab,
 } from "@codemirror/commands";
+import { fenceLanguage, fenceHighlighter } from "../core/code-highlighting.mjs";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   defaultHighlightStyle,
@@ -130,7 +131,7 @@ export default function Editor({
           }),
           highlightSelectionMatches(),
           bracketMatching(),
-          markdown({ base: markdownLanguage, extensions: [wikiSyntax] }),
+          markdown({ base: markdownLanguage, extensions: [wikiSyntax], codeLanguages: fenceLanguage }),
           rendering.current.of(live ? liveExtensions() : []),
           autocompletion({
             override: [
@@ -162,6 +163,7 @@ export default function Editor({
           }),
           outlining.current.of(journalOutline({ journal, live })),
           syntaxHighlighting(defaultHighlightStyle),
+          syntaxHighlighting(fenceHighlighter),
           EditorView.lineWrapping,
           selectionToolbar((view, format, color) => {
             if (color) setTextColor(color);

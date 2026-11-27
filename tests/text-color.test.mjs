@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { history, undo, redo } from "@codemirror/commands";
@@ -94,7 +95,9 @@ test("coloring preserves task and table syntax and literal code blocks",()=>{
   const editor=view(doc,0,doc.length);runTextColor(editor,"#1565c0");
   const html=renderMarkdown(editor.state.doc.toString(),[],"Home.md");
   assert.match(html,/<table>/);assert.match(html,/<input[^>]*type="checkbox"/);
-  assert.match(html,/<code class="language-js">const value=1;/);
+  const code=JSDOM.fragment(html).querySelector("code.language-js");
+  assert.equal(code.textContent,"const value=1;\n");
+  assert.equal(code.querySelector("[style]"),null);
   assert.doesNotMatch(editor.state.doc.toString(),/```js\n<span/);
 });
 

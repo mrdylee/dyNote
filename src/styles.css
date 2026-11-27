@@ -631,6 +631,13 @@ kbd {
   padding: 0;
   color: var(--muted);
 }
+/* Shared by rendered code and CodeMirror's fenced-language parser. */
+:is(pre code, .code-editor) .tok-keyword { color: #7638a1; }
+:is(pre code, .code-editor) :is(.tok-typeName, .tok-className) { color: #155a88; }
+:is(pre code, .code-editor) :is(.tok-string, .tok-string2) { color: #246639; }
+:is(pre code, .code-editor) :is(.tok-number, .tok-atom, .tok-bool) { color: #984318; }
+:is(pre code, .code-editor) :is(.tok-definition, .tok-meta, .tok-macroName) { color: #704617; }
+:is(pre code, .code-editor) .tok-comment { color: #596575; font-style: italic; }
 .markdown-preview table {
   width: 100%;
   border-collapse: collapse;
