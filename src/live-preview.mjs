@@ -29,12 +29,13 @@ export const wikiSyntax = {
 const config = Facet.define({ combine: (values) => values[0] ?? {} });
 export const composition = StateEffect.define();
 export const refreshLivePreview = StateEffect.define();
+const revealClickedCaret = StateEffect.define();
 export const imageLayoutChanged = StateEffect.define();
 const formatting = { StrongEmphasis: "strong", Emphasis: "emphasis", Strikethrough: "strike", InlineCode: "code" };
 const literal = new Set(["FencedCode", "CodeBlock", "HTMLBlock", "HTMLTag", "Table", "LinkReference"]);
 
-function selected(state, from, to) {
-  return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+function selected(selection, from, to) {
+  return selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
 function linkInfo(state, node) {
@@ -154,7 +155,7 @@ class RevealRegion extends RangeValue {
   constructor(replacements) { super(); this.replacements = replacements; }
 }
 
-function decorate(state) {
+function decorate(state, revealSelection = state.selection) {
   const ranges = [], reveals = [], options = state.facet(config), context = options.getContext?.() ?? {};
   const source = state.doc.toString();
   const frontmatter = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(source)?.[0].length ?? 0;
@@ -194,7 +195,7 @@ function decorate(state) {
         const replacement = Decoration.replace({ block: true, inclusive: false, widget }).range(from, to);
         // The boundary is still a valid caret position, including when a note opens at offset zero.
         reveals.push(new RevealRegion([replacement]).range(from + 1, to - 1));
-        if (!selected(state, from + 1, to - 1)) ranges.push(replacement);
+        if (!selected(revealSelection, from + 1, to - 1)) ranges.push(replacement);
       }
       return false;
     }
@@ -204,7 +205,7 @@ function decorate(state) {
     const finish = (skipChildren = false) => {
       if (replacements.length) {
         reveals.push(new RevealRegion(replacements).range(from, to));
-        if (!selected(state, from, to)) ranges.push(...replacements);
+        if (!selected(revealSelection, from, to)) ranges.push(...replacements);
       }
       if (skipChildren) return false;
     };
@@ -248,14 +249,16 @@ function decorate(state) {
     }
     return finish();
   }});
-  return { decorations: Decoration.set(ranges, true), reveals: RangeSet.of(reveals, true) };
+  return { decorations: Decoration.set(ranges, true), reveals: RangeSet.of(reveals, true), revealSelection };
 }
 
-function updateSelection(value, before, after) {
+function updateSelection(value, after) {
+  const before = value.revealSelection;
+  if (before.eq(after)) return value;
   const seen = new Set(), removed = new Set(), add = [], intervals = [];
   // The index includes hidden and currently revealed syntax. Query both ends of
   // a move, including ancestors, without walking the document between them.
-  for (const selection of [...before.selection.ranges, ...after.selection.ranges]) {
+  for (const selection of [...before.ranges, ...after.ranges]) {
     let from = selection.from, to = selection.to, filter = false;
     value.reveals.between(from, to, (start, end, region) => {
       if (seen.has(region)) return;
@@ -271,7 +274,7 @@ function updateSelection(value, before, after) {
     });
     if (filter) intervals.push({ from, to });
   }
-  if (!removed.size && !add.length) return value;
+  if (!removed.size && !add.length) return { ...value, revealSelection: after };
   const merged = [];
   for (const interval of intervals.sort((a, b) => a.from - b.from)) {
     const last = merged.at(-1);
@@ -283,7 +286,7 @@ function updateSelection(value, before, after) {
     filterFrom: from, filterTo: to, filter: (_from, _to, decoration) => !removed.has(decoration),
   });
   if (add.length) decorations = decorations.update({ add, sort: true });
-  return { ...value, decorations };
+  return { ...value, decorations, revealSelection: after };
 }
 
 export const livePreviewState = StateField.define({
@@ -294,10 +297,15 @@ export const livePreviewState = StateField.define({
       if (effect.is(composition)) { composing = effect.value; refresh = true; }
       if (effect.is(refreshLivePreview)) refresh = true;
     }
-    if (composing) return { ...value, composing, decorations: value.decorations.map(tr.changes) };
+    if (composing) return { ...value, composing, revealSelection: tr.state.selection, decorations: value.decorations.map(tr.changes) };
+    // Keep glyphs under the mouse until the click ends or the next keyboard edit.
+    const revealAtCaret = tr.effects.some(effect => effect.is(revealClickedCaret));
+    const moved = tr.selection && !tr.selection.eq(tr.startState.selection);
+    const followSelection = tr.docChanged || revealAtCaret || (moved && !tr.isUserEvent("select.pointer"));
+    const revealSelection = followSelection ? tr.state.selection : value.revealSelection;
     if (refresh || tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state) || tr.startState.readOnly !== tr.state.readOnly)
-      return { ...decorate(tr.state), composing };
-    return tr.selection ? updateSelection(value, tr.startState, tr.state) : value;
+      return { ...decorate(tr.state, revealSelection), composing };
+    return updateSelection(value, revealSelection);
   },
   provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
 });
@@ -319,6 +327,11 @@ export function livePreview(options = {}) {
       compositionstart() { clearTimeout(this.timer); this.view.dispatch({ effects: composition.of(true) }); },
       compositionend() {
         this.timer = setTimeout(() => this.view.dispatch({ effects: composition.of(false) }), 50);
+      },
+      click(event) {
+        const { state } = this.view;
+        if (event.button === 0 && state.selection.main.empty && !state.selection.eq(state.field(livePreviewState).revealSelection))
+          this.view.dispatch({ effects: revealClickedCaret.of(null) });
       },
       mousedown(event) {
         const link = event.target.closest?.("[data-live-target]");

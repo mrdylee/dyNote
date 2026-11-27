@@ -21,7 +21,7 @@ try {
   for (const mode of ['편집 보기','Live Preview','읽기 보기']) {
     await page.getByRole('button', {name:mode, exact:true}).click();
     const surface = page.locator(mode === '읽기 보기' ? '.markdown-preview' : '.cm-content');
-    for (const word of ['Plain','Yellow']) {
+    for (const [word,reverse] of [['Plain',false],['Yellow',false],['Yellow',true]]) {
       const box = await surface.evaluate((el, word) => {
         const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
@@ -50,9 +50,9 @@ try {
         },png.toString('base64'));
       };
       const before = await sample();
-      await page.mouse.move(x,y);
+      await page.mouse.move(reverse ? box.right-0.5 : x,y);
       await page.mouse.down();
-      await page.mouse.move(box.right-0.5,y,{steps:6});
+      await page.mouse.move(reverse ? x : box.right-0.5,y,{steps:6});
       for(const phase of ['drag','release']) {
         if (phase === 'release') await page.mouse.up();
         const after = await sample();
@@ -62,11 +62,19 @@ try {
           const {from,to} = view.state.selection.main;
           return view.state.sliceDoc(from,to);
         });
-        assert.ok(selected.length > 0, mode+' '+phase+' must keep a text selection');
-        assert.ok(Math.max(...after.map((c,i)=>Math.abs(c-before[i])))>=45,
-          mode+' '+word+' '+phase+' selection is indistinct: '+before+' -> '+after);
+        assert.equal(selected, word, mode+' '+phase+' must select the visible word');
+        // The blue selection overlay (#4285ed at 40%) must cover the original glyph location.
+        const expected = [66,133,237].map((channel,i)=>Math.round(channel*0.4+before[i]*0.6));
+        assert.ok(after.every((c,i)=>Math.abs(c-expected[i])<=12),
+          mode+' '+word+' '+phase+' selection color: '+after+' expected '+expected);
       }
-      await page.mouse.click(box.right+1,y);
+      if (mode === 'Live Preview' && word === 'Yellow' && reverse) {
+        await page.mouse.click(box.left+box.width/2,y);
+        await page.waitForFunction(() => document.querySelector('.cm-content').textContent.includes('<span style='));
+      }
+      // Start the next gesture with no selection, away from the styled span.
+      const plain = surface.getByText('Plain selected words', {exact:true}).first();
+      await plain.click({position:{x:2,y:4}});
     }
   }
   console.log('Mouse selection is visible during drag and after release in Markdown source, Live Preview and reading view.');
