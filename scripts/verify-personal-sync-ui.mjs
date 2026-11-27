@@ -271,6 +271,46 @@ async function verifyJournalConflict(a, b) {
   assert.equal(await review.getByText("검토할 버전 0개").count(), 0);
   await b.page.keyboard.press("Escape");
   await today(b).getByRole("button", {name:/버전 확인/}).waitFor({state:"hidden"});
+
+  // Import against a real pending Git conflict in the destination journal.
+  await edit(a, "다른 PC의 일정");
+  await edit(b, "보관할 내 일정");
+  await sync(a);
+  await sync(b);
+  await today(b).getByRole("button", {name:/버전 확인/}).waitFor();
+  const source = path.join(temp, "workspaceStorage");
+  for (const project of ["Work", "Other"]) {
+    const folder = path.join(source, project);
+    await mkdir(path.join(folder, "chatSessions"), {recursive:true});
+    await writeFile(path.join(folder,"workspace.json"), JSON.stringify({folder:"vscode-remote://wsl+Ubuntu/home/test/"+project}));
+    await writeFile(path.join(folder,"chatSessions","session.json"), JSON.stringify({
+      version:3, sessionId:project, customTitle:project+" import", requests:[{
+        requestId:"q", timestamp:Date.now(), message:{text:project+" question"},
+        modelState:{value:1}, response:[{value:"답변"}]
+      }]
+    }));
+  }
+  await b.app.evaluate(({dialog}, source) => { dialog.showOpenDialog=async()=>({canceled:false,filePaths:[source]}); },source);
+  await b.page.getByRole("button", {name:"Copilot 대화 자동 저장 설정"}).click();
+  const settings = b.page.getByRole("dialog", {name:"설정",exact:true});
+  await settings.getByRole("button", {name:"기록 폴더 선택",exact:true}).click();
+  await settings.getByText(source, {exact:true}).waitFor();
+  await settings.getByRole("checkbox", {name:/WSL \(Ubuntu\) · \/home\/test\/Work/}).check();
+  await settings.getByRole("button", {name:"선택한 프로젝트 가져오기"}).click();
+  const popup = b.page.getByRole("dialog", {name:"Copilot 가져오기 충돌 해결"});
+  await popup.getByRole("heading", {name:journal,exact:true}).waitFor();
+  await popup.getByRole("button", {name:"나중에"}).click();
+  await settings.getByRole("button", {name:"남은 충돌 해결"}).click();
+  await popup.getByRole("region", {name:"Local",exact:true}).getByRole("button",{name:/가운데에 반영/}).click();
+  await popup.getByRole("button", {name:"적용하고 가져오기 계속"}).click();
+  await settings.getByText("대화를 개인 노트에 가져왔습니다.", {exact:true}).waitFor();
+  const captured = await b.invoke("captureStatus");
+  assert.deepEqual(captured.records.map(r=>r.label), ["Work"]);
+  assert.match(await readFile(path.join(b.root, journal),"utf8"), /보관할 내 일정/);
+  assert.match(await readFile(path.join(b.root, captured.records[0].sessions[0].path),"utf8"), /Work question/);
+  await settings.getByRole("button",{name:"닫기",exact:true}).click();
+  await sync(b);
+  await sync(a);
 }
 try {
   const a = await launch("Cloud", true, "개인 노트 장기 보관함 ".repeat(4).trim()),

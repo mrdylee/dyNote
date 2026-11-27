@@ -777,6 +777,7 @@ test('selected missing legacy daily notes migrate from cache and preserve other 
  await f.controller.persist(f.vault,{...f.controller.config(f.vault),records});
  const work=Object.values(records).find(r=>r.label==='Work');
  const conflicted=await f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:['project'],protectedPaths:new Set([work.journalPath])});
+ assert.deepEqual(conflicted.blockedPaths,[work.journalPath]);
  assert.match(conflicted.importWarning,/충돌/);assert.equal(conflicted.changed,false);
  for(const [i,id] of ['project','other'].entries()){
   await f.controller.sync(f.vault,{},true,{allSessions:true,projectIds:[id]});
@@ -789,9 +790,30 @@ test('selected missing legacy daily notes migrate from cache and preserve other 
   assert.match(await readFile(path.join(f.vault.root,f.journal),'utf8'),new RegExp(sid));
  }
 });
+test('background capture returns only journals it needs and retries without duplicating links',async t=>{
+ const f=await fixture(t);await f.configure(true);await f.put();
+ f.advance(86400000);
+ await f.put('q2','다음 날',f.now()+1,path.join(f.source,'project/chatSessions/next.json'));
+ const secondJournal=`Journal/${localDate(f.now())}.md`;
+ const protectedPaths=new Set([f.journal,secondJournal,'Journal/unrelated.md']);
+ const scan=options=>f.controller.sync(f.vault,{},false,options);
+ assert.equal((await scan({protectedPaths,checkOnly:true})).pending,true);
+ const blocked=await scan({protectedPaths});
+ assert.deepEqual(blocked.blockedPaths,[f.journal,secondJournal]);
+ assert.equal(blocked.changed,false);
+ const saved=await scan({});
+ assert.equal(saved.changed,true);
+ const existingPath=saved.status.records[0].sessions[0].path;
+ assert.equal((await scan({protectedPaths:new Set([existingPath]),checkOnly:true})).pending,undefined);
+ assert.equal((await scan({})).changed,false);
+ for(const name of [f.journal,secondJournal])
+  assert.equal(captureLinkRanges(await readFile(path.join(f.vault.root,name),'utf8')).length,1);
+});
+
 test('manual reimport explains a pending Git conflict and succeeds after resolution',async t=>{
  const f=await deletedProject(t);
  const result=await f.importProject('project',{protectedPaths:new Set([f.relative])});
+ assert.deepEqual(result.blockedPaths,[f.relative]);
  assert.equal(result.changed,false);assert.match(result.importWarning,/충돌/);
  await assert.rejects(readFile(f.file),{code:'ENOENT'});
  assert.equal((await f.importProject()).changed,true);assert.equal(await readFile(f.file,'utf8'),f.original);
@@ -803,7 +825,8 @@ test('a pending reimport waits for Git conflict resolution before replaying its 
  await assert.rejects(f.importProject(),/interrupted/);
  f.vault.applyDocumentChanges=apply;
  const waiting=await f.importProject('project',{protectedPaths:new Set([f.relative])});
- assert.match(waiting.importWarning,/버전 확인/);
+ assert.deepEqual(waiting.blockedPaths,[f.relative]);
+ assert.match(waiting.importWarning,/충돌/);
  await assert.rejects(readFile(f.file),{code:'ENOENT'});
  assert.equal((await f.importProject()).changed,true);
  assert.equal(await readFile(f.file,'utf8'),f.original);

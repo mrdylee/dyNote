@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-export default function CopilotJournalSettings({state,destination,importNotice,pendingEdits=[],importBlocked,onReviewEdit,onReconnect,onRefresh,onSource,onSave,onImport,onManageSpaces,disabled}){
+export default function CopilotJournalSettings({state,destination,importNotice,onResolve,pendingEdits=[],importBlocked,onReviewEdit,onReconnect,onRefresh,onSource,onSave,onImport,onManageSpaces,disabled}){
  const [enabled,setEnabled]=useState(state?.enabled??false);
  const [selected,setSelected]=useState(()=>state?.projects.filter(project=>project.selected).map(project=>project.id)??[]);
  const [pending,setPending]=useState(false),[error,setError]=useState('');
@@ -64,6 +64,7 @@ export default function CopilotJournalSettings({state,destination,importNotice,p
     await onImport(projectIds);
    })}>선택한 프로젝트 가져오기</button></div>
   {(error||state?.error)&&<p className="error-banner" role="alert">{error||state.error}</p>}
+  {onResolve&&<button disabled={busy} onClick={onResolve}>남은 충돌 해결</button>}
   {importNotice&&<p className="muted" role="status">{importNotice}</p>}
   </>}
  </section>;

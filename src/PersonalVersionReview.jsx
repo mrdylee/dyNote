@@ -8,7 +8,7 @@ function copyPath(name, id) {
   return name.slice(0, dot) + " (" + id.slice(0, 8) + ")" + name.slice(dot);
 }
 
-function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, busy, onSwitch, onPick}) {
+function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, busy, onSwitch, onPick, capture}) {
   const body = useRef(null);
   useEffect(() => {
     const view = body.current;
@@ -48,7 +48,7 @@ function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, 
             <span className="comparison-value">{text || "(삭제)"}</span>
             <button type="button" className="comparison-arrow" title={label} aria-label={label} aria-pressed={source === id}
               disabled={busy || !Object.hasOwn(part.alternatives, id)} onClick={() => onPick(part.key, id)}>
-              {slot === "left" ? "→" : "←"}
+              {capture && "이 내용 사용 "}{slot === "left" ? "→" : "←"}
             </button>
           </div>;
         }
@@ -70,7 +70,7 @@ function ComparisonPane({id, slot, rows, other, parts, target, selected, picks, 
   </section>;
 }
 
-export default function PersonalVersionReview({ path, count, action, onClose }) {
+export default function PersonalVersionReview({ path, count, action, onClose, onResolved, applyLabel }) {
   const [rows, setRows] = useState([]),
     [basis, setBasis] = useState([]),
     [current, setCurrent] = useState(null);
@@ -136,6 +136,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       active = false;
     };
   }, [path, count, limit, reload]);
+  const keepsDeletion = !hunks.length && rows.some(v => v.commit === selected && !v.blob);
   async function apply() {
     setBusy(true);
     setError("");
@@ -154,13 +155,21 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         commit: selected || rows[0].commit,
         options: { hunks: hunks.map((h) => picks[h.key] ?? selected), copies },
       });
-      onClose();
+      if (onResolved) await onResolved({keepsDeletion});
+      else onClose();
     } catch (e) {
       setError(e.message);
       setReload((n) => n + 1);
     } finally {
       setBusy(false);
     }
+  }
+  async function continueResolved() {
+    setBusy(true);
+    setError("");
+    try { await onResolved(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
   }
   async function download(v) {
     try {
@@ -188,7 +197,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
           disabled={busy || loading || !!loadError || !ready || rows.length !== basis.length}
           onClick={apply}
         >
-          {hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용"}
+          {(onResolved && keepsDeletion ? "삭제 유지하고 가져오기 중단" : applyLabel) || (hunks.length ? "선택한 내용 반영" : "선택한 버전으로 적용")}
         </button>
         <button disabled={busy} onClick={onClose}>
           나중에
@@ -207,7 +216,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
                 checked={selected === v.commit && !Object.keys(picks).length}
                 onChange={() => { select(v.commit); setPicks({}); }}
               />
-              {hunks[0]?.alternatives[v.commit]?.trim().slice(0, 120) || (v.blob ? "파일 수정" : "파일 삭제")} ·{" "}
+              {hunks[0]?.alternatives[v.commit]?.trim().slice(0, 120) || (onResolved && rows.some(row => !row.blob) ? (v.blob ? "파일 복원" : "삭제 유지") : (v.blob ? "파일 수정" : "파일 삭제"))} ·{" "}
               {v.device || v.author} · {new Date(v.time).toLocaleString()}
               {v.blob === current ? " · 현재 상태" : ""}
             </label>
@@ -222,7 +231,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
       <h3>{path}</h3>
       {loading && <p role="status">{count ? `버전 ${count}개 불러오는 중…` : "버전 불러오는 중…"}</p>}
       {loadError && <p role="alert">{loadError} <button onClick={() => setReload(n => n + 1)}>다시 불러오기</button></p>}
-      {!loading && !loadError && !basis.length && <p role="status">이 노트에 남은 충돌이 없습니다.</p>}
+      {!loading && !loadError && !basis.length && <p role="status">이 노트에 남은 충돌이 없습니다. {onResolved && <button disabled={busy} onClick={continueResolved}>계속</button>}</p>}
       {parts && compared.length === 2 && compared.every(id => rows.some(v => v.commit === id)) && <div className="version-workspace">
         {hunks.length > 1 && <label className="comparison-jump">겹친 구간으로 이동
           <select value={Math.min(target, hunks.length - 1)} onChange={e => setTarget(Number(e.target.value))}>
@@ -231,7 +240,7 @@ export default function PersonalVersionReview({ path, count, action, onClose }) 
         </label>}
         <DocumentPanes panes={[{key:"left", id:compared[0]}, {key:"original", id:"original"}, {key:"right", id:compared[1]}]}
           renderPane={({key, id}) => <ComparisonPane slot={key} id={id} rows={rows} other={compared[key === "left" ? 1 : 0]}
-            parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
+            capture={!!onResolved} parts={parts} target={Math.min(target, hunks.length - 1)} selected={selected} picks={picks} busy={busy}
             onSwitch={id => setCompared(old => key === "left" ? [id, old[1]] : [old[0], id])}
             onPick={(key, pick) => setPicks(old => {
               const next = { ...old };

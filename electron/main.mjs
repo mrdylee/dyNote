@@ -786,7 +786,16 @@ app
           const manual=args.checkOnly!==true && args.manual===true;
           const reimport=manual && (Array.isArray(args.sessionIds) || (args.allSessions===true && Array.isArray(args.projectIds)));
           const protectedPaths=gitBackup.status().enabled && gitBackup.status().config?.mode==="personal-sync" ? await gitBackup.personal.blockedSessions({includeDeleted:!reimport}) : undefined;
-          return copilotJournal.sync(vault,args.dailyOptions,manual,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
+          const result=await copilotJournal.sync(vault,args.dailyOptions,manual,{checkOnly:args.checkOnly===true,sessionIds:args.sessionIds,allSessions:args.allSessions,projectIds:args.projectIds,protectedPaths});
+          if(result.blockedPaths){
+            const pending=reimport?protectedPaths:await gitBackup.personal.blockedSessions({includeDeleted:false});
+            result.conflictPaths=result.blockedPaths.filter(name=>pending.has(name));
+            delete result.blockedPaths;
+            result.importWarning=result.conflictPaths.length
+              ? `파일 ${result.conflictPaths.length}개의 충돌을 해결하면 대화 가져오기를 계속할 수 있습니다.`
+              : '동기화로 삭제된 대화는 선택한 프로젝트 가져오기에서 복구할 수 있습니다.';
+          }
+          return result;
         };
         return args.checkOnly===true ? run() : gitBackup.enqueue(run);
       },

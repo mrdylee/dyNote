@@ -19,7 +19,10 @@ const wslDistro=value=>{
 const clone=value=>structuredClone(value);
 const usesDailyFile=(config,record)=>!config.sessionLayout||record.legacyDaily===true;
 const legacyLayout=config=>Object.values(config.records).some(record=>usesDailyFile(config,record));
-const conflictNotice=count=>`Git 충돌이 남은 파일 ${count}개가 있어 관련 대화의 가져오기를 보류했습니다. 개인 노트 동기화 설정의 ‘버전 확인’에서 충돌을 해결한 뒤 다시 가져와 주세요.`;
+function captureConflict(paths){
+ const blockedPaths=[...new Set(paths)].sort();
+ return {blockedPaths,importWarning:`파일 ${blockedPaths.length}개의 충돌을 해결하면 대화 가져오기를 계속할 수 있습니다.`};
+}
 const hasHistory=config=>!!config&&(Object.keys(config.records).length>0||!!config.pendingCapture||config.blocked.length>0||!!config.trashId);
 const recordProjectKey=record=>path.posix.basename(path.posix.dirname(record.path));
 function selectionFor(config,project){
@@ -327,7 +330,7 @@ export class CopilotJournal{
   next.sessionLayout=true;
   let migrating=false;
   const snapshot=await vault.documentSnapshot(),notes=new Map(snapshot.notes.map(n=>[n.path,n])),edits=new Map();
-  const touched=new Set(recreate);
+  const touched=new Set(recreate),blocked=new Set();
   const journalContent=name=>edits.has(name)?edits.get(name):notes.get(name)?.content??`# ${path.basename(name,'.md')}\n\n`;
   for(const id of new Set([...Object.keys(previous.records),...Object.keys(next.records)])){
    const before=previous.records[id],after=next.records[id];
@@ -365,7 +368,7 @@ export class CopilotJournal{
    const oldText=before?renderSessionCapture(before):null,newText=after?renderSessionCapture(after):null;
    const name=(after??before).path,current=notes.get(name);
    if(protectedPaths?.has(name)&&(recreate.has(id)||oldText!==newText)){
-    return {changed:false,importWarning:conflictNotice(1),status:await this.status(vault)};
+    blocked.add(name);continue;
    }
    if(!current&&after&&recreate.has(id)){edits.set(name,newText);continue;}
    if(oldText===newText)continue;
@@ -375,8 +378,8 @@ export class CopilotJournal{
    if(current?.content!==newText&&(current||after))edits.set(name,newText);
   }
   const changes=[...edits].filter(([name,content])=>content!==notes.get(name)?.content).map(([path,content])=>({path,content}));
-  const conflicts=changes.filter(change=>protectedPaths?.has(change.path));
-  if(conflicts.length)return {changed:false,importWarning:conflictNotice(conflicts.length),status:await this.status(vault)};
+  for(const change of changes)if(protectedPaths?.has(change.path))blocked.add(change.path);
+  if(blocked.size)return {changed:false,...captureConflict(blocked),status:await this.status(vault)};
   if(changes.length&&!previous.pendingCapture){
    // Replay the same records on retry, even if the original transcript has changed since this batch.
    const {records,sessionLayout,blocked,trashId,projectKeys}=next;
@@ -468,7 +471,11 @@ export class CopilotJournal{
     if([sourceKey,legacyKey,sessionId].some(key=>next.blocked.includes(`s:${key}`)))continue;
     let existing=sessions.get(sessionId);
     const documentPath=existing?.path ?? `${folder}/${project.key}/${sessionId}.md`;
-    if(protectedPaths?.has(documentPath)){conflicts.add(documentPath);continue;}
+    const since=selectionFor(previous,project)?.since??previous.since??this.now();
+    if(protectedPaths?.has(documentPath)){
+     if(manual||source.messages.some(message=>message.at>=since&&!existing?.messages.has(message.id)))conflicts.add(documentPath);
+     continue;
+    }
     if(protectedPaths) {
       const received=await vault.readNote(documentPath).catch(error=>{if(error.code!=="ENOENT")throw error;return null;});
       if(received && (!existing || (received.content!==renderSessionCapture(existing) && received.content!==renderSessionCapture(existing,{legacy:true}))))continue;
@@ -483,7 +490,6 @@ export class CopilotJournal{
       for(const entry of existing.entries){entry.sourceKey=sourceKey;updated.add(entry);}
      }
     }
-    const since=selectionFor(previous,project)?.since??previous.since??this.now();
     for(const message of source.messages){
      if(seen.has(message.id)||!Number.isFinite(message.at)||(!manual&&message.at<since))continue;
      const date=localDate(message.at);if(manual&&!selected&&!importAll&&date!==today)continue;
@@ -512,7 +518,7 @@ export class CopilotJournal{
   if(selected&&[...selected].some(id=>!matched.has(id)))throw new Error('선택한 세션을 읽을 수 없습니다. 세션 목록을 새로 불러와 주세요.');
   for(const session of updated)session.messages.sort((a,b)=>a.at-b.at);
   const changed=converting||updated.size>0||recreate.size>0;
-  if(checkOnly&&changed)return {pending:true};
+  if(checkOnly&&(changed||conflicts.size))return {pending:true};
   const result=changed?await this.commit(vault,previous,next,recreate,protectedPaths):{changed:false,status:await this.status(vault)};
   if(importAll&&!result.changed&&!conflicts.size&&!sources.error&&!cachedInScope&&!sources.sessions.some(({source})=>source.messages.length)){
    result.noConversationHistory=true;
@@ -529,7 +535,7 @@ export class CopilotJournal{
     }
    }
   }
-  if(manual&&conflicts.size)result.importWarning=conflictNotice(conflicts.size);
+  if(conflicts.size)Object.assign(result,captureConflict([...conflicts,...(result.blockedPaths??[])]));
   if(sources.error||incompatible)result.status.error=[result.status.error,sources.error,incompatible&&'기존 기록과 메시지 식별자가 다른 세션은 가져오기를 보류했습니다.'].filter(Boolean).join(' · ');
   return result;
  }

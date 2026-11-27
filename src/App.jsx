@@ -596,6 +596,7 @@ export default function App() {
     }
     return [id, entries];
   })), [captureStates]);
+  const [captureConflicts, setCaptureConflicts] = useState({});
   const [captureImportResult, setCaptureImportResult] = useState(null);
   const [captureWritingId, setCaptureWritingId] = useState(null);
   const [restoringVaults, setRestoringVaults] = useState([]);
@@ -645,6 +646,10 @@ export default function App() {
   const [lastTrash, setLastTrash] = useState(null);
   const [gitStates, setGitStates] = useState({});
   const [reviewFile,setReviewFile]=useState(null);
+  const openCaptureConflict = useCallback(id => {
+    setReviewFile({id, capture:true});
+    setModal("personal-review");
+  }, []);
   const openReview=(id,path)=>{setReviewFile({id,path});setModal("personal-review");};
   const gitStatus = gitStates[vault?.id] ?? checkingGit;
   const gitSettingsStatus = gitStates[gitVault?.id] ?? checkingGit;
@@ -726,6 +731,8 @@ export default function App() {
   const captureVaultId = captureVault?.id;
   const captureTargetState = captureStates[captureVaultId] ?? null;
   const captureImportNotice = captureImportResult?.vaultId === captureVaultId ? captureImportResult?.notice : "";
+  const captureReview = reviewFile?.capture ? captureConflicts[reviewFile.id] : null;
+  const reviewPath = captureReview ? captureReview.paths[captureReview.index] : reviewFile?.path;
   const visibleSpaces = connectedSpaces.filter(scope => together
     ? (filter === "all" || scope.id === filter || (filter === "personal" && scope.purpose === "personal"))
     : scope.id === vault?.id);
@@ -1078,36 +1085,41 @@ export default function App() {
   const updateCaptureState = useCallback((id, transform) => {
     setCaptureStates(old => ({ ...old, [id]: transform(old[id]) }));
   }, []);
-  const captureAction = useCallback(async (action, manual, args, id) => {
+  const captureAction = useCallback(async (action, manual, args, id, resume = false) => {
+    const view = currentSettingsView.current, activeId = currentVault.current;
     const automatic = action === "sync" && !manual;
     const state = captureContext.current.states[id];
     const canStart = () => {
       const { busy, modal, states } = captureContext.current;
       const scope = vaultsRef.current[id];
       return scope?.id && !captureWorking.current && !captureContext.current.restoringVaults.includes(id) && !busy && (!automatic || (
-        !modal && scope.purpose === "personal" && states[id] === state && state?.enabled && state.personal
+        (resume || !modal) && scope.purpose === "personal" && states[id] === state && state?.enabled && state.personal
         && !queue.dirtyIn(id) && !editsRef.current.blocked(id)
       ));
     };
-    if ((automatic && captureScanning.current) || !canStart()) return;
+    if ((automatic && captureScanning.current) || !canStart()) {
+      if (resume) throw new Error("현재 작업이 끝난 뒤 가져오기를 다시 시도해 주세요.");
+      return;
+    }
     const request = { vaultId: id, ...args };
     const preferences = vaultsRef.current[id].journalPreferences;
     const dailyOptions = { ...preferences.daily, locale: preferences.locale };
     let writing = false;
     try {
-      if (automatic) {
+      if (automatic && !resume) {
         captureScanning.current = true;
         const { pending, status } = await invoke(api.syncCapture({ ...request, dailyOptions, checkOnly: true }));
         // A user edit or settings change can arrive while the scan is running.
         if (!canStart()) return;
         if (!pending) {
+          setCaptureConflicts(old => old[id] && !old[id].manual ? {...old, [id]:null} : old);
           updateCaptureState(id, old => old === state ? status : old);
           return;
         }
       }
       writing = captureWorking.current = true;
       setCaptureWritingId(id);
-      if (!automatic) {
+      if (!automatic || resume) {
         setCaptureImportResult(null);
         const targetEdits = editsRef.current.forVault(id);
         if (targetEdits.blocked() || targetEdits.working) throw new Error("개인 노트의 Copilot 변경을 먼저 검토해 주세요. 설정에서 미확정 변경 문서를 열 수 있습니다.");
@@ -1116,7 +1128,16 @@ export default function App() {
       const result = await invoke(action === "trash" ? api.trashCapture(request) : action === "restore"
         ? api.restoreCapture(request) : api.syncCapture({ ...request, dailyOptions, manual }));
       if (!vaultsRef.current[id]) return;
-      if (manual && action === "sync") {
+      if (action === "sync") {
+        const paths = result.conflictPaths;
+        setCaptureConflicts(old => {
+          if (automatic && !resume && old[id]?.manual) return old;
+          if (!paths?.length && !old[id]) return old;
+          return {...old, [id]: paths?.length ? {paths, index:0, args, manual} : null};
+        });
+        if (paths?.length && (manual || resume) && view === currentSettingsView.current && activeId === currentVault.current) openCaptureConflict(id);
+      }
+      if ((manual || resume) && action === "sync") {
         const notice = result.migrated ? "기존 대화와 저널 링크를 세션별로 이관했습니다." : result.changed
           ? "대화를 개인 노트에 가져왔습니다." : result.noConversationHistory
             ? "선택한 프로젝트에서 완료된 원본 대화나 Dynote에 저장된 이전 기록을 찾지 못했습니다. 위의 기록 폴더를 확인해 주세요."
@@ -1125,9 +1146,10 @@ export default function App() {
       }
       updateCaptureState(id, () => result.status);
       if (result.snapshot) acceptSnapshot(result.snapshot);
+      return result;
     } catch (error) {
       if (writing || canStart()) updateCaptureState(id, old => ({ ...old, error: error.message }));
-      if (manual) throw error;
+      if (manual || resume) throw error;
     } finally {
       if (automatic) captureScanning.current = false;
       if (writing) {
@@ -1135,7 +1157,7 @@ export default function App() {
         setCaptureWritingId(null);
       }
     }
-  }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef]);
+  }, [flush, acceptSnapshot, queue, updateCaptureState, vaultsRef, openCaptureConflict]);
   const captureIds = Object.values(vaults).filter(scope => scope.id).map(scope => `${scope.id}:${scope.purpose ?? ""}`).sort().join(",");
   useEffect(() => {
     if (!api?.captureStatus || !captureIds) return;
@@ -1155,6 +1177,22 @@ export default function App() {
     return () => { alive = false; clearInterval(timer); };
   }, [captureIds, captureAction, updateCaptureState]);
   const captureSettings = () => { setSettingsTab("capture"); setModal("settings"); };
+  const continueCapture = async ({keepsDeletion = false} = {}) => {
+    const id = reviewFile.id;
+    if (modalRef.current !== "personal-review") return;
+    if (keepsDeletion) {
+      setCaptureConflicts(old => ({...old, [id]:null}));
+      setCaptureImportResult({vaultId:id, notice:"선택한 파일의 삭제를 유지하고 이번 가져오기를 중단했습니다."});
+      captureSettings();
+      return;
+    }
+    if (captureReview.index + 1 < captureReview.paths.length) {
+      setCaptureConflicts(old => ({...old, [id]: {...captureReview, index:captureReview.index + 1}}));
+      return;
+    }
+    const result = await captureAction("sync", captureReview.manual, captureReview.args, id, true);
+    if (!result?.conflictPaths?.length && modalRef.current === "personal-review") captureSettings();
+  };
   const importCapture = async () => {
     if (!captureTargetState?.personal || (!captureTargetState.needsMigration && !captureTargetState.pendingCapture)) { captureSettings(); return; }
     await captureAction("sync", true, {}, captureVaultId);
@@ -2906,6 +2944,7 @@ export default function App() {
             session={aiSession} prompts={documentPrompts} folders={vaults[draft.vaultId].folders ?? []}
             onUpdate={updateDocumentDraft} onPersist={persistDocumentDraft} onSave={saveCopilotDocument} />)}
           <footer className="statusbar">
+            {captureConflicts[captureVaultId] && <button onClick={() => openCaptureConflict(captureVaultId)}>Copilot 가져오기 · 남은 충돌 해결</button>}
             {switchingVault && <span role="status">보관함 전환 중…</span>}
             <div
               className={`save-status ${status}`}
@@ -3597,6 +3636,7 @@ export default function App() {
             onSelect={root => switchVault(api.selectVault, { root })}
             onForget={async root => { await flush(); return invoke(api.forgetVault({ root })); }} />}
           {settingsTab === "capture"&&<CopilotJournalSettings key={captureVaultId} state={captureTargetState}
+            onResolve={captureConflicts[captureVaultId] ? () => openCaptureConflict(captureVaultId) : null}
             destination={captureVault?.root ?? captureVault?.name} importNotice={captureImportNotice} disabled={busy || captureWritingId === captureVaultId}
             pendingEdits={editState.drafts[captureVaultId] ?? emptyFiles}
             importBlocked={editState.blocked(captureVaultId) || editState.forVault(captureVaultId).working}
@@ -3670,9 +3710,14 @@ export default function App() {
             onRecovery={() => invoke(api.showRecovery({ vaultId: gitVault.id })).catch((e) => setError(e.message))} />}
         </Modal>
       )}
-      {modal==="personal-review" && reviewFile && <Modal title="버전 확인" className="version-dialog" onClose={()=>setModal(null)}>
-        <PersonalVersionReview key={reviewFile.id+reviewFile.path} path={reviewFile.path} count={gitStates[reviewFile.id]?.conflicts?.find(f=>f.name===reviewFile.path)?.count}
-          action={async args=>{if(args.action==="resolve") await flush(true,reviewFile.id);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={()=>setModal(null)}/>
+      {modal==="personal-review" && reviewFile && reviewPath && <Modal title={captureReview ? "Copilot 가져오기 충돌 해결" : "버전 확인"} className="version-dialog" onClose={captureReview ? captureSettings : ()=>setModal(null)}>
+        {captureReview && <p role="status">충돌 파일 {captureReview.index + 1} / {captureReview.paths.length} · {journalPaths.get(reviewFile.id)?.has(reviewPath)
+          ? "이 저널의 대화 링크를 갱신하려면 남길 내용을 선택해 주세요."
+          : "대화를 가져오려면 이 파일에서 남길 내용을 선택해 주세요."}</p>}
+        <PersonalVersionReview key={reviewFile.id+reviewPath} path={reviewPath}
+          onResolved={captureReview ? continueCapture : undefined}
+          applyLabel={captureReview && (captureReview.index + 1 < captureReview.paths.length ? "적용하고 다음 충돌 보기" : "적용하고 가져오기 계속")} count={gitStates[reviewFile.id]?.conflicts?.find(f=>f.name===reviewPath)?.count}
+          action={async args=>{if(args.action==="resolve") await flush(true,reviewFile.id);return invoke(api.personalSyncAction({vaultId:reviewFile.id,...args}));}} onClose={captureReview ? captureSettings : ()=>setModal(null)}/>
       </Modal>}
       {modal === "file-versions" && displayedPath && <Modal title="파일 버전 기록" className="version-dialog" onClose={() => setModal(null)}>
         <FileVersionHistory key={vault.id + ":" + displayedPath} path={displayedPath}
