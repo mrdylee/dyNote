@@ -2,6 +2,7 @@
   "checks": [
     "Enter sends exactly once; Shift+Enter adds newline; composing Enter and keyCode229 do not send; repeated Enter while running does not send",
     "Completed Mermaid renders as sanitized SVG; streaming stays code; invalid diagram remains readable code; Markdown tables render; empty Enter does not send",
+    "Pasted PNG previews, can be removed, blocks text-only models, reaches IPC with the question, survives cancellation and clears on success",
     "At 1050x700 mode/model selectors sit below textarea; send button and transcript remain visible"
   ],
   "errors": [],
@@ -47,8 +48,8 @@
       "x": 711,
       "y": 133.5,
       "right": 1050,
-      "bottom": 382.3203125,
-      "height": 248.8203125
+      "bottom": 406.3203125,
+      "height": 272.8203125
     },
     "height": 700
   }

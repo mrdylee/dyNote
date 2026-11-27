@@ -20,7 +20,7 @@ try {
   await app.evaluate(({ ipcMain, BrowserWindow, app }) => {
     globalThis.composerRequests = [];
     ipcMain.removeHandler("notes:copilot-status");
-    ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: "auto", name: "Auto" }, { id: "long", name: "Long model display name for narrow panel" }] } }));
+    ipcMain.handle("notes:copilot-status", () => ({ ok: true, value: { authenticated: true, login: "fixture", models: [{ id: "auto", name: "Auto" }, { id: "long", name: "Long model display name for narrow panel", vision: true }] } }));
     ipcMain.removeHandler("notes:copilot-send");
     ipcMain.handle("notes:copilot-send", (event, args) => {
       globalThis.composerRequests.push(args);
@@ -65,6 +65,62 @@ try {
   await input.press("Enter");
   assert.equal(await app.evaluate(() => globalThis.composerRequests.length), 1);
   report.checks.push("Completed Mermaid renders as sanitized SVG; streaming stays code; invalid diagram remains readable code; Markdown tables render; empty Enter does not send");
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 8;
+    canvas.getContext("2d").fillRect(0, 0, 8, 8);
+    return canvas.toDataURL().split(",")[1];
+  });
+  const pasteImage = (data = png) => input.evaluate((element, data) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File([Uint8Array.from(atob(data), char => char.charCodeAt(0))], "screen.png", { type: "image/png" }));
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+  }, data);
+  const preview = page.getByAltText("첨부 이미지 미리보기");
+  const sendButton = page.getByRole("button", { name: "Copilot 보내기" });
+  await input.fill("이 화면을 검토해 줘");
+  await pasteImage();
+  await preview.waitFor();
+  assert.equal(await preview.getAttribute("src"), "data:image/png;base64," + png);
+  assert.equal(await sendButton.isDisabled(), true, "Text-only model blocks image requests");
+  await page.getByLabel("Copilot 모델").selectOption("long");
+  await page.getByRole("button", { name: "첨부 이미지 제거" }).click();
+  assert.equal(await preview.count(), 0);
+  assert.equal(await input.inputValue(), "이 화면을 검토해 줘");
+  await pasteImage();
+  await preview.waitFor();
+  await sendButton.click();
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  const readRequest = () => app.evaluate(() => globalThis.composerRequests.at(-1));
+  assert.deepEqual((await readRequest()).image, { mimeType: "image/png", data: png });
+  assert.equal((await readRequest()).prompt, "이 화면을 검토해 줘");
+  await app.evaluate(() => globalThis.composerEmit("canceled"));
+  await sendButton.waitFor();
+  await preview.waitFor();
+  await sendButton.click();
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  await app.evaluate(() => globalThis.composerEmit("done", "검토 완료"));
+  await preview.waitFor({ state: "detached" });
+  await input.fill("후속 질문");
+  await sendButton.click();
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  assert.equal((await readRequest()).image, undefined);
+  await app.evaluate(() => globalThis.composerEmit("done", "확인"));
+  await sendButton.waitFor();
+  await pasteImage("AAAA");
+  await page.getByText("이미지를 읽을 수 없습니다.", { exact: false }).first().waitFor();
+  assert.equal(await sendButton.isDisabled(), true);
+  await page.getByRole("button", { name: "첨부 이미지 제거" }).click();
+  await pasteImage();
+  await preview.waitFor();
+  await page.getByLabel("Copilot 작업").selectOption("chat");
+  await sendButton.click();
+  await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  assert.equal((await readRequest()).prompt, "첨부한 이미지를 검토해 주세요.");
+  assert.deepEqual((await readRequest()).image, { mimeType: "image/png", data: png });
+  await app.evaluate(() => globalThis.composerEmit("done", "이미지 검토 완료"));
+  await preview.waitFor({ state: "detached" });
+  report.checks.push("Pasted PNG previews, can be removed, blocks text-only models, reaches IPC with the question, survives cancellation and clears on success");
   const geometry = await page.evaluate(() => {
     const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, height: r.height }; };
     return { input: box('[aria-label="Copilot 질문"]'), mode: box('[aria-label="Copilot 작업"]'), model: box('[aria-label="Copilot 모델"]'), send: box('[aria-label="Copilot 보내기"]'), panel: box('.copilot-panel'), log: box('.copilot-transcript'), height: innerHeight };
