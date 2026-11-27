@@ -49,7 +49,11 @@ export function selectionToolbar(apply, colors) {
 
   function tooltip(state) {
     const range = state.selection.main;
-    return state.readOnly || range.empty ? null : { pos: range.head, above: true, create };
+    if (state.readOnly || range.empty) return null;
+    // A native right-click can select the newline and put the toolbar over the insertion point.
+    const line = state.doc.lineAt(range.from);
+    if (range.to <= line.to + 1 && !line.text.trim()) return null;
+    return { pos: range.head, above: true, create };
   }
   const field = StateField.define({
     create: tooltip,
