@@ -1,7 +1,7 @@
 {
   "name": "dynote",
   "productName": "Dynote",
-  "version": "0.23.22-beta.8",
+  "version": "0.23.22-beta.12",
   "private": true,
   "description": "An independent local Markdown notebook informed by REA artifact analysis.",
   "author": "Dynote contributors",
@@ -31,6 +31,7 @@
     "@codemirror/lang-javascript": "6.2.5",
     "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/language": "6.13.1",
+    "@codemirror/language-data": "6.5.2",
     "@codemirror/legacy-modes": "6.5.5",
     "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.6",

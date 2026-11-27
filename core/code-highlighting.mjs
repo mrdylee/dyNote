@@ -1,3 +1,5 @@
+import { languages as catalog } from "@codemirror/language-data";
+import { markdownLanguage } from "@codemirror/lang-markdown";
 import { languageDataProp, StreamLanguage } from "@codemirror/language";
 import { javascriptLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { c, cpp } from "@codemirror/legacy-modes/mode/clike";
@@ -5,27 +7,39 @@ import { python } from "@codemirror/legacy-modes/mode/python";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { classHighlighter, highlightCode } from "@lezer/highlight";
 
-const languages = new Map();
-for (const [names, language] of [
-  [["c"], StreamLanguage.define(c)],
-  [["cpp", "c++", "cxx"], StreamLanguage.define(cpp)],
-  [["python", "py"], StreamLanguage.define(python)],
-  [["bash", "sh", "shell"], StreamLanguage.define(shell)],
-  [["javascript", "js"], javascriptLanguage],
-  [["typescript", "ts"], typescriptLanguage],
-]) {
-  for (const name of names) languages.set(name, language);
+// Keep the original six parsers synchronous. Other catalog entries load on demand.
+const eager = new Map([
+  ["C", StreamLanguage.define(c)], ["C++", StreamLanguage.define(cpp)],
+  ["Python", StreamLanguage.define(python)], ["Shell", StreamLanguage.define(shell)],
+  ["JavaScript", javascriptLanguage], ["TypeScript", typescriptLanguage],
+]);
+const byName = new Map();
+for (const entry of catalog) {
+  const mode = eager.get(entry.name) ?? entry;
+  for (const alias of [...entry.alias, entry.name.toLowerCase().replaceAll(" ", "-")])
+    byName.set(alias, mode);
+}
+for (const entry of catalog) {
+  for (const ext of entry.extensions) {
+    const key = ext.toLowerCase();
+    if (!byName.has(key)) byName.set(key, eager.get(entry.name) ?? entry);
+  }
 }
 
-export const fenceLanguage = name => languages.get(name.toLowerCase());
-const languageData = new Set([...languages.values()].map(language => language.data));
+export const fenceLanguage = name => byName.get(name.toLowerCase());
+const eagerData = new Set([...eager.values()].map(language => language.data));
 export const fenceHighlighter = {
   ...classHighlighter,
-  scope: type => languageData.has(type.prop(languageDataProp)),
+  scope(type) {
+    const data = type.prop(languageDataProp);
+    return !!data && data !== markdownLanguage.data &&
+      (eagerData.has(data) || catalog.some(entry => entry.support?.language.data === data));
+  },
 };
 
 export function highlightFence(source, name, escapeHtml) {
-  const language = fenceLanguage(name);
+  const mode = fenceLanguage(name);
+  const language = mode?.support?.language ?? (mode?.parser ? mode : null);
   if (!language) return ""; // Let Markdown-it escape plain code.
   let html = "";
   highlightCode(source, language.parser.parse(source), classHighlighter, (text, classes) => {

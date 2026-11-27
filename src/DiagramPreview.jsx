@@ -1,8 +1,33 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { highlightCode, classHighlighter } from "@lezer/highlight";
+import { fenceLanguage } from "../core/code-highlighting.mjs";
 import { renderMermaid } from "./mermaid-preview.mjs";
 
 export default function DiagramPreview({ html, onClick, previewRef, tabIndex, className = "markdown-preview", renderDiagrams = true }) {
   const own = useRef(null);
+  const markup = useMemo(() => ({ __html: html }), [html]);
+  useEffect(() => {
+    const root = own.current;
+    for (const block of root.querySelectorAll("pre > code[class]")) {
+      if (block.childElementCount) continue;
+      const tag = [...block.classList].find(name => name.startsWith("language-"));
+      const mode = tag && fenceLanguage(tag.slice(9));
+      if (!mode?.load) continue;
+      mode.load().then(({ language }) => {
+        if (!root.contains(block) || block.childElementCount) return;
+        const source = block.textContent, doc = block.ownerDocument;
+        const fragment = doc.createDocumentFragment();
+        highlightCode(source, language.parser.parse(source), classHighlighter, (text, classes) => {
+          if (!classes) { fragment.append(text); return; }
+          const token = doc.createElement("span");
+          token.className = classes;
+          token.textContent = text;
+          fragment.append(token);
+        }, () => fragment.append("\n"));
+        block.replaceChildren(fragment);
+      }).catch(() => { /* Keep escaped source readable if a parser cannot load. */ });
+    }
+  }, [html]);
   useEffect(() => {
     if (!renderDiagrams) return;
     let disposed = false;
@@ -38,7 +63,7 @@ export default function DiagramPreview({ html, onClick, previewRef, tabIndex, cl
       tabIndex={tabIndex}
       className={className}
       onClick={onClick}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={markup}
     />
   );
 }

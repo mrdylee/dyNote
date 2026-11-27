@@ -47,3 +47,18 @@ test("editing a fence language updates code tokens without coloring surrounding 
   state = state.update({ changes: { from: tag, to: tag + 1, insert: "text" } }).state;
   assert.deepEqual(keywords(), []);
 });
+
+test("JavaScript aliases, file extensions and catalog languages resolve in fenced blocks", async () => {
+  for (const [tag, source] of [
+    ["javascript", "const x = 42"], ["JS", "const x = 42"], ["mjs", "const x = 42"],
+    ["csharp", "return 42;"], ["rust", "let x = 42;"], ["sql", "SELECT 42;"],
+    ["json", '{"x": 42}'], ["tsx", "const x = <p>{42}</p>;"],
+  ]) {
+    const mode = fenceLanguage(tag);
+    assert.ok(mode, tag);
+    if (mode.load) await mode.load();
+    const code = codeBlock(tag, source);
+    assert.equal(code.textContent, source + "\n");
+    assert.ok(code.querySelector(".tok-number"), tag);
+  }
+});
