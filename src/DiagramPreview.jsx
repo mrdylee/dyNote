@@ -71,6 +71,16 @@ export default function DiagramPreview({ html, onClick, previewRef, tabIndex, cl
       tabIndex={tabIndex}
       className={className}
       onClick={onClick}
+      onCopy={event => {
+        const article = event.currentTarget;
+        const selection = article.ownerDocument.getSelection();
+        if (!selection || selection.isCollapsed || !article.contains(selection.anchorNode) ||
+            !article.contains(selection.focusNode)) return;
+        const text = selection.toString();
+        if (!text) return;
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", text);
+      }}
       dangerouslySetInnerHTML={markup}
     />
   );

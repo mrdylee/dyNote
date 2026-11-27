@@ -317,6 +317,45 @@ const captureMarkerState=StateField.define({
   provide:field=>[EditorView.decorations.from(field),EditorView.atomicRanges.of(view=>view.state.field(field))],
 });
 
+// The editor has already handled the copy, including its line-wise paste bookkeeping.
+export function copyEditorSelection(event, view) {
+  if (!view || !event.defaultPrevented || !view.contentDOM.contains(event.target) || !event.clipboardData) return;
+  const { state } = view;
+  const ranges = state.selection.ranges.filter(range => !range.empty);
+  if (!ranges.length) return;
+  const sets = state.field(livePreviewState, false)
+    ? state.facet(EditorView.decorations).filter(set => typeof set !== "function") : [];
+  let replaced = false;
+  const parts = ranges.map(({ from, to }) => {
+    let text = "", widgetSelected = false;
+    // Remove only parsed formatting tags whose body intersects the drag.
+    const styleMarks = [];
+    syntaxTree(state).iterate({ from, to, enter(ref) {
+      if (["FencedCode", "CodeBlock", "InlineCode"].includes(ref.name)) return false;
+      if (ref.name !== "StyleMark") return;
+      const style = ref.node.parent;
+      if (from < style.lastChild.from && to > style.firstChild.to)
+        styleMarks.push(Decoration.replace({}).range(ref.from, ref.to));
+    } });
+    RangeSet.spans([...sets, Decoration.set(styleMarks)], from, to, {
+      span(start, end) { text += state.sliceDoc(start, end); },
+      point(start, end, decoration) {
+        if (start === end) return;
+        replaced = true;
+        if (decoration.spec.widget) widgetSelected = true;
+        if (decoration.spec.widget instanceof Bullet) text += "•";
+      },
+    }, 1);
+    if (widgetSelected && !styleMarks.length && ranges.length === 1 && from >= view.viewport.from && to <= view.viewport.to) {
+      const selected = view.dom.ownerDocument.getSelection();
+      if (selected && !selected.isCollapsed && view.contentDOM.contains(selected.anchorNode) &&
+          view.contentDOM.contains(selected.focusNode)) return selected.toString();
+    }
+    return text;
+  });
+  if (replaced) event.clipboardData.setData("text/plain", parts.join(state.lineBreak));
+}
+
 export function livePreview(options = {}) {
   return [config.of(options), captureMarkerState, livePreviewState,
     EditorView.editorAttributes.of({ class: "cm-live-preview" }),

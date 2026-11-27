@@ -23,6 +23,9 @@ try {
   await writeFile(path.join(personal, "Inbox/Plan.md"), source);
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
+  const selectionLine = "앞 선택 ```기호 `유지` 본문``` 마침 뒤";
+  const styleLine = '앞 색상시작 <span style="background-color:#ffe58a"><span style="color:#c62828">강조</span></span> 색상끝 뒤';
+  await writeFile(path.join(personal, "Selection.md"), styleLine + "\n\n" + selectionLine + "\n\n```txt\n첫 줄\n둘째 줄\n```\n");
   await writeFile(path.join(personal, "Shell.md"), "# Shell move");
   await writeFile(path.join(personal, "Shell index.md"), "[link](Shell.md)");
   await writeFile(path.join(personal, "Cut.pdf"), "original");
@@ -387,6 +390,54 @@ try {
   await settings.getByRole("button", { name: "단축키", exact: true }).click();
   await settings.getByText("복사 · 잘라내기 · 붙여넣기", { exact: true }).waitFor();
   await page.keyboard.press("Escape");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 900));
+  await row(personalTree, "Selection.md").click();
+  const dragText = async (surface, first, last) => {
+    const [start, end] = await surface.evaluate((element, [first, last]) => {
+      const point = (text, after) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode, offset = node.data.indexOf(text);
+          if (offset < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, offset + (after ? text.length : 0));
+          range.collapse(true);
+          const box = range.getBoundingClientRect();
+          return { x: box.left, y: box.top + box.height / 2 };
+        }
+        throw new Error("Missing text " + text);
+      };
+      return [point(first, false), point(last, true)];
+    }, [first, last]);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 15 });
+    await page.mouse.up();
+  };
+  const checkCopy = async (surface, first, last, expected) => {
+    await dragText(surface, first, last);
+    await page.keyboard.press(modifier + "+c");
+    const actual = await app.evaluate(async ({ clipboard }) => ({
+      text: await clipboard.readText(), html: (await clipboard.read()).some(item => item.types.includes("text/html")),
+    }));
+    assert.deepEqual(actual, { text: expected, html: false });
+  };
+  for (const mode of ["Live Preview", "편집 보기", "분할 보기", "읽기 보기"]) {
+    await page.locator(".view-segments").getByRole("button", { name: mode, exact: true }).click();
+    if (mode !== "읽기 보기") {
+      const editor = page.locator(".document-pane.focused .cm-content");
+      await checkCopy(editor, "선택", "마침", mode === "Live Preview" ? "선택 기호 `유지` 본문 마침" : selectionLine.slice(2, -2));
+      await checkCopy(editor, "색상시작", "색상끝", "색상시작 강조 색상끝");
+      await checkCopy(editor, "첫 줄", "둘째 줄", "첫 줄\n둘째 줄");
+    }
+    if (mode === "읽기 보기" || mode === "분할 보기") {
+      const preview = page.locator(".document-pane.focused .markdown-preview");
+      await checkCopy(preview, "선택", "마침", "선택 기호 `유지` 본문 마침");
+      await checkCopy(preview, "색상시작", "색상끝", "색상시작 강조 색상끝");
+      await checkCopy(preview, "첫 줄", "둘째 줄", "첫 줄\n둘째 줄");
+    }
+  }
+  console.log("Mouse selection copied the displayed text in live, source, split and reading views.");
   assert.deepEqual(errors, []);
   console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
 } finally {

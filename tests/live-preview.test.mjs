@@ -6,7 +6,7 @@ import { ensureSyntaxTree } from "@codemirror/language";
 import { history, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { JSDOM } from "jsdom";
-import { livePreview, livePreviewState, wikiSyntax, composition, refreshLivePreview } from "../src/live-preview.mjs";
+import { copyEditorSelection, livePreview, livePreviewState, wikiSyntax, composition, refreshLivePreview } from "../src/live-preview.mjs";
 
 const context = { path: "Home.md", vaultId: "vault", attachments: [{ path: "assets/a.png" }] };
 function state(doc, anchor = doc.length, extra = []) {
@@ -78,6 +78,19 @@ test("decorations preserve Markdown and reveal only the selected formatted span"
   assert.equal(editing.doc.toString(), doc);
   const selected = s.update({ selection: EditorSelection.range(0, doc.length) }).state;
   assert.equal(hidden(selected).length, 0);
+});
+
+test("a backwards drag across offscreen lines copies rendered labels and literal code", () => {
+  const middle = '  공백과 `문자` <span style="color:#c62828">예제</span>  \n'.repeat(12);
+  const source = '**앞** [[Guide|안내]] <span style="font-size:1.5em">크기</span>\n\n```txt\n' + middle + "```\n\n**뒤**\n끝";
+  const original = state(source);
+  const selection = { anchor: source.indexOf("뒤") + 1, head: 2 };
+  const view = { state: original.update({ selection, userEvent: "select.pointer" }).state,
+    contentDOM: { contains: () => true }, viewport: { from: 0, to: 20 } };
+  const values = new Map();
+  const event = { defaultPrevented: true, clipboardData: { setData: (type, value) => values.set(type, value) } };
+  copyEditorSelection(event, view);
+  assert.equal(values.get("text/plain"), "앞 안내 크기\n\n```txt\n" + middle + "```\n\n뒤");
 });
 
 test("nested markup reveals its ancestors; code, frontmatter, HTML and tables remain literal", () => {
