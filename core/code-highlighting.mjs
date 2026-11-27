@@ -37,7 +37,11 @@ export const fenceHighlighter = {
   },
 };
 
+// Larger previews paint only the visible portion after the plain text is displayed.
+export const inlineHighlightLimit = 16 * 1024;
+
 export function highlightFence(source, name, escapeHtml) {
+  if (source.length > inlineHighlightLimit) return "";
   const mode = fenceLanguage(name);
   const language = mode?.support?.language ?? (mode?.parser ? mode : null);
   if (!language) return ""; // Let Markdown-it escape plain code.

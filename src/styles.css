@@ -632,13 +632,20 @@ kbd {
   color: var(--muted);
 }
 /* Shared by rendered code and CodeMirror's fenced-language parser. */
-:is(pre code, .code-editor) .tok-keyword { color: #7638a1; }
-:is(pre code, .code-editor) :is(.tok-typeName, .tok-className, .tok-propertyName, .tok-variableName2, .tok-namespace, .tok-link) { color: #155a88; }
-:is(pre code, .code-editor) :is(.tok-string, .tok-string2, .tok-inserted) { color: #246639; }
-:is(pre code, .code-editor) :is(.tok-number, .tok-atom, .tok-bool, .tok-literal) { color: #984318; }
-:is(pre code, .code-editor) :is(.tok-definition, .tok-meta, .tok-macroName) { color: #704617; }
-:is(pre code, .code-editor) :is(.tok-invalid, .tok-deleted) { color: #a53336; }
-:is(pre code, .code-editor) .tok-comment { color: #596575; font-style: italic; }
+:is(pre code, .code-editor) .tok-keyword,
+::highlight(tok-keyword) { color: #7638a1; }
+:is(pre code, .code-editor) :is(.tok-typeName, .tok-className, .tok-propertyName, .tok-variableName2, .tok-namespace, .tok-link),
+::highlight(tok-typeName), ::highlight(tok-className), ::highlight(tok-propertyName), ::highlight(tok-variableName2), ::highlight(tok-namespace), ::highlight(tok-link) { color: #155a88; }
+:is(pre code, .code-editor) :is(.tok-string, .tok-string2, .tok-inserted),
+::highlight(tok-string), ::highlight(tok-string2), ::highlight(tok-inserted) { color: #246639; }
+:is(pre code, .code-editor) :is(.tok-number, .tok-atom, .tok-bool, .tok-literal),
+::highlight(tok-number), ::highlight(tok-atom), ::highlight(tok-bool), ::highlight(tok-literal) { color: #984318; }
+:is(pre code, .code-editor) :is(.tok-definition, .tok-meta, .tok-macroName),
+::highlight(tok-definition), ::highlight(tok-meta), ::highlight(tok-macroName) { color: #704617; }
+:is(pre code, .code-editor) :is(.tok-invalid, .tok-deleted),
+::highlight(tok-invalid), ::highlight(tok-deleted) { color: #a53336; }
+:is(pre code, .code-editor) .tok-comment,
+::highlight(tok-comment) { color: #596575; font-style: italic; }
 .markdown-preview table {
   width: 100%;
   border-collapse: collapse;

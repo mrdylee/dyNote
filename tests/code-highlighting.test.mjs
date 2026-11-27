@@ -62,3 +62,14 @@ test("JavaScript aliases, file extensions and catalog languages resolve in fence
     assert.ok(code.querySelector(".tok-number"), tag);
   }
 });
+
+test("large eager and loaded catalog fences render intact without synchronous token markup", async () => {
+  for (const [tag, line] of [["js", "const sensor = read(42);"], ["json", '{"reading": 42}']]) {
+    const mode = fenceLanguage(tag);
+    if (mode.load) await mode.load();
+    const source = (line + "\n").repeat(5000) + '"<b>&</b>"';
+    const code = codeBlock(tag, source);
+    assert.equal(code.textContent, source + "\n");
+    assert.equal(code.querySelector("[class^=tok-], b"), null);
+  }
+});

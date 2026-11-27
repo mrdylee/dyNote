@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {EditorState} from '@codemirror/state';
 import {history,undo} from '@codemirror/commands';
 import {markdown} from '@codemirror/lang-markdown';
+import {fenceLanguage} from '../core/code-highlighting.mjs';
 import {captureContext,prepareRequest,applyProposal} from '../core/copilot.mjs';
 const journal=await import('../src/journal-outline.mjs').catch(()=>({}));
 function editor(doc,anchor=doc.length,readonly=false){
- let state=EditorState.create({doc,selection:{anchor},extensions:[markdown(),history(),EditorState.readOnly.of(readonly)]});
+ let state=EditorState.create({doc,selection:{anchor},extensions:[markdown({codeLanguages:fenceLanguage}),history(),EditorState.readOnly.of(readonly)]});
  return {get state(){return state;},dispatch(spec){state=state.update(spec).state;},focus(){},composing:false};
 }
 function run(name,view,...args){assert.equal(typeof journal[name],'function');return journal[name](view,...args);}
@@ -113,5 +114,18 @@ test('quoted lists retain Markdown editing rather than journal block commands',(
  for(const name of ['journalEnter','journalBackspace','journalInsertAttachments']){
   const view=editor(before,name==='journalBackspace'?anchor:before.length);
   assert.equal(run(name,view,'![[a.png]]'),false,name);assert.equal(view.state.doc.toString(),before);
+ }
+});
+
+test('journal shortcuts leave highlighted Markdown examples inside fences alone',async()=>{
+ await fenceLanguage('md').load();
+ for(const prefix of ['', '- Parent\n  ']){
+  const indent=prefix?'  ':'';
+  const doc=prefix+'~~~md\n'+indent+'- first\n'+indent+'- second\n\n'+indent+'plain text\n'+indent+'~~~';
+  for(const name of ['journalBackspace','journalEnter','journalSoftBreak','journalIndent','journalInsertAttachments','startJournalBullet']){
+   const view=editor(doc,doc.indexOf(name==='startJournalBullet'?'text':'second'));
+   assert.equal(run(name,view,'indent'),false,name);
+   assert.equal(view.state.doc.toString(),doc);
+  }
  }
 });

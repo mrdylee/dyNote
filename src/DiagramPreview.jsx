@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useRef } from "react";
 import { highlightCode, classHighlighter } from "@lezer/highlight";
-import { fenceLanguage } from "../core/code-highlighting.mjs";
+import { highlightLargeFence } from "./large-code-preview.mjs";
+import { fenceLanguage, inlineHighlightLimit } from "../core/code-highlighting.mjs";
 import { renderMermaid } from "./mermaid-preview.mjs";
 
 export default function DiagramPreview({ html, onClick, previewRef, tabIndex, className = "markdown-preview", renderDiagrams = true }) {
   const own = useRef(null);
   const markup = useMemo(() => ({ __html: html }), [html]);
   useEffect(() => {
-    const root = own.current;
+    const root = own.current, cleanups = [];
+    let disposed = false;
     for (const block of root.querySelectorAll("pre > code[class]")) {
       if (block.childElementCount) continue;
       const tag = [...block.classList].find(name => name.startsWith("language-"));
       const mode = tag && fenceLanguage(tag.slice(9));
-      if (!mode?.load) continue;
-      mode.load().then(({ language }) => {
-        if (!root.contains(block) || block.childElementCount) return;
-        const source = block.textContent, doc = block.ownerDocument;
+      if (!mode) continue;
+      const source = block.textContent;
+      Promise.resolve(mode.parser ? mode : mode.load().then(support => support.language)).then(language => {
+        if (disposed || !root.contains(block) || block.childElementCount) return;
+        if (source.length > inlineHighlightLimit) {
+          cleanups.push(highlightLargeFence(block, source, language));
+          return;
+        }
+        const doc = block.ownerDocument;
         const fragment = doc.createDocumentFragment();
         highlightCode(source, language.parser.parse(source), classHighlighter, (text, classes) => {
           if (!classes) { fragment.append(text); return; }
@@ -27,6 +34,7 @@ export default function DiagramPreview({ html, onClick, previewRef, tabIndex, cl
         block.replaceChildren(fragment);
       }).catch(() => { /* Keep escaped source readable if a parser cannot load. */ });
     }
+    return () => { disposed = true; for (const cleanup of cleanups) cleanup(); };
   }, [html]);
   useEffect(() => {
     if (!renderDiagrams) return;

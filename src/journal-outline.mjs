@@ -17,7 +17,7 @@ function blockAtSelection(state){
  const pos=state.selection.main.head;
  if(outlineOptionsAt(state,pos).mode!=='journal')return null;
  if(pos<metadataEnd(state.doc))return null;
- let node=syntaxTree(state).resolveInner(pos,-1);
+ let node=syntaxTree(state).resolve(pos,-1);
  while(node&&node.name!=='ListItem'){
   if(['FencedCode','CodeBlock','HTMLBlock'].includes(node.name))return null;
   node=node.parent;
@@ -43,7 +43,7 @@ export function startJournalBullet(view) {
  const {doc,selection}=state;
  const {head,empty}=selection.main;
  if(state.readOnly||composing||selection.ranges.length!==1||!empty||head<metadataEnd(doc))return false;
- let node=syntaxTree(state).resolveInner(head,-1);
+ let node=syntaxTree(state).resolve(head,-1);
  while(node.parent&&node.parent.name!=='Document')node=node.parent;
  const line=doc.lineAt(head);
  const hasText=Boolean(line.text.trim());
