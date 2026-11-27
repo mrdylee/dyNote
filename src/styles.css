@@ -2459,8 +2459,3 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .copilot-mention-list { max-height: 10rem; overflow: auto; display: grid; }
 .copilot-mention-list button { text-align: left; overflow-wrap: anywhere; padding: 4px 8px; }
 .copilot-mention-list button[aria-selected="true"] { background: var(--soft); color: var(--accent); }
-.copilot-checkpoint { max-height: 85vh; overflow: auto; }
-.copilot-checkpoint > section { padding: 8px 0; border-top: 1px solid var(--border); }
-.copilot-checkpoint label { display: block; }
-.copilot-restore-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.copilot-restore-diff pre { max-height: 14rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

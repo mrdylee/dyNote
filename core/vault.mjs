@@ -185,7 +185,7 @@ export class Vault {
     return this.#enqueue(async () => { const snapshot = await this.#snapshot(); return { ...snapshot, revision: documentRevision(snapshot) }; });
   }
 
-  applyDocumentChanges(changes, expectedRevision, { trashDeleted = false } = {}) {
+  applyDocumentChanges(changes, expectedRevision) {
     return this.#enqueue(async () => {
       const before = await this.#snapshot();
       if (before.warnings.length) throw new Error(`읽을 수 없는 문서를 먼저 확인해 주세요: ${before.warnings[0]}`);
@@ -229,8 +229,7 @@ export class Vault {
         for (const change of changes) {
           const previous = current.get(change.path);
           if ((await readCurrent(change.path))?.revision !== previous?.revision) throw new Error(`적용 중 문서가 변경되었습니다: ${change.path}`);
-          if (change.content === null && trashDeleted) await this.#trashFile(change.path, previous.revision);
-          else if (change.content === null) await unlink(await this.#file(change.path));
+          if (change.content === null) await unlink(await this.#file(change.path));
           else if (previous) await this.#save(change.path, change.content, previous.revision);
           else await writeFile(await this.#file(change.path, true), change.content, { flag: "wx", mode: 0o600 });
           applied.push(change);
@@ -1071,29 +1070,27 @@ export class Vault {
   }
 
   trashFile(relative, expectedRevision) {
-    return this.#enqueue(() => this.#trashFile(relative, expectedRevision));
-  }
-
-  async #trashFile(relative, expectedRevision) {
-    const current = await this.#binary(relative);
-    if (current.revision !== expectedRevision)
-      throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
-    const id = randomUUID();
-    const directory = path.join(this.recoveryRoot, "trash", id);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(path.join(directory, "content"), current.bytes, {
-      flag: "wx",
-      mode: 0o600,
+    return this.#enqueue(async () => {
+      const current = await this.#binary(relative);
+      if (current.revision !== expectedRevision)
+        throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
+      const id = randomUUID();
+      const directory = path.join(this.recoveryRoot, "trash", id);
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await writeFile(path.join(directory, "content"), current.bytes, {
+        flag: "wx",
+        mode: 0o600,
+      });
+      await writeFile(
+        path.join(directory, "entry.json"),
+        JSON.stringify({ path: relative, revision: current.revision }),
+        { flag: "wx", mode: 0o600 },
+      );
+      if ((await this.#binary(relative)).revision !== current.revision)
+        throw new Error("삭제 전 외부 변경이 감지되었습니다.");
+      await unlink(await this.#file(relative));
+      return { id, path: relative };
     });
-    await writeFile(
-      path.join(directory, "entry.json"),
-      JSON.stringify({ path: relative, revision: current.revision }),
-      { flag: "wx", mode: 0o600 },
-    );
-    if ((await this.#binary(relative)).revision !== current.revision)
-      throw new Error("삭제 전 외부 변경이 감지되었습니다.");
-    await unlink(await this.#file(relative));
-    return { id, path: relative };
   }
 
   restoreTrash(id) {

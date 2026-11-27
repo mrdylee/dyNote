@@ -33,7 +33,7 @@ GitHub Copilot에 직접 연결된 패널의 질문창에 이미지를 붙여 �
 
 직접 연결 Copilot에서 **⋯ → 최근 대화**를 열면 현재 보관함의 대화를 다시 볼 수 있습니다. 앱을 재시작한 뒤에도 이어서 질문할 수 있습니다. 다시 연 대화는 **Ask · 문서 없음**으로 시작합니다. 이미지 이름은 기록되며, 이미지를 다시 검토하려면 원본을 다시 붙여 넣으세요.
 
-각 사용자 질문의 **복원 지점**을 누르면 해당 질문 직전의 상태와 현재 노트를 비교할 수 있습니다. 해당 질문부터 이후의 Copilot 변경이 대상입니다. 직접 수정했거나 외부에서 변경된 노트는 **현재 내용 유지** 또는 **요청 직전으로 복원**을 선택하세요. 확인하면 대화, 변경된 노트 및 관련 초안이 복원됩니다. 저장된 새 노트는 Dynote 휴지통으로 옮깁니다. MCP 서버 등 외부 서비스에서 실행된 작업은 각 서비스에서 관리합니다.
+답변 아래의 **복원 지점 → 대화 복원**을 누르면 해당 질문과 답변까지 남습니다. 이후 대화는 최근 대화 기록과 다음 질문에 전달하는 대화 내역에서 제외됩니다. 노트와 초안은 그대로 유지됩니다.
 
 **⋯ → Skill · MCP 관리**에서 Skill 폴더나 MCP 설정 JSON을 등록합니다. 등록된 경로와 MCP 서버 이름을 확인하고 연결을 해제할 수 있습니다. 설정은 이 PC의 Agent 연결에 적용되며, 해제한 원본 파일은 유지됩니다.
 
@@ -108,7 +108,7 @@ forcibly disables the OS keychain in `empty` mode. Dynote explicitly sets the
 restricted session defaults and clears installed plugins for both login and
 chat sessions. It still rejects plaintext credential storage.
 
-SDK sessions are temporary and deleted after each request. Dynote stores direct-panel conversation history and checkpoint data in the app's local user-data directory, scoped by vault. Subsequent questions use bounded dialogue from the open conversation. A runtime crash can leave temporary SDK files in Dynote's application
+SDK sessions are temporary and deleted after each request. Dynote stores direct-panel conversation history in the app's local user-data directory, scoped by vault. Subsequent questions use bounded dialogue from the open conversation. A runtime crash can leave temporary SDK files in Dynote's application
 data directory; these are not included in vault Git backups.
 
 `npm run package:mac`, `package:win`, and `package:linux` include the matching SDK
