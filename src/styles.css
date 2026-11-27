@@ -572,7 +572,7 @@ kbd {
 }
 .markdown-preview span[style^="color:"] :is(strong, a, code) { color: inherit; }
 .markdown-preview span[style*="font-size:"] code { font-size: inherit; }
-.markdown-preview ::selection { background: var(--accent-soft); }
+.markdown-preview ::selection { background: #4285ed66; }
 .markdown-preview a {
   color: var(--accent);
   text-decoration: none;
@@ -737,10 +737,13 @@ kbd {
 .cm-cursor {
   border-left-color: var(--accent) !important;
 }
-.cm-content ::selection,
-.cm-content::selection,
-.cm-selectionBackground {
-  background: var(--accent-soft) !important;
+/* Keep the drag visible over the active line and saved Markdown highlights. */
+.code-editor .cm-selectionLayer {
+  z-index: 1 !important;
+  pointer-events: none;
+}
+.code-editor .cm-selectionBackground {
+  background: #4285ed66 !important;
 }
 .mindmap-editor { position: relative; }
 .mindmap-editor > .document-search-host {
