@@ -21,6 +21,8 @@ export function sendBlock({ connection, model, prompt, attachment, checking, aut
   if (attachment && !selectedModel.vision) return reason("vision", "이미지를 지원하는 모델을 선택해 주세요.");
   try { captureContext({ vaultId, note, scope, selection }); }
   catch (error) { return reason("context", scope === "document" && !note ? "현재 노트가 없습니다. 왼쪽에서 Markdown 노트를 열어 주세요." : error.message); }
-  if (!prompt.trim()) return reason("prompt", "질문을 입력해 주세요.");
+  if (!prompt.trim()) return reason("prompt", attachment && mode === "edit"
+    ? "문서에서 수정할 내용을 입력해 주세요. 이미지만 검토하려면 Ask를 선택해 주세요."
+    : "질문을 입력해 주세요.");
   return null;
 }

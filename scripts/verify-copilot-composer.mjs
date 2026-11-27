@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 const profile = await mkdtemp(`${tmpdir()}/dynote-composer-`);
 await mkdir(`${profile}/vault`);
 await writeFile(`${profile}/vault/Home.md`, "# Original\nDo not change");
+await writeFile(`${profile}/vault/Other.md`, "# Other");
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot: `${profile}/vault` }));
 const report = { checks: [], errors: [], transport: "deterministic IPC; no account or live model", windowsNative: false };
 const app = await electron.launch({
@@ -113,14 +114,30 @@ try {
   await page.getByRole("button", { name: "첨부 이미지 제거" }).click();
   await pasteImage();
   await preview.waitFor();
+  await page.getByLabel("Copilot 작업").selectOption("edit");
+  assert.equal(await sendButton.isDisabled(), true, "Image-only Edit requires an explicit editing instruction");
+  assert.match(await page.getByLabel("Copilot 전송 상태").innerText(), /Ask/);
+  const countBeforeEdit = await app.evaluate(() => globalThis.composerRequests.length);
+  await input.press("Enter");
+  assert.equal(await app.evaluate(() => globalThis.composerRequests.length), countBeforeEdit);
+  await input.fill("이 이미지의 제목을 문서에 추가해 줘");
+  assert.equal(await sendButton.isEnabled(), true);
+  await input.fill("");
   await page.getByLabel("Copilot 작업").selectOption("chat");
+  await page.getByLabel("Copilot 전달 범위").selectOption("none");
+  await page.locator('.file-row[title="Other.md"]').click();
+  await page.locator('.file-row.selected[title="Other.md"]').waitFor();
+  assert.equal(await preview.count(), 1, "No-document Ask keeps the image when the active note changes");
   await sendButton.click();
   await page.getByRole("button", { name: "Copilot 응답 중지" }).waitFor();
+  assert.equal((await readRequest()).mode, "chat");
+  assert.deepEqual((await readRequest()).context, { kind: "none" });
   assert.equal((await readRequest()).prompt, "첨부한 이미지를 검토해 주세요.");
   assert.deepEqual((await readRequest()).image, { mimeType: "image/png", data: png });
   await app.evaluate(() => globalThis.composerEmit("done", "이미지 검토 완료"));
   await preview.waitFor({ state: "detached" });
   report.checks.push("Pasted PNG previews, can be removed, blocks text-only models, reaches IPC with the question, survives cancellation and clears on success");
+  report.checks.push("Image-only Edit waits for instructions; switching to no-document Ask and opening another note preserves the attachment through send");
   const geometry = await page.evaluate(() => {
     const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, height: r.height }; };
     return { input: box('[aria-label="Copilot 질문"]'), mode: box('[aria-label="Copilot 작업"]'), model: box('[aria-label="Copilot 모델"]'), send: box('[aria-label="Copilot 보내기"]'), panel: box('.copilot-panel'), log: box('.copilot-transcript'), height: innerHeight };

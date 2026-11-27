@@ -101,7 +101,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   useEffect(() => {
     if (previousPath.current === note?.path) return;
     previousPath.current = note?.path;
-    if (mode === "agent") return;
+    if (mode === "agent" || (provider === "copilot" && mode === "chat" && scope === "none")) return;
     if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
     pending.current = null;
     setAttachment(null);
@@ -141,7 +141,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       setAttachment(current => current === draft ? { ...draft, error: e.message } : current);
     }
   };
-  const outgoingPrompt = attachment && !prompt.trim() ? "첨부한 이미지를 검토해 주세요." : prompt;
+  const outgoingPrompt = attachment && mode !== "edit" && !prompt.trim() ? "첨부한 이미지를 검토해 주세요." : prompt;
   const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
   const effectiveScope = independent && !note && mode !== "edit" ? "none" : scope;
   const otherWork = independent ? mode === "agent" && (liveEdits.running || liveEdits.working)
