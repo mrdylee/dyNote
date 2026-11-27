@@ -297,11 +297,17 @@ export default function Editor({
       else if (!selection.eq(view.state.selection)) view.dispatch({ selection });
     }
     if (format === "ai-suggestion") {
+      const { doc, selection } = view.state;
+      const caret = selection.main;
       let range;
-      runSelectionOrLine(view, target => {
-        if (target.state.selection.ranges.length === 1) range = target.state.selection.main;
-        return true;
-      });
+      if (selection.ranges.length === 1 && caret.empty && !doc.lineAt(caret.head).text.trim()) {
+        range = caret;
+      } else {
+        runSelectionOrLine(view, target => {
+          if (target.state.selection.ranges.length === 1) range = target.state.selection.main;
+          return true;
+        });
+      }
       setSuggestion({ id: crypto.randomUUID(), path: latest.current.note.path, vaultId: latest.current.vaultId,
         doc: view.state.doc, from: range?.from, to: range?.to });
       return;

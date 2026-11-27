@@ -2389,7 +2389,26 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .ai-suggestion::backdrop { background: rgb(0 0 0 / 24%); }
 .ai-suggestion h2 { margin: 0; font-size: 18px; }
 .ai-suggestion .copilot-comparison:has(section:only-child) { grid-template-columns: 1fr; }
-.ai-suggestion label { display: inline-flex; align-items: center; gap: 6px; margin: 4px 12px 4px 0; }
+.ai-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin: 16px 0 12px; padding: 0; border: 0; }
+.ai-actions legend, .ai-field { color: var(--muted); font-size: 12px; }
+.ai-actions legend { margin-bottom: 6px; padding: 0; }
+.ai-actions label { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); cursor: pointer; }
+.ai-actions input { margin: 0; }
+.ai-actions label:has(:checked) { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+.ai-actions label:has(:disabled) { color: var(--muted); cursor: default; }
+.ai-field { display: grid; gap: 6px; margin: 12px 0; }
+.ai-suggestion p { color: var(--muted); font-size: 12px; }
+.ai-suggestion [role="alert"] { color: var(--text); }
+.ai-field textarea, .ai-field select, .copilot-send-row .copilot-model select,
+.conversation-document select[aria-label="AI 모델"], .planner .planner-ai-controls select {
+  min-width: 0; border: 1px solid var(--accent-line); border-radius: 8px;
+  background-color: var(--panel); color: var(--text); padding: 7px 10px; font: inherit;
+}
+.ai-field textarea { resize: vertical; line-height: 1.55; }
+.ai-field select, .copilot-send-row .copilot-model select, .conversation-document select[aria-label="AI 모델"],
+.planner .planner-ai-controls select { cursor: pointer; }
+.ai-field :focus-visible, .copilot-model select:focus-visible, .conversation-document select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.copilot-send-row .copilot-model select { padding: 4px 6px; font-size: 11px; }
 .ai-suggestion footer { display: flex; justify-content: flex-end; gap: 8px; }
-.ai-suggestion .ai-custom-prompt { display: flex; }
-.ai-custom-prompt input { flex: 1; min-width: 0; padding: 5px; }
