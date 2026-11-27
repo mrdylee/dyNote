@@ -13,6 +13,9 @@ try {
   await mkdir(profile); await mkdir(vault);
   await writeFile(join(profile, "settings.json"), JSON.stringify({ vaultRoot: vault }));
   await writeFile(join(vault, "Home.md"), content);
+  await mkdir(join(vault,"Records"));
+  await writeFile(join(vault,"Records","First.md"), "시작\r\nitem-11 과 item-22\r\n");
+  await writeFile(join(vault,"Second.md"), "item-33\nITEM-44\n");
   app = await electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || electronPath,
     args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile } });
   const page = await app.firstWindow();
@@ -145,7 +148,40 @@ try {
     await input.press("Escape");
   }
   assert.equal(await readFile(join(vault, "Home.md"), "utf8"), content);
-  console.log("Verified Markdown find in all five views, both split surfaces, folded mind map nodes, and all four preview search regressions.");
+  await page.keyboard.press("Control+Shift+f");
+  const body = page.getByRole("textbox",{name:"본문 검색",exact:true});
+  assert.equal(await body.evaluate(el=>el===document.activeElement),true);
+  const panel = page.locator(".workspace-find");
+  await body.fill("item-(\\d+)");
+  await panel.getByRole("button",{name:"정규식"}).click();
+  const status = text=>panel.getByText(text,{exact:true}).waitFor();
+  await status("2개 문서 · 4개 일치");
+  await panel.getByRole("button",{name:"대소문자 구분"}).click();
+  await status("2개 문서 · 3개 일치");
+  await panel.getByText("파일 범위",{exact:true}).click();
+  await panel.getByLabel("포함",{exact:true}).fill("Records/**");
+  await status("1개 문서 · 2개 일치");
+  await panel.locator(".find-hit button").nth(1).click();
+  await page.waitForFunction(()=>window.getSelection()?.toString()==="item-22");
+  await page.keyboard.press("Control+Shift+f");
+  assert.equal(await body.inputValue(),"item-(\\d+)");
+  await panel.getByRole("button",{name:"바꾸기 펼치기"}).click();
+  await panel.getByLabel("바꿀 내용").fill("값-$1");
+  await panel.getByRole("button",{name:"Records/First.md 2행 바꾸기"}).first().click();
+  await status("1개 문서 · 1개 일치");
+  await panel.getByLabel("포함",{exact:true}).fill("");
+  await status("2개 문서 · 2개 일치");
+  await panel.getByRole("button",{name:"모두 바꾸기"}).click();
+  await panel.getByRole("button",{name:"취소",exact:true}).click();
+  await status("2개 문서 · 2개 일치");
+  await panel.getByRole("button",{name:"모두 바꾸기"}).click();
+  await panel.getByRole("button",{name:"적용",exact:true}).click();
+  await status("0개 문서 · 0개 일치");
+  await status("바꾸기가 완료되었습니다.");
+  assert.equal(await readFile(join(vault,"Records","First.md"),"utf8"),"시작\r\n값-11 과 값-22\r\n");
+  assert.equal(await readFile(join(vault,"Second.md"),"utf8"),"값-33\nITEM-44\n");
+  assert.equal(await readFile(join(vault,"Home.md"),"utf8"),content);
+  console.log("Verified all Markdown find views and workspace search, source navigation, filtered replacement and saved contents.");
 } finally {
   if (app) await app.close();
   await rm(fixture, { recursive: true, force: true });

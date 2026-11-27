@@ -356,6 +356,17 @@ export default function Editor({
   }, [pendingOriginal, note.content]);
   useEffect(() => {
     if (!jump || jump.path !== note.path) return;
+    const view = editor.current;
+    if (jump.match && view) {
+      const {line,column,text} = jump.match;
+      if (line >= view.state.doc.lines) return;
+      const source = view.state.doc.line(line + 1);
+      if (column > source.length || source.text.slice(column,column+text.length)!==text) return;
+      const anchor = source.from + column;
+      view.dispatch({selection:{anchor,head:anchor+text.length},effects:EditorView.scrollIntoView(anchor,{y:"center"})});
+      view.focus();
+      return;
+    }
     let lineNumber = jump.heading?.line;
     if (lineNumber === undefined) {
       let fragment;
@@ -363,7 +374,6 @@ export default function Editor({
       const heading = note.headings?.find((h) => h.text === fragment || h.plainText === fragment || h.id === fragment || headingId(h.plainText) === fragment);
       lineNumber = heading?.line;
     }
-    const view = editor.current;
     if (view && lineNumber !== undefined) {
       const line = view.state.doc.line(Math.min(view.state.doc.lines, lineNumber + 1));
       view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 52 }) });

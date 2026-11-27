@@ -49,6 +49,7 @@ import {
   attachmentUrl,
 } from "../core/knowledge.mjs";
 import useVaultDocuments from "./useVaultDocuments.jsx";
+import WorkspaceFind from "./WorkspaceFind.jsx";
 import DocumentWorkspace from "./DocumentWorkspace.jsx";
 import useDocumentWorkspace from "./useDocumentWorkspace.jsx";
 import JournalFeed from "./JournalFeed.jsx";
@@ -489,6 +490,7 @@ export default function App() {
   const dailyKey = dailyVaultId && documentKey(dailyVaultId, today);
   const [editorJump, updateEditorJump] = useState(null);
   const setEditorJump = (jump, id = vault?.id) => updateEditorJump(jump && { ...jump, vaultId: id });
+  const [bodySearch,setBodySearch] = useState(false);
   const [query, setQuery] = useState("");
   const [right, setRight] = useState(true);
   const [panelWidths, setPanelWidths] = useState(() => normalizePanelWidths(stored("dynote.panelWidths", null)));
@@ -745,7 +747,17 @@ export default function App() {
       ...file, vaultId: scope.id, key: documentKey(scope.id, file.path), scopeLabel: spaceLabel(scope),
     }))
   ), query);
-  const results = section === "search" ? searchAcross(query) : emptyFiles;
+  const results = section === "search" && !bodySearch ? searchAcross(query) : emptyFiles;
+  const workspaceFiles = useMemo(() => {
+    if (section !== "search" || !bodySearch) return emptyFiles;
+    return visibleSpaces.flatMap(scope => models.get(scope.id).notes.map(({path,content}) => ({
+      key: documentKey(scope.id,path), vaultId:scope.id, path, content, label:together ? spaceLabel(scope) : "",
+    })));
+  }, [section,bodySearch,models,together,filter,vault?.id,vaults]);
+  function openSearch(body) {
+    setBodySearch(body);setSection("search");
+    requestAnimationFrame(()=>{const input=document.getElementById("vault-search");input?.focus();input?.select();});
+  }
   const switchResults = modal === "switch" ? searchAcross(switchQuery).slice(0, 9) : emptyFiles;
 
   const reconcileScope = useCallback((id, paths) => {
@@ -1385,6 +1397,29 @@ export default function App() {
     timer.current = setTimeout(() => flush(true).catch(() => {}), 700);
   };
 
+  async function replaceWorkspaceResults(changes) {
+    for (const {file} of changes) {
+      const {vaultId,path} = file;
+      const current = vaultsRef.current[vaultId]?.notes.find(note=>note.path===path);
+      const edits = editsRef.current.forVault(vaultId);
+      if (!current || current.content!==file.content || !visibleSpaces.some(scope=>scope.id===vaultId))
+        throw new Error(path + " 문서나 검색 범위가 변경되었습니다. 결과를 다시 확인해 주세요.");
+      if (busy || writingPath(vaultId,path) || edits.working || edits.running || edits.drafts.some(d=>d.path===path))
+        throw new Error(path + " 문서의 편집 작업이 끝난 뒤 다시 시도해 주세요.");
+    }
+    for (const {file,content} of changes) changeFile(file.path,content,file.vaultId);
+    const spaces = [...new Set(changes.map(({file}) => file.vaultId))];
+    const saved = await Promise.allSettled(spaces.map(id => flush(true, id)));
+    const errors = saved.filter(result => result.status === "rejected");
+    if (errors.length) throw new Error(errors.map(result => result.reason.message).join("\n"));
+  }
+
+  function openWorkspaceMatch(file,match) {
+    openNote(file.path,file.vaultId);
+    if (["read","mindmap"].includes(workspace.modes[file.key])) workspace.setMode("edit");
+    setEditorJump({path:file.path,match:{line:match.line,column:match.column,text:match.text}},file.vaultId);
+  }
+
   const openNewDocument = useCallback((name = "", target = { vaultId: vault?.id }) => {
     if (!target.vaultId) return;
     setNewDocumentTarget(target);
@@ -1457,6 +1492,10 @@ export default function App() {
   useEffect(() => {
     const handler = (event) => {
       if (busy) return;
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toLowerCase()==="f") {
+        if (!modal && !audioActive.current) { event.preventDefault(); openSearch(true); }
+        return;
+      }
       if (audioActive.current && (event.key === "Escape" || ((event.metaKey || event.ctrlKey) && ["p", "k", "s", "n"].includes(event.key.toLowerCase())))) {
         event.preventDefault(); setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); return;
       }
@@ -2464,7 +2503,7 @@ export default function App() {
             <IconButton
               label="전체 검색"
               active={section === "search"}
-              onClick={() => setSection("search")}
+              onClick={() => openSearch(false)}
             >
               <Search size={20} />
             </IconButton>
@@ -2531,17 +2570,11 @@ export default function App() {
           </button>
           <button
             className="search-shortcut"
-            onClick={() => {
-              setSection("search");
-              setTimeout(
-                () => document.getElementById("vault-search")?.focus(),
-                0,
-              );
-            }}
+            onClick={() => openSearch(true)}
           >
             <Search size={15} />
-            <span>모든 문서 검색</span>
-            <kbd>{shortcut} K</kbd>
+            <span>본문 검색·바꾸기</span>
+            <kbd>{isMac ? "⇧⌘F" : "Ctrl+Shift+F"}</kbd>
           </button>
           <div className="nav-section-title">
             <span>{section === "search" ? "검색 결과" : "내 문서"}</span>
@@ -2564,7 +2597,12 @@ export default function App() {
           {spaceWarnings.map(warning => <p key={warning} className="space-warning" role="status">{warning}</p>)}
           {showCalendar ? <JournalPanel key={vault.id} notes={model.notes} active={active} preferences={journalPreferences} onPreferences={updateJournalPreferences} onOpen={openNote} onCreate={createPeriodic} onHistory={(date) => { setHistoryDate(date); setModal("onThisDay"); }} busy={busy}/>
           : ["recent", "bookmarks"].includes(section) ? <NavigationPanel title={section === "recent" ? "최근 파일" : "북마크"} paths={navigation[section]} onOpen={openNote}/>
-          : section === "search" ? (
+          : section === "search" ? <>
+            <div className="search-kind" role="group" aria-label="검색 방식">
+              <button aria-pressed={!bodySearch} onClick={()=>openSearch(false)}>문서 검색</button>
+              <button aria-pressed={bodySearch} onClick={()=>openSearch(true)}>본문 검색·바꾸기</button>
+            </div>
+            {bodySearch ? <WorkspaceFind files={workspaceFiles} busy={busy} onOpen={openWorkspaceMatch} onReplace={replaceWorkspaceResults}/> :
             <div className="search-panel">
               <input
                 id="vault-search"
@@ -2593,8 +2631,8 @@ export default function App() {
               {!results.length && (
                 <p className="muted empty-small">일치하는 문서가 없습니다.</p>
               )}
-            </div>
-          ) : (
+            </div>}
+          </> : (
             <SpaceTrees spaces={together ? visibleSpaces : [vault]} renderTree={renderTree} dropProps={treeDropProps} onContext={rootTreeContext}
               onRootKey={(event, id) => treeEntryKey(event, {path:"", folder:true}, id)}
               syncMessage={id => !(vaults[id]?.purpose === "personal" && (panelSyncs[id]?.working || gitStates[id]?.phase === "saving")) &&
@@ -3160,7 +3198,7 @@ export default function App() {
                       key={tag}
                       onClick={() => {
                         setQuery("#" + tag);
-                        setSection("search");
+                        openSearch(false);
                       }}
                     >
                       #{tag}

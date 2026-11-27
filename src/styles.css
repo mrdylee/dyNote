@@ -2515,3 +2515,24 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
   .ai-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-suggestion .copilot-comparison { grid-template-columns: 1fr; }
 }
+
+.search-kind, .workspace-find-row, .workspace-find-flags, .find-confirm { display:flex; align-items:center; gap:4px; }
+.search-kind { margin:2px 12px 8px; padding:3px; background:var(--soft); border-radius:7px; }
+.search-kind button, .workspace-find-flags button, .workspace-find-row button, .find-confirm button { border-radius:4px; padding:4px 6px; font-size:11px; }
+.search-kind button[aria-pressed=true], .workspace-find-flags button[aria-pressed=true] { color:var(--accent-ink); background:var(--accent-soft); font-weight:600; }
+.workspace-find input { min-width:0; border:1px solid var(--border); border-radius:5px; background:var(--surface); color:var(--text); padding:5px 7px; }
+.workspace-find-row { margin-bottom:5px; }
+.workspace-find-row input { flex:1; width:0; }
+.workspace-find-row button { display:flex; align-items:center; }
+.workspace-find-flags button { color:var(--muted); }
+.workspace-find summary { cursor:pointer; overflow-wrap:anywhere; }
+.find-paths, .workspace-find p { margin:6px 0; color:var(--muted); font-size:11px; }
+.find-paths label { display:grid; gap:2px; margin:5px 0; }
+.find-file { border-top:1px solid var(--border); padding:5px 0; font-size:12px; }
+.find-file summary b { color:var(--accent-ink); }
+.find-hit { display:flex; align-items:center; padding:1px 0 1px 7px; }
+.find-hit button:first-child { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:pre; text-align:left; padding:4px; font-size:11px; }
+.find-hit button:hover { background:var(--soft); }
+.find-hit mark { background:var(--accent-soft); color:var(--accent-ink); }
+.find-hit ins { color:var(--accent-ink); margin-left:3px; }
+.find-confirm { flex-wrap:wrap; padding:6px; background:var(--soft); font-size:11px; }
