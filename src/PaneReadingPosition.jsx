@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { EditorView } from "@codemirror/view";
+import { readSplitPosition, writeSplitPosition } from "./split-reading-position.mjs";
 
 function editorPosition(view, line, fraction) {
   const source = view.state.doc.line(Math.min(line + 1, view.state.doc.lines));
@@ -100,13 +101,17 @@ export default class PaneReadingPosition extends Component {
   }
 
   componentDidUpdate(previous, _state, anchor) {
+    if (previous.mode === "split" && this.props.mode !== "split") writeSplitPosition(this.props.tabKey, null);
     if (previous.content !== this.props.content || previous.jump !== this.props.jump) { this.cancel(); return; }
     if (anchor) this.restore(anchor);
   }
 
   componentDidMount() {
     const { positions, tabKey, readingPreview, jump } = this.props;
-    const saved = positions.get(tabKey);
+    this.offClose = window.notes?.onBeforeClose(() => {
+      if (this.props.mode === "split") this.savePosition();
+    });
+    const saved = positions.get(tabKey) ?? (this.props.mode === "split" && readSplitPosition(tabKey));
     if (!saved) return;
     positions.delete(tabKey);
     readingPreview.current = saved.preview;
@@ -162,10 +167,17 @@ export default class PaneReadingPosition extends Component {
     this.events?.abort();
     this.pending = null;
   };
-  componentWillUnmount() {
+  savePosition() {
     const { positions, tabKey, mode, readingPreview } = this.props;
     const anchor = this.capture(mode);
-    if (anchor) positions.set(tabKey, { anchor, preview: readingPreview.current });
+    if (!anchor) return;
+    const position = { anchor, preview: readingPreview.current };
+    positions.set(tabKey, position);
+    if (mode === "split") writeSplitPosition(tabKey, position);
+  }
+  componentWillUnmount() {
+    this.offClose?.();
+    this.savePosition();
     this.cancel();
   }
   render() { return this.props.children; }

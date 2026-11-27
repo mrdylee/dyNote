@@ -23,7 +23,7 @@ report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, pl
 let page;
 // CodeMirror's current installed DOM bridge is used only by this harness to
 // inspect state and place deterministic selections. User actions use real input.
-const setup = async () => {
+const connectWindow = async () => {
   page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   page.on("pageerror", (error) => errors.push(error.message));
@@ -32,6 +32,9 @@ const setup = async () => {
   await app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0]; win.setSize(1280, 900); win.setIgnoreMouseEvents(true);
   });
+};
+const setup = async () => {
+  await connectWindow();
   await page.locator('.file-row[title="Home.md"]').click();
   await page.locator(".view-segments").getByRole("button", { name: "Live Preview", exact: true }).click();
   await page.locator(".cm-live-preview").waitFor();
@@ -208,8 +211,8 @@ try {
     assert.ok(Math.abs(offset - 24) < 60, `scroll anchor offset ${offset} after ${mode}`);
   }
   report.checks.push("long document source/live switching preserves the visible text anchor");
-  const first = page.getByRole("region", { name: "문서 Long.md", exact: true });
-  const other = page.getByRole("region", { name: "문서 Other.md", exact: true });
+  let first = page.getByRole("region", { name: "문서 Long.md", exact: true });
+  let other = page.getByRole("region", { name: "문서 Other.md", exact: true });
   const box = await first.boundingBox();
   await page.locator('.file-row[title="Other.md"]').dragTo(first, { targetPosition: { x: box.width - 10, y: 28 } });
   await other.waitFor();
@@ -358,10 +361,48 @@ try {
   await page.getByRole("button", { name: "Long.md 탭 닫기", exact: true }).click();
   await tab("Long").waitFor({ state: "detached" });
   await page.locator('.file-row[title="Long.md"]').click();
-  await first.waitFor();
-  assert.equal(await first.evaluate(el => el.scrollTop), 0, "a newly reopened tab starts at the top");
+  const checkSplit = async (pane, section, side) => {
+    await pane.locator(".document-content.split").waitFor();
+    await page.waitForFunction(() => document.fonts.status === "loaded");
+    await page.waitForTimeout(250);
+    const offset = await paragraphOffset(pane, section, false, side === "preview");
+    assert.ok(Math.abs(offset + 3) < 32, `restored ${side} paragraph ${section} at ${offset}`);
+  };
+  const addOther = async () => {
+    const bounds = await first.boundingBox();
+    await page.locator('.file-row[title="Other.md"]').dragTo(first, { targetPosition: { x: bounds.width - 10, y: 28 } });
+  };
+  await checkSplit(first, 56, "preview");
+  await page.getByRole("button", { name: "Other.md 탭 닫기", exact: true }).click();
+  await addOther();
+  await checkSplit(other, 32, "editor");
+  await checkSplit(first, 56, "preview");
+  report.checks.push("closing and reopening each tab restores its split view and paragraph on the original side");
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page.getByRole("button", { name: "시작 화면", exact: true }).click();
+  await page.getByRole("combobox", { name: "시작 화면" }).selectOption("last");
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  await place(other, 68, "editor");
+  await tab("Long").click();
+  await place(first, 85, "preview");
+  await app.close();
+  app = await launch();
+  await connectWindow();
+  first = page.getByRole("region", { name: "문서 Long.md", exact: true });
+  other = page.getByRole("region", { name: "문서 Other.md", exact: true });
+  await checkSplit(first, 85, "preview");
+  await addOther();
+  await checkSplit(other, 68, "editor");
+  await checkSplit(first, 85, "preview");
+  for (const [name, pane, section] of [["Other", other, 68], ["Long", first, 85]]) {
+    await tab(name).click();
+    await switchMode("읽기 보기");
+    await page.waitForTimeout(250);
+    assert.ok(Math.abs(await paragraphOffset(pane, section) + 3) < 32, `restored tab ${name} follows its reading side`);
+  }
   assert.deepEqual(errors, []);
-  report.checks.push("returning from an external file restores both panes; closing the tab clears its saved reading position");
+  report.checks.push("relaunching with both panes open restores the latest preview and editor paragraphs and remembers both reading sides");
   assert.equal(await readFile(`${vaultRoot}/Long.md`, "utf8"), longText);
   assert.equal(await readFile(`${vaultRoot}/Other.md`, "utf8"), longText);
   report.checks.push("two independently scrolled panes retain their paragraphs across live, source, split and reading modes");

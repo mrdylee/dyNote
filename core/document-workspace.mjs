@@ -15,10 +15,10 @@ export function spaceLabel(space) {
   return `${kind} · ${space.name}`;
 }
 
-export function workspaceAction(value, action) {
+export function workspaceAction(value, action, initialMarkdownMode = () => 'live') {
   const state = value ?? {paths:[], active:null, modes:{}};
   const {path} = action;
-  if (action.type === 'reset') return {paths:path ? [path] : [], active:path ?? null, modes:path&&/\.md$/i.test(path)?{[path]:'live'}:{}};
+  if (action.type === 'reset') return {paths:path ? [path] : [], active:path ?? null, modes:path&&/\.md$/i.test(path)?{[path]:initialMarkdownMode(path)}:{}};
   if (action.type === 'mode') return {...state, modes:{...state.modes,[path ?? state.active]:action.mode}};
   if (action.type === 'rename') {
     const { [path]: mode, ...modes } = state.modes;
@@ -61,7 +61,7 @@ export function workspaceAction(value, action) {
   if (!path) return {...state, paths:[], active:null};
   if (action.type === 'add' && (!/\.md$/i.test(path) || !['left','right'].includes(action.side))) return state;
   if (state.paths.includes(path)) return {...state, active:path};
-  const modes={...state.modes,[path]:state.modes[path]??(/\.md$/i.test(path)?'live':'read')};
+  const modes={...state.modes,[path]:state.modes[path]??(/\.md$/i.test(path)?initialMarkdownMode(path):'read')};
   if (action.type === 'add') {
     if (state.paths.length >= 3) return state;
     const paths = [...state.paths], index = Math.max(0, paths.indexOf(action.anchor ?? state.active));
