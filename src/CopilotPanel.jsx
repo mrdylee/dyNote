@@ -1,3 +1,6 @@
+import CopilotMentions from "./CopilotMentions.jsx";
+import CopilotExtensions from "./CopilotExtensions.jsx";
+import CopilotRestore from "./CopilotRestore.jsx";
 import { prepareCaptureImage } from "./planner-image.mjs";
 import { sendBlock } from "../core/copilot-send-state.mjs";
 import { useEffect, useRef, useState } from "react";
@@ -25,7 +28,7 @@ export default function CopilotPanel({ api, vaultId, session, ...props }) {
   return <ProviderPanel key={`${vaultId}:${session.provider}`} {...props} api={api} vaultId={vaultId} session={session} provider={session.provider} onProvider={session.setProvider} />;
 }
 
-function ProviderPanel({ api, vaultId, session, provider, onProvider, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive, onOpenVault }) {
+function ProviderPanel({ api, vaultId, session, provider, onProvider, note, notes = [], selection, busy, onApply, onReview, visible, liveEdits, onBeginLive, onOpenVault, onFlush, onRestored }) {
   const label = { copilot: "Copilot", codex: "Codex", claude: "Claude" }[provider];
   const accountLabel = { copilot: "GitHub", codex: "Codex", claude: "Claude" }[provider];
   const { ai, connection, checking, model, setModel, refresh, reasoningEfforts, reasoningEffort, setReasoningEffort, defaultReasoningEffort } = session;
@@ -35,6 +38,11 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const [scope, setScope] = useState("document");
   const [mode, setMode] = useState(provider !== "claude" ? "agent" : "chat");
   const [prompt, setPrompt] = useState("");
+  const chat = useRef(null);
+  const [historyList, setHistoryList] = useState(null);
+  const [extensionManager, setExtensionManager] = useState(false);
+  const [checkpoint, setCheckpoint] = useState(null);
+  const chatHistory = (action, extra = {}) => invoke(api.copilotHistory({ vaultId, chatId: chat.current, action, ...extra }));
   const [messages, setMessages] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
@@ -63,6 +71,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       const request = pending.current;
       if (!request || request.requestId !== event.requestId) return;
       if (event.type === "delta" || event.type === "done") {
+        request.reply = event.content;
         setMessages((old) => old.map((m) => m.id === request.requestId ? { ...m, content: event.content, complete: event.type === "done" } : m));
       }
       if (event.type === "done") {
@@ -81,6 +90,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       if (event.type === "error") setError(event.error);
       if (event.type === "canceled") setError("응답을 중지했습니다. 질문을 수정해 다시 보낼 수 있습니다.");
       if (["done", "error", "canceled"].includes(event.type)) {
+        if (request.chatId) chatHistory("finish", { chatId: request.chatId, requestId: request.requestId, status: event.type, content: event.content || request.reply || event.error }).catch(e => setError(e.message));
         if (request.mode === "agent") latest.current.liveEdits.finish(request.requestId);
         if (event.type !== "done") { setProposals([]); setReview(null); }
         pending.current = null;
@@ -104,6 +114,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     if (mode === "agent" || (provider === "copilot" && mode === "chat" && scope === "none")) return;
     if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
     pending.current = null;
+    chat.current = null; setHistoryList(null); setCheckpoint(null);
     setAttachment(null);
     setRunning(false); setMessages([]); setProposals([]); setReview(null); setError("");
   }, [note?.path]);
@@ -116,6 +127,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     return () => session.setActivity("chat", false, vaultId);
   }, [running, authBusy, vaultId, session.setActivity]);
   const newConversation = () => {
+    chat.current = null; setHistoryList(null); setCheckpoint(null);
     setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
   const login = async () => {
@@ -152,6 +164,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const send = async (event) => {
     event?.preventDefault();
     if (pending.current || running || !canSend) return;
+    let request;
     try {
       const { context, target } = captureContext({ vaultId, note, scope: effectiveScope, selection });
       const requestId = crypto.randomUUID();
@@ -164,9 +177,15 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       const drafts = mode === "agent" ? latest.current.liveEdits.drafts.map(({ path, content }) => ({ path, content })) : [];
       const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt: outgoingPrompt, image: attachment?.image, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
-      const request = { ...args, target, inputPrompt: prompt };
+      if (independent) chat.current ??= crypto.randomUUID();
+      request = { ...args, target, inputPrompt: prompt, chatId: independent ? chat.current : null };
       pending.current = request;
-      if (mode === "agent") await latest.current.onBeginLive(requestId, () => ai.cancel({ requestId }));
+      if (request.chatId) {
+        await chatHistory("begin", { requestId, prompt: args.prompt, mode, imageName: attachment?.name });
+        request.recorded = true;
+      }
+      if (!mounted.current || pending.current !== request) return;
+      if (mode === "agent") await latest.current.onBeginLive(requestId, () => ai.cancel({ requestId }), request.chatId);
       if (!mounted.current) { latest.current.liveEdits.stop(); await latest.current.liveEdits.finish(requestId); return; }
       if (request.canceled) {
         await latest.current.liveEdits.finish(requestId);
@@ -176,11 +195,13 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         return;
       }
       setMessages((old) => [...old,
-        { id: `${requestId}-user`, role: "user", content: args.prompt, imageName: attachment?.name, complete: true, mode },
+        { id: `${requestId}-user`, role: "user", checkpoint: request.chatId ? requestId : null, content: args.prompt, imageName: attachment?.name, complete: true, mode },
         { id: requestId, role: "assistant", content: "", complete: false, mode },
       ]);
       await invoke(ai.send(args));
     } catch (e) {
+      if (request && pending.current !== request) return;
+      if (request?.recorded) chatHistory("finish", { chatId: request.chatId, requestId: request.requestId, status: "error", content: e.message }).catch(err => setError(err.message));
       if (pending.current?.mode === "agent") latest.current.liveEdits.finish(pending.current.requestId);
       pending.current = null; setRunning(false); setError(e.message);
     }
@@ -203,14 +224,60 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       const current = latest.current;
       if (current.busy || applying) return;
       setApplying(true);
-      if (review.kind !== "create") applyProposal(review.target, { vaultId: current.vaultId, ...current.notes.find((n) => n.path === review.path) }, review.content);
-      const staged = await current.onApply(review);
+      const beforeDraft = current.liveEdits.drafts.find(d => d.path === review.path);
+      const before = current.notes.find(n => n.path === review.path)?.content ?? null;
+      const after = review.kind === "create" ? review.content : applyProposal(review.target, { vaultId, path: review.path, content: before }, review.content);
+      const ref = independent ? { chatId: chat.current, requestId: review.id } : null;
+      if (ref) {
+        await chatHistory("change", { ...ref, change: { path: review.path, before, after, beforeDraft } });
+        if (!beforeDraft) await chatHistory("saving", { ...ref, path: review.path });
+      }
+      const staged = await current.onApply(review, ref);
+      if (ref && !staged) await chatHistory("keep", { ...ref, path: review.path }).catch(e => setError(e.message));
       const content = staged ? `초안에 반영: ${review.path}. 저장하려면 변경 유지를 눌러 주세요.` : `적용 완료: ${review.path}. 다음 작업에서는 현재 내용을 다시 확인합니다.`;
+      if (ref) await chatHistory("applied", { ...ref, content }).catch(e => setError(e.message));
       setMessages((old) => [...old, { id: crypto.randomUUID(), role: "assistant", mode: "agent", complete: true, content }]);
       setReview(null); setProposals((old) => old.filter((p) => p.id !== review.id));
     } catch (e) { setError(e.message); }
     finally { setApplying(false); }
   };
+
+  async function showHistory() {
+    try { setError(""); setHistoryList(await chatHistory("list")); }
+    catch (e) { setError(e.message); }
+  }
+  async function reopen(id) {
+    try {
+      const saved = await chatHistory("open", { chatId: id });
+      newConversation(); chat.current = id;
+      setMode("chat"); setScope("none"); setPrompt(""); setReferences([]); setAttachment(null); setVaultAccess(false);
+      setMessages(saved);
+    } catch (e) { setError(e.message); }
+  }
+  async function showCheckpoint(requestId) {
+    setApplying(true); setError("");
+    try {
+      await onFlush();
+      const preview = await chatHistory("preview", { requestId, drafts: latest.current.liveEdits.drafts });
+      setCheckpoint({ ...preview, requestId });
+    } catch (e) { setError(e.message); }
+    finally { setApplying(false); }
+  }
+  async function restore(choices) {
+    setApplying(true); setError("");
+    try {
+      await onFlush();
+      const { requestId, version } = checkpoint;
+      const drafts = latest.current.liveEdits.drafts, chatId = chat.current;
+      const result = await invoke(api.restoreCopilotNotes({ vaultId, chatId, requestId, version, choices, drafts }));
+      latest.current.liveEdits.restoreDrafts(drafts, result.drafts);
+      const retained = await chatHistory("rewind", { chatId, requestId });
+      if (result.snapshot) onRestored(result.snapshot);
+      setMessages(retained); setCheckpoint(null); setReview(null); setProposals([]); setProgress([]);
+      setPrompt(""); setAttachment(null); setReferences([]); setMode("chat"); setScope("none");
+    } catch (e) { setError(e.message); }
+    finally { setApplying(false); }
+  }
 
   return <section className="copilot-panel" aria-label={`${label} 채팅`} hidden={!visible}>
     <div className="copilot-chat-heading">
@@ -219,6 +286,13 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         <option value="copilot">Copilot</option><option value="codex">Codex</option><option value="claude">Claude</option>
       </select>
       <div className="copilot-heading-actions">
+        {independent && <details className="copilot-history-menu" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false; }}
+          onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary").focus(); } }}>
+          <summary aria-label="Copilot 대화 관리" title="최근 대화 및 Skill · MCP 관리">⋯</summary>
+          <div className="copilot-history-options">
+            <button disabled={!vaultId || running || applying} onClick={e => { e.target.closest("details").open = false; showHistory(); }}>최근 대화</button>
+            <button onClick={e => { e.target.closest("details").open = false; setExtensionManager(true); }}>Skill · MCP 관리</button>
+          </div></details>}
         <details className="copilot-account-menu" ref={accountMenu}
           onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}
           onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary").focus(); } }}>
@@ -237,6 +311,13 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         <button type="button" title="새 대화" aria-label={`${label} 새 대화`} disabled={running || applying} onClick={() => { setAttachment(null); newConversation(); }}><Plus size={14}/></button>
       </div>
     </div>
+    {extensionManager && <CopilotExtensions api={api} onClose={() => setExtensionManager(false)} />}
+    {historyList && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="최근 대화">
+      <div className="modal-heading"><h2>최근 대화</h2><button onClick={() => setHistoryList(null)}>닫기</button></div>
+      {error && <p role="alert">{error}</p>}
+      {historyList.length ? <ul>{historyList.map(c => <li key={c.id}><button onClick={() => reopen(c.id)}>{c.title}</button> <small>{new Date(c.updated).toLocaleString()}</small></li>)}</ul> : <p>이 보관함에 저장된 대화가 없습니다.</p>}
+    </section></div>}
+    {checkpoint && <CopilotRestore preview={checkpoint} busy={applying} error={error} onRestore={restore} onClose={() => setCheckpoint(null)} />}
     {auth && (authBusy || auth.phase === "error") && <div className="copilot-auth-notice">
       <p role="status" className={`copilot-auth ${auth.phase === "error" ? "failed" : ""}`}>{auth.message}</p>
       {authBusy && <button type="button" className="text-action" onClick={() => invoke(ai.cancelLogin()).catch(e => setError(e.message))}>로그인 취소</button>}
@@ -247,6 +328,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       </div>}
       {messages.map((m) => <article className={`copilot-message ${m.role}`} key={m.id}>
         <strong>{m.role === "user" ? "나" : m.mode === "edit" ? `${label} · 수정안` : label}</strong>
+        {m.checkpoint && <button className="text-action" disabled={running || applying || busy || liveEdits.running || liveEdits.working} onClick={() => showCheckpoint(m.checkpoint)}>복원 지점</button>}
         {m.imageName && <small className="copilot-sent-image"><Paperclip size={12} />{m.imageName}</small>}
         {m.role === "assistant" && m.content ? <DiagramPreview className="copilot-message-content markdown-answer" html={answerHtml(m.content)} renderDiagrams={m.complete} />
           : <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>}
@@ -284,8 +366,9 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 {label}에 전송됩니다.</small>}
       </div>
       <div className="copilot-input-box">
-        <textarea aria-label={`${label} 질문`} placeholder={independent ? "질문을 입력하거나 이미지를 붙여 넣으세요…" : `${label}에게 물어보세요…`} onPaste={independent ? pasteImage : undefined} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) send(); } }} />
+        <CopilotMentions enabled={independent && !running} label={label} prompt={prompt} setPrompt={setPrompt}
+          notes={notes.filter(n => effectiveScope === "none" || n.path !== note?.path)} references={references} onAttach={path => setReferences(old => [...old, path])}
+          onSend={send} onPaste={independent ? pasteImage : undefined} />
         <div className="copilot-send-row">
           <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
             {provider !== "claude" && <option value="agent">Agent</option>}<option value="chat">Ask</option><option value="edit" disabled={scope === "none" || !note}>Edit</option>

@@ -3014,14 +3014,15 @@ export default function App() {
               return <CopilotPanel key={id ?? "missing"} api={api} session={aiSession} vaultId={id}
                 note={contextNote} notes={models.get(id).notes} liveEdits={scopeEdits}
                 onOpenVault={() => { setSettingsTab("vault"); setModal("settings"); }}
-                onBeginLive={async (requestId, cancel) => { await flush(true); editsRef.current.forVault(id).begin(requestId, cancel); }}
+                onFlush={() => flush(true, id)} onRestored={snapshot => install(snapshot)}
+                onBeginLive={async (requestId, cancel, chatId) => { await flush(true); editsRef.current.forVault(id).begin(requestId, cancel, chatId); }}
                 selection={focused && note && mode !== "read" ? editorSelection : null}
                 busy={busy || !focused} visible={focused && rightTab === "copilot"}
                 onReview={path => {
                   openNote(path, id);
                   workspace.dispatch({ type: "mode", path: documentKey(id, path), mode: "edit" });
                 }}
-                onApply={async proposal => {
+                onApply={async (proposal, historyRef) => {
                   if (busy) throw new Error("저장 작업이 끝난 뒤 다시 적용해 주세요.");
                   const key = documentKey(id, proposal.path);
                   if (proposal.kind === "create") {
@@ -3039,7 +3040,7 @@ export default function App() {
                   const draft = scopeEdits.drafts.find(item => item.path === proposal.path);
                   const target = draft ?? vaultsRef.current[id]?.notes.find(n => n.path === proposal.path);
                   const content = applyProposal(proposal.target, { vaultId: id, ...target }, proposal.content);
-                  if (draft && scopeEdits.revise(proposal.path, content)) return true;
+                  if (draft && scopeEdits.revise(proposal.path, content, historyRef)) return true;
                   const view = editorView.current;
                   if (currentVault.current === id && view && !view.state.readOnly && note?.path === proposal.path) {
                     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, annotations: isolateHistory.of("full"), userEvent: "input.copilot" });

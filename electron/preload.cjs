@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld(
     applyComposition: (args) => call("composer-apply", args),
     previewPdf: (args) => call("pdf-preview", args),
     applyPdf: (args) => call("pdf-apply", args),
+    copilotHistory: args => call("copilot-history", args),
+    restoreCopilotNotes: args => call("chat-restore-notes", args),
     aiExtensions: () => call("ai-extensions"),
     aiImportMcp: () => call("ai-import-mcp"),
     aiAddSkills: () => call("ai-add-skills"),

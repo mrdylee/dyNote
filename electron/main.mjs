@@ -39,6 +39,7 @@ import { managedBridgePath, openBridge } from "./bridge-policy.mjs";
 import { noteFolderRemotes, noteRemotes } from "./bridge-repositories.mjs";
 import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
+import { CopilotHistory } from "./copilot-history.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
@@ -627,10 +628,11 @@ app
       onStatus: value => { if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-status", value); },
       onOpen: value => { if (value.created) openedVaults.get(value.vaultId)?.git.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
+    const chatHistory = new CopilotHistory(path.join(app.getPath("userData"), "copilot-history"));
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
     const scopedActions = new Set([
-      "open-sticky", "create-folder", "move-across-vaults",
+      "copilot-history", "chat-restore-notes", "open-sticky", "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
@@ -644,6 +646,15 @@ app
         checkVault(args, target);
         if (!stickyNotes) throw new Error("스티키 노트를 준비하는 중입니다. 잠시 후 다시 열어 주세요.");
         return stickyNotes.openFromVault(target.root, args.path);
+      },
+      "copilot-history": (args, target) => {
+        checkVault(args, target);
+        if (args.action === "apply") throw new Error("복원 작업을 다시 선택해 주세요.");
+        return chatHistory.run(target, args);
+      },
+      "chat-restore-notes": (args, target, git) => {
+        checkVault(args, target);
+        return git.enqueue(() => chatHistory.run(target, { ...args, action: "apply" }));
       },
       "document-drafts": () => documentDrafts.list(),
       "write-document-draft": args => documentDrafts.write(args),
@@ -1192,7 +1203,7 @@ app
         const registering = name === "git-clone" || name === "connect-team-repositories";
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
-        const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
+        const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["chat-restore-notes", "git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
         const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let release;
         try {
@@ -1239,7 +1250,7 @@ app
             (value.status ?? value).personal = registry.purposes[target.root] === "personal";
             if (value.changed) entry.git.markDirty(target.id);
           }
-          if (["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
+          if ((name === "chat-restore-notes" && value?.snapshot) || ["create", "create-folder", "move-across-vaults", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "choose-attachments", "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "composer-apply", "classification-apply", "pdf-apply"].includes(name)) entry?.git.markDirty(target.id);
           return { ok: true, value };
         } catch (error) {
           return { ok: false, error: error.message };

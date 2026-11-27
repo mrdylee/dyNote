@@ -43,11 +43,11 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
       job.cancel().catch(() => {});
     }
   };
-  const begin = (id, requestId, cancel = () => api.copilotCancel({ requestId })) => {
+  const begin = (id, requestId, cancel = () => api.copilotCancel({ requestId }), chatId) => {
     if (jobs.current.has(id) || resolving.current?.vaultId === id) throw new Error("이 보관함의 AI 변경 작업이 끝난 뒤 다시 요청해 주세요.");
     if (!entries.current.has(id)) throw new Error("AI 복구 초안을 확인해 주세요.");
     const notes = new Map([...latest.current.vaults[id].notes, ...readDrafts(id)].map(note => [note.path, note]));
-    jobs.current.set(id, { id: requestId, stopped: false, notes, conflicts: new Set(), cancel });
+    jobs.current.set(id, { id: requestId, chatId, stopped: false, notes, conflicts: new Set(), cancel });
     setRunning([...jobs.current.keys()]);
   };
   const stage = (id, proposal, requestId) => {
@@ -64,10 +64,9 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
         latest.current.onError("미확정 문서가 5개입니다. 기존 변경을 먼저 검토해 주세요.");
         return;
       }
+      let draft;
       try {
-        const draft = previewEdit(proposal, source, disk?.revision ?? null, requestId, previous, active.notes.get(proposal.path));
-        update(id, [...readDrafts(id).filter(d => d.path !== draft.path), draft]);
-        if (!previous) latest.current.onOpen(id, draft.path);
+        draft = previewEdit(proposal, source, disk?.revision ?? null, requestId, previous, active.notes.get(proposal.path));
       } catch (error) {
         active.conflicts.add(proposal.path);
         if (previous) update(id, readDrafts(id).map(d => d.path === proposal.path ? { ...d, conflict: error.message } : d));
@@ -79,7 +78,22 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
           latest.current.onOpen(id, draft.path);
         }
         latest.current.onError(error.message);
+        return;
       }
+      if (previous?.history) draft.history = previous.history;
+      if (active.chatId) {
+        const ref = { chatId: active.chatId, requestId };
+        await invoke(api.copilotHistory({ vaultId: id, action: "change", ...ref, change: {
+          path: draft.path, before: previous?.content ?? source?.content ?? null, after: draft.content, beforeDraft: previous,
+        } }));
+        if (active.stopped || active !== jobs.current.get(id) || active.conflicts.has(draft.path)) return;
+        const current = latest.current.vaults[id]?.notes.find(n => n.path === draft.path);
+        if (current?.content !== source?.content || readDrafts(id).find(d => d.path === draft.path) !== previous)
+          throw new Error("복원 지점 기록 중 문서가 변경되었습니다. 수정안을 다시 요청해 주세요.");
+        if (!draft.history?.some(h => h.requestId === requestId)) draft.history = [...(draft.history ?? []), ref];
+      }
+      update(id, [...readDrafts(id).filter(d => d.path !== draft.path), draft]);
+      if (!previous) latest.current.onOpen(id, draft.path);
     }).catch(error => { if (jobs.current.get(id)?.id === requestId) stop(id); latest.current.onError(error.message); });
     serial.current.set(id, operation);
     return operation;
@@ -102,11 +116,11 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
     catch (error) { latest.current.onError(error.message); }
     return true;
   };
-  const revise = (id, path, content) => {
+  const revise = (id, path, content, ref) => {
     if (!readDrafts(id).some(d => d.path === path)) return false;
     if (jobs.current.has(id) || resolving.current?.vaultId === id)
       throw new Error("이 보관함의 AI 변경 작업이 끝난 뒤 수정안을 적용해 주세요.");
-    update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, aiContent: content } : d));
+    update(id, readDrafts(id).map(d => d.path === path ? { ...d, content, aiContent: content, history: ref ? [...(d.history ?? []), ref] : d.history } : d));
     return true;
   };
   const resolve = (id, path, action) => {
@@ -129,7 +143,10 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
           latest.current.onOpen(id, saved.path);
         } else {
           const args = { ...scope, path, content: draft.content, revision: draft.revision };
+          for (const ref of draft.history ?? []) await invoke(api.copilotHistory({ vaultId: id, ...ref, action: "saving", path }));
+          if (readDrafts(id).find(d => d.path === path) !== draft) throw new Error("저장 중 초안이 변경되었습니다. 다시 확인해 주세요.");
           const saved = await invoke(draft.kind === "create" ? api.createNote(args) : api.saveNote(args));
+          for (const ref of draft.history ?? []) await invoke(api.copilotHistory({ vaultId: id, ...ref, action: "keep", path })).catch(e => latest.current.onError(e.message));
           latest.current.onSaved(id, [saved]);
         }
         update(id, readDrafts(id).filter(d => d.path !== path));
@@ -148,9 +165,17 @@ export default function useCopilotEdits({ api, vaults, onSaved, onOpen, onError 
     forVault: id => ({
       drafts: drafts[id] ?? empty, running: running.includes(id), working: !!id && working === id,
       ready: Object.hasOwn(drafts, id), blocked: () => blocked(id),
-      begin: (requestId, cancel) => begin(id, requestId, cancel),
+      begin: (requestId, cancel, chatId) => begin(id, requestId, cancel, chatId),
+      restoreDrafts: (expected, next) => {
+        const serialized = JSON.stringify(next);
+        if (JSON.stringify(readDrafts(id)) !== JSON.stringify(expected))
+          throw new Error("복원 중 초안이 변경되었습니다. 복원 지점을 다시 확인해 주세요.");
+        if (serialized === JSON.stringify(expected)) return;
+        localStorage.setItem(storageKey(id), serialized);
+        entries.current.set(id, next); setDrafts(old => ({ ...old, [id]: next }));
+      },
       stage: (proposal, requestId) => stage(id, proposal, requestId), finish: requestId => finish(id, requestId),
-      edit: (path, content) => edit(id, path, content), revise: (path, content) => revise(id, path, content),
+      edit: (path, content) => edit(id, path, content), revise: (path, content, ref) => revise(id, path, content, ref),
       stop: () => stop(id), resolve: (path, action) => resolve(id, path, action),
     }),
     close: async () => {

@@ -2202,15 +2202,15 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 
 .copilot-heading-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .copilot-heading-actions { position: relative; display: flex; flex: 1; min-width: 0; justify-content: flex-end; align-items: center; gap: 7px; }
-.copilot-account-menu { position: static; min-width: 0; }
-.copilot-account-menu summary { display: flex; align-items: center; gap: 4px; max-width: 110px; padding: 4px; border-radius: 4px; cursor: pointer; list-style: none; }
-.copilot-account-menu summary::-webkit-details-marker { display: none; }
-.copilot-account-menu summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.copilot-account-menu[open] summary, .copilot-account-menu summary:hover { background: var(--soft); color: var(--accent); }
-.copilot-account-options { position: absolute; top: calc(100% + 5px); right: 0; z-index: 30; width: 180px; padding: 10px; background: white; border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 6px 20px rgb(0 0 0 / 13%); }
-.copilot-account-options p { margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
-.copilot-account-options button { width: 100%; padding: 7px 4px; border-radius: 4px; text-align: left; }
-.copilot-account-options button:hover { background: var(--soft); }
+:is(.copilot-account-menu, .copilot-history-menu) { position: static; min-width: 0; }
+:is(.copilot-account-menu, .copilot-history-menu) summary { display: flex; align-items: center; gap: 4px; max-width: 110px; padding: 4px; border-radius: 4px; cursor: pointer; list-style: none; }
+:is(.copilot-account-menu, .copilot-history-menu) summary::-webkit-details-marker { display: none; }
+:is(.copilot-account-menu, .copilot-history-menu) summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.copilot-account-menu, .copilot-history-menu)[open] summary, :is(.copilot-account-menu, .copilot-history-menu) summary:hover { background: var(--soft); color: var(--accent); }
+:is(.copilot-account-options, .copilot-history-options) { position: absolute; top: calc(100% + 5px); right: 0; z-index: 30; width: 180px; padding: 10px; background: white; border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 6px 20px rgb(0 0 0 / 13%); }
+:is(.copilot-account-options, .copilot-history-options) p { margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
+:is(.copilot-account-options, .copilot-history-options) button { width: 100%; padding: 7px 4px; border-radius: 4px; text-align: left; }
+:is(.copilot-account-options, .copilot-history-options) button:hover { background: var(--soft); }
 .copilot-auth-notice { padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .ai-provider-select { max-width: 105px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--soft); color: inherit; font: inherit; }
 
@@ -2455,3 +2455,12 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
   .ai-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-suggestion .copilot-comparison { grid-template-columns: 1fr; }
 }
+
+.copilot-mention-list { max-height: 10rem; overflow: auto; display: grid; }
+.copilot-mention-list button { text-align: left; overflow-wrap: anywhere; padding: 4px 8px; }
+.copilot-mention-list button[aria-selected="true"] { background: var(--soft); color: var(--accent); }
+.copilot-checkpoint { max-height: 85vh; overflow: auto; }
+.copilot-checkpoint > section { padding: 8px 0; border-top: 1px solid var(--border); }
+.copilot-checkpoint label { display: block; }
+.copilot-restore-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.copilot-restore-diff pre { max-height: 14rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

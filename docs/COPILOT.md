@@ -27,6 +27,16 @@ GitHub Copilot에 직접 연결된 패널의 질문창에 이미지를 붙여 �
 모델을 선택하고 질문을 보내세요. **Ask**와 **Agent**에서는 이미지만 보내도 검토를 요청합니다.
 **Edit**에서는 이미지와 함께 문서에서 수정할 내용을 입력하세요.
 
+## 문서 첨부와 최근 대화
+
+질문창에서 `#문서명`을 입력한 뒤 목록을 클릭하거나 위·아래 키와 Enter로 선택하면 현재 보관함의 참고 문서로 첨부됩니다. Esc로 목록을 닫을 수 있습니다. 한 번에 참고 문서 다섯 개까지 보낼 수 있습니다.
+
+직접 연결 Copilot에서 **⋯ → 최근 대화**를 열면 현재 보관함의 대화를 다시 볼 수 있습니다. 앱을 재시작한 뒤에도 이어서 질문할 수 있습니다. 다시 연 대화는 **Ask · 문서 없음**으로 시작합니다. 이미지 이름은 기록되며, 이미지를 다시 검토하려면 원본을 다시 붙여 넣으세요.
+
+각 사용자 질문의 **복원 지점**을 누르면 해당 질문 직전의 상태와 현재 노트를 비교할 수 있습니다. 해당 질문부터 이후의 Copilot 변경이 대상입니다. 직접 수정했거나 외부에서 변경된 노트는 **현재 내용 유지** 또는 **요청 직전으로 복원**을 선택하세요. 확인하면 대화, 변경된 노트 및 관련 초안이 복원됩니다. 저장된 새 노트는 Dynote 휴지통으로 옮깁니다. MCP 서버 등 외부 서비스에서 실행된 작업은 각 서비스에서 관리합니다.
+
+**⋯ → Skill · MCP 관리**에서 Skill 폴더나 MCP 설정 JSON을 등록합니다. 등록된 경로와 MCP 서버 이름을 확인하고 연결을 해제할 수 있습니다. 설정은 이 PC의 Agent 연결에 적용되며, 해제한 원본 파일은 유지됩니다.
+
 ## Ask and revise
 
 - **문서 없음:** excludes the current note. Explicit attachments and optionally
@@ -62,7 +72,7 @@ Agent mode retains conversation/drafts when switching notes;
 Ask/edit mode clears them. Switching vaults or changing the context scope starts
 a new conversation. Closing the right panel cancels
 its pending operation; pending drafts remain accessible in the center editor.
-Conversations are not restored after reopening.
+Saved direct Copilot conversations are available from the recent conversations menu.
 
 Pending Agent drafts are journalled in local app storage, outside the vault and
 Git, and recovered when the same vault reopens. Resolve them before sending
@@ -88,11 +98,7 @@ the chosen text and dialogue are transmitted to Copilot when sent.
 ## Implementation and verification
 
 `@github/copilot-sdk` is pinned to 1.0.23 with runtime 1.0.100. Its SDK account-flow
-API is currently marked experimental. The runtime runs outside the vault with
-only the four Dynote tools in Agent mode (no tools in Ask/edit), rejected
-generic permission requests, no configuration/skill/hook
-discovery, no host Git context or shared session store. Dynote exposes no
-arbitrary filesystem or command tools to the model.
+API is currently marked experimental. Agent sessions expose the four Dynote note tools and any explicitly registered skills and MCP servers. The selected JSON controls which tools each MCP server exposes. Ask and Edit use the supplied context. The runtime runs outside the vault with automatic configuration discovery disabled.
 The four tools use `skipPermission` because they only read explicitly permitted
 snapshots or stage drafts. Actual note writes still require Keep (Agent) or
 reviewed Apply (Edit), and use the vault's path, exclusive-create and revision checks.
@@ -102,9 +108,7 @@ forcibly disables the OS keychain in `empty` mode. Dynote explicitly sets the
 restricted session defaults and clears installed plugins for both login and
 chat sessions. It still rejects plaintext credential storage.
 
-SDK sessions are temporary and deleted after each request. Dynote holds its
-visible dialogue in memory, and sends that bounded dialogue for subsequent
-questions. A runtime crash can leave temporary SDK files in Dynote's application
+SDK sessions are temporary and deleted after each request. Dynote stores direct-panel conversation history and checkpoint data in the app's local user-data directory, scoped by vault. Subsequent questions use bounded dialogue from the open conversation. A runtime crash can leave temporary SDK files in Dynote's application
 data directory; these are not included in vault Git backups.
 
 `npm run package:mac`, `package:win`, and `package:linux` include the matching SDK
