@@ -6,11 +6,11 @@ import {DOCUMENT_DRAG, TAB_DRAG} from '../core/document-workspace.mjs';
 import {isolateHistory} from '@codemirror/commands';
 import Editor from './Editor.jsx';
 import PaneReadingPosition from './PaneReadingPosition.jsx';
-import {closeSearchPanel,openSearchPanel} from '@codemirror/search';
-import RenderedDocumentFind,{useDocumentFind} from './RenderedDocumentFind.jsx';
+import {closeSearchPanel,findNext,getSearchQuery,openSearchPanel,searchPanelOpen,SearchQuery,setSearchQuery} from '@codemirror/search';
+import RenderedDocumentFind,{DocumentSearchHost,useDocumentFind} from './RenderedDocumentFind.jsx';
 import DiagramPreview from './DiagramPreview.jsx';
 
-function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, onBodyDrop, canMakeDocument, onMakeDocument, captureLocked, edits, limited, disabled, review, children}) {
+function Pane({note, findPanel, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, onBodyDrop, canMakeDocument, onMakeDocument, captureLocked, edits, limited, disabled, review, children}) {
   const [edge,setEdge]=useState(null);
   useEffect(()=>{const clear=()=>setEdge(null);window.addEventListener('dragend',clear);window.addEventListener('drop',clear);return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);};},[]);
   const side=e=>e.clientX < e.currentTarget.getBoundingClientRect().x + e.currentTarget.clientWidth / 2 ? 'left' : 'right';
@@ -23,7 +23,7 @@ function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active
     <div className="pane-header"><div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
       {scopeLabel && <small className="pane-space" title={scopeLabel}>{scopeLabel}</small>}
       <span title={note.path}>{note.path}</span>
-    </span><div className="pane-heading-actions">{canMakeDocument?.(note,vault.id)&&<button className="make-document-button" disabled={disabled||captureLocked} onClick={()=>onMakeDocument(note,vault.id)}>문서로 만들기</button>}<button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div></div>{review}<div className="document-search-host" ref={searchHost}>{renderedFind}</div></div>
+    </span><div className="pane-heading-actions">{canMakeDocument?.(note,vault.id)&&<button className="make-document-button" disabled={disabled||captureLocked} onClick={()=>onMakeDocument(note,vault.id)}>문서로 만들기</button>}<button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div></div>{review}{findPanel}</div>
     <div className={`document-content ${mode}`}>{children}</div>
     {edge&&<div className={`pane-drop-target ${edge}`} aria-live="polite">{edge==='link'?'링크 삽입':`${edge==='left'?'왼쪽':'오른쪽'}에 문서 열기`}</div>}
   </section>;
@@ -40,22 +40,52 @@ function DocumentPane(props) {
   };
   const [findMode,setFindMode]=useState(null);
   const renderedOpen=active && mode===findMode;
-  useEffect(()=>{setFindMode(null);},[active,mode]);
-  useDocumentFind(searchHost,active,target=>{
-    const input=searchHost.current.querySelector('.rendered-find input[name=search]');
-    if(input && searchHost.current.contains(target)){input.focus();input.select();return;}
-    if(mode==='read'||(mode==='split' && preview.current?.contains(target))){
-      if(editor.current)closeSearchPanel(editor.current);
-      setFindMode(mode);
-      if(input){input.focus();input.select();}
-    }else if(editor.current){
+  const previewQuery = useRef(null);
+  useEffect(()=>{
+    setFindMode(null);
+    if(editor.current)closeSearchPanel(editor.current);
+  },[active,mode]);
+  function closeFind() {
+    if(renderedOpen) {
       setFindMode(null);
-      openSearchPanel(editor.current);
+      preview.current?.focus({preventScroll:true});
+    } else if(editor.current) {
+      closeSearchPanel(editor.current);
+      editor.current.focus();
     }
+  }
+  function openFind(scope) {
+    const view = editor.current;
+    if(mode==='split') readingPreview.current = scope==='preview';
+    if(scope==='preview' && !renderedOpen) {
+      previewQuery.current = view && searchPanelOpen(view.state) ? getSearchQuery(view.state) : new SearchQuery({search:""});
+      if(view)closeSearchPanel(view);
+      setFindMode(mode);
+    } else if(scope==='editor' && view) {
+      setFindMode(null);
+      openSearchPanel(view);
+      if(renderedOpen && previewQuery.current) {
+        view.dispatch({effects:setSearchQuery.of(previewQuery.current)});
+        if(previewQuery.current.valid)findNext(view);
+      }
+    }
+    const field = searchHost.current.querySelector(scope==='editor' ? '.cm-panels input[name=search]' : '.rendered-find input[name=search]');
+    if(field){field.focus({preventScroll:true});field.select();}
+  }
+  useDocumentFind(searchHost,active,target=>{
+    if(searchHost.current.contains(target)) {
+      const field = searchHost.current.querySelector('input[name=search]');
+      if(field){field.focus({preventScroll:true});field.select();return;}
+    }
+    const onPreview = preview.current?.contains(target) ||
+      (!target.closest('.code-editor') && readingPreview.current);
+    openFind(mode==='read' || (mode==='split' && onPreview) ? 'preview' : 'editor');
   });
-  const renderedFind=renderedOpen && <RenderedDocumentFind target={preview} onClose={()=>{
-    setFindMode(null);preview.current?.focus({preventScroll:true});
-  }}/>;
+  const findPanel = <DocumentSearchHost host={searchHost} scope={mode==='split' && (renderedOpen?'preview':'editor')}
+    onScope={openFind} onClose={closeFind}>
+    {renderedOpen && <RenderedDocumentFind target={preview} initialQuery={previewQuery.current}
+      onQueryChange={value=>{previewQuery.current=value;}} onClose={closeFind}/>}
+  </DocumentSearchHost>;
   const [compare,setCompare]=useState(false);
   const context=()=>onContext(editor.current,preview.current,selection.current);
   const focus=()=>{if(!disabled){onFocus();context();}};
@@ -83,7 +113,7 @@ function DocumentPane(props) {
     }else onChange(note.path,note.content+(note.content.endsWith('\n\n')?'':note.content.endsWith('\n')?'\n':'\n\n')+text+'\n',vault.id);
     props.onTabLinkInserted(key,{x:event.clientX,y:event.clientY});
   };
-  return <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={searchHost} editor={editor} preview={preview}><Pane {...props} searchHost={searchHost} renderedFind={renderedFind} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+  return <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={searchHost} editor={editor} preview={preview}><Pane {...props} findPanel={findPanel} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
       {pending.userEdited&&<p>직접 편집한 내용이 포함되어 있습니다. 유지하거나 복구본을 저장해 주세요.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>

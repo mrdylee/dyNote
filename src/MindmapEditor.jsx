@@ -2,7 +2,7 @@ import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ReactFlow,Background,Controls,Handle,Position,applyNodeChanges} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {parseMindmap,editMindmap} from '../core/mindmap.mjs';
-import RenderedDocumentFind,{useDocumentFind} from './RenderedDocumentFind.jsx';
+import RenderedDocumentFind,{DocumentSearchHost,useDocumentFind} from './RenderedDocumentFind.jsx';
 function MindNode({data}) {
   return <div className="mindmap-node"><Handle type="target" position={Position.Left}/><span>{data.text.replace(/<br\s*\/?\s*>/g,'\n')}</span><Handle type="source" position={Position.Right}/></div>;
 }
@@ -36,6 +36,9 @@ export default function MindmapEditor({note,onChange,onConvert,onMarkdown,readOn
     const input=searchHost.current.querySelector('input[name=search]');
     if(input){input.focus();input.select();}
   });
+  const closeFind=()=>{
+    setSearching(false);searchHost.current.parentElement.focus({preventScroll:true});
+  };
   const revealNode=useCallback(id=>{
     flow.current?.fitView({nodes:[{id}],maxZoom:1});
   },[]);
@@ -56,11 +59,9 @@ export default function MindmapEditor({note,onChange,onConvert,onMarkdown,readOn
   if(parsed.error)return <section className="mindmap-error"><p role="alert">마인드맵을 읽을 수 없습니다: {parsed.error}</p><button onClick={onMarkdown}>Markdown으로 열기</button></section>;
   const model=parsed.model;
   return <section className="mindmap-editor" tabIndex={-1} aria-label="마인드맵 편집기">
-    <div className="document-search-host" ref={searchHost}>
-      {searching&&<RenderedDocumentFind target={stage} revealNode={revealNode} onClose={()=>{
-        setSearching(false);searchHost.current.parentElement.focus({preventScroll:true});
-      }}/>}
-    </div>
+    <DocumentSearchHost host={searchHost} onClose={closeFind}>
+      {searching&&<RenderedDocumentFind target={stage} revealNode={revealNode} onClose={closeFind}/>}
+    </DocumentSearchHost>
     <div className="mindmap-toolbar">
       <button disabled={readOnly||!history.past.length} onClick={()=>travel(true)}>실행 취소</button><button disabled={readOnly||!history.future.length} onClick={()=>travel(false)}>다시 실행</button>
       <button disabled={readOnly||!selectedNode} onClick={()=>commit('add-child','새 생각')}>자식 노드 추가</button><button disabled={readOnly||!selectedNode} onClick={()=>commit('add-sibling','새 생각')}>형제 노드 추가</button>

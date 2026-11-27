@@ -7,7 +7,7 @@ import { join } from "node:path";
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
 const fixture = await mkdtemp(join(tmpdir(), "dynote-markdown-find-"));
 const profile = join(fixture, "profile"), vault = join(fixture, "vault");
-const content = "> [!note] alpha\n> beta\n\n$$x+y$$\n\n# Map\n- Needle\n- needle\n- Needles\n- Ne**ed**le\n";
+const content = "> [!note] alpha\n> beta\n\n$$x+y$$\n\n# Map\n- Needle\n- needle\n- Needles\n- Ne**ed**le\n" + "\n일반 문단\n".repeat(100) + "\n아래쪽 **검색** 결과\n\n[참고](https://example.com/source-only-target)\n";
 let app;
 try {
   await mkdir(profile); await mkdir(vault);
@@ -22,23 +22,34 @@ try {
   await page.locator('.file-row[title="Home.md"]').click();
   const mode = name => page.getByRole("button", { name, exact: true }).click();
   const input = page.getByRole("textbox", { name: "문서에서 찾기" });
+  const options = page.getByRole("button", { name: "검색 옵션" });
+  const showOptions = async () => {
+    if (await options.getAttribute("aria-expanded") === "false") await options.click();
+  };
   const option = name => page.getByRole("checkbox", { name, exact: true });
   const find = async () => {
     await page.keyboard.press("Control+f");
     await input.waitFor();
     assert.equal(await input.evaluate(el => document.activeElement === el), true);
     const aligned = await input.evaluate(el => {
-      const panel = el.closest(".cm-search").getBoundingClientRect();
+      const panel = el.closest(".document-search-host").getBoundingClientRect();
       const pane = el.closest(".document-pane, .mindmap-editor").getBoundingClientRect();
       return panel.left >= pane.left && pane.right - panel.right >= 0 && pane.right - panel.right <= 24 &&
-        panel.top >= pane.top && panel.top - pane.top < 60 && el.offsetHeight >= 36;
+        panel.top >= pane.top && panel.top - pane.top < 60 && el.offsetHeight <= 28 && panel.width <= 321;
     });
-    assert.ok(aligned, "Search field is enlarged and anchored at the upper right of the active view");
+    assert.ok(aligned, "Search field is compact and anchored at the upper right of the active view");
   };
   const count = async n => page.waitForFunction(n => CSS.highlights.get("note-find")?.size === n, n);
   for (const name of ["Live Preview", "편집 보기", "분할 보기"]) {
     await mode(name);
     await find();
+    if (name === "편집 보기") {
+      await showOptions();
+      await page.getByRole("textbox", { name: "바꿀 내용" }).waitFor();
+      await options.click();
+      assert.equal(await page.getByRole("textbox", { name: "바꿀 내용" }).count(), 0);
+    }
+    await input.selectText();
     await input.pressSequentially("Needle");
     await page.waitForFunction(() => document.querySelectorAll(".cm-searchMatch").length === 3);
     await input.press("Escape");
@@ -49,6 +60,7 @@ try {
     await find();
     await input.fill("Needle");
     await count(4);
+    await showOptions();
     await option("대소문자 구분").check(); await count(3);
     await option("단어 단위").check(); await count(2);
     await option("정규식").check();
@@ -58,10 +70,35 @@ try {
     await input.press("Shift+Enter");
     assert.equal(await page.locator(".rendered-find [role=status]").innerText(), "1 / 2");
     if (name === "분할 보기") {
+      await page.getByRole("button", { name: "작성", exact: true }).click();
+      assert.equal(await input.inputValue(), "Ne.dle");
+      assert.ok(await option("정규식").isChecked());
+      assert.equal(await page.locator(".rendered-find").count(), 0);
+      await page.getByRole("button", { name: "미리보기", exact: true }).click();
+      assert.equal(await input.inputValue(), "Ne.dle");
+      await count(2);
+      await input.fill("아래쪽 검색 결과");
+      await count(1);
+      await page.waitForFunction(() => {
+        const range = [...(CSS.highlights.get("note-find-current") ?? [])][0];
+        if (range?.toString() !== "아래쪽 검색 결과") return false;
+        const rect = range.getBoundingClientRect();
+        return !!document.elementFromPoint(rect.x + 2, rect.y + rect.height / 2)?.closest(".markdown-preview");
+      });
       await page.locator(".cm-content").focus();
       await find();
       assert.equal(await page.locator(".rendered-find").count(), 0);
       assert.equal(await page.locator(".cm-search").count(), 1);
+      await page.locator(".document-pane").evaluate(pane => { pane.scrollTop = 0; });
+      await input.selectText();
+      await input.pressSequentially("source-only-target");
+      await input.press("Enter");
+      await page.waitForFunction(() => {
+        const match = document.querySelector(".cm-searchMatch-selected");
+        if (match?.textContent !== "source-only-target") return false;
+        const rect = match.getBoundingClientRect();
+        return !!document.elementFromPoint(rect.x + 2, rect.y + rect.height / 2)?.closest(".cm-content");
+      });
     }
     await input.press("Escape");
     assert.equal(await page.locator(".cm-search").count(), 0);
@@ -71,6 +108,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".mindmap-node").length === 1);
   await find();
   await input.fill("Needle"); await count(3);
+  await showOptions();
   await option("대소문자 구분").check(); await count(2);
   await option("단어 단위").check(); await count(1);
   await option("정규식").check(); await input.fill("Ne.dle"); await count(1);

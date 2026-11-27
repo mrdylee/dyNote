@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { Text } from "@codemirror/state";
 import { SearchQuery } from "@codemirror/search";
 
@@ -18,6 +19,24 @@ export function useDocumentFind(anchor, active, open) {
     workspace.addEventListener("keydown", keydown, true);
     return () => workspace.removeEventListener("keydown", keydown, true);
   }, [anchor, active]);
+}
+
+export function DocumentSearchHost({ host, scope, onScope, onClose, children }) {
+  const [expanded, setExpanded] = useState(false);
+  return <div ref={host} className={`document-search-host${expanded ? " find-expanded" : ""}`}>
+    {children}
+    <div className="find-controls" onKeyDown={event => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); }
+    }}>
+      <button className="find-options" type="button" aria-label="검색 옵션" title="검색 옵션"
+        aria-expanded={expanded} onClick={() => setExpanded(!expanded)}><SlidersHorizontal size={15}/></button>
+      {scope && <div className="find-scope" role="group" aria-label="검색 대상">
+        {[["editor", "작성"], ["preview", "미리보기"]].map(([value, label]) =>
+          <button key={value} type="button" aria-pressed={scope === value}
+            onClick={() => onScope(value)}>{label}</button>)}
+      </div>}
+    </div>
+  </div>;
 }
 
 // Inline formatting can split a single match across several DOM text nodes.
@@ -66,9 +85,14 @@ function findRanges(root, query, mindmap) {
   return ranges;
 }
 
-export default function RenderedDocumentFind({ target, onClose, revealNode }) {
-  const [search, setSearch] = useState("");
-  const [options, setOptions] = useState({ caseSensitive: false, wholeWord: false, regexp: false });
+export default function RenderedDocumentFind({ target, onClose, revealNode, initialQuery, onQueryChange }) {
+  const [query, setQuery] = useState(() => initialQuery ?? new SearchQuery({ search: "" }));
+  const { search } = query;
+  function change(values) {
+    const next = new SearchQuery({ ...query, ...values });
+    setQuery(next);
+    onQueryChange?.(next);
+  }
   const [ranges, setRanges] = useState([]);
   const [index, setIndex] = useState(0);
   const input = useRef(null);
@@ -76,7 +100,6 @@ export default function RenderedDocumentFind({ target, onClose, revealNode }) {
   useEffect(() => {
     const root = revealNode ? target.current?.querySelector(".react-flow__nodes") : target.current;
     if (!root) return;
-    const query = new SearchQuery({ search, ...options });
     function refresh() {
       const matches = findRanges(root, query, !!revealNode);
       const highlight = new Highlight();
@@ -89,7 +112,7 @@ export default function RenderedDocumentFind({ target, onClose, revealNode }) {
     const observer = new MutationObserver(refresh);
     observer.observe(root, { subtree: true, childList: true, characterData: true });
     return () => { observer.disconnect(); CSS.highlights.delete("note-find"); };
-  }, [target, search, options, revealNode]);
+  }, [target, query, revealNode]);
   useEffect(() => {
     const range = ranges[index];
     if (!range) return;
@@ -100,7 +123,7 @@ export default function RenderedDocumentFind({ target, onClose, revealNode }) {
     else {
       const pane = target.current.closest(".document-pane");
       const rect = range.getBoundingClientRect(), bounds = pane.getBoundingClientRect();
-      const panel = input.current.closest(".cm-search").getBoundingClientRect();
+      const panel = input.current.closest(".pane-header").getBoundingClientRect();
       if (rect.top < panel.bottom || rect.bottom > bounds.bottom) {
         pane.scrollTop += rect.top - (panel.bottom + bounds.bottom) / 2;
       }
@@ -118,12 +141,12 @@ export default function RenderedDocumentFind({ target, onClose, revealNode }) {
       }
     }}>
     <input ref={input} className="cm-textfield" name="search" aria-label="문서에서 찾기" placeholder="문서에서 찾기"
-      value={search} onChange={e => setSearch(e.target.value)}/>
+      value={search} onChange={e => change({ search: e.target.value })}/>
     <button type="button" name="close" aria-label="닫기" onClick={onClose}>×</button>
-    <button type="button" disabled={!ranges.length} onClick={() => move(1)}>다음</button>
-    <button type="button" disabled={!ranges.length} onClick={() => move(-1)}>이전</button>
     {search && <span role="status">{ranges.length ? `${index + 1} / ${ranges.length}` : "결과 없음"}</span>}
+    <button type="button" name="prev" disabled={!ranges.length} onClick={() => move(-1)}>이전</button>
+    <button type="button" name="next" disabled={!ranges.length} onClick={() => move(1)}>다음</button>
     {[["caseSensitive","대소문자 구분"],["regexp","정규식"],["wholeWord","단어 단위"]].map(([key,label]) =>
-      <label key={key}><input type="checkbox" checked={options[key]} onChange={e => setOptions({ ...options, [key]: e.target.checked })}/>{label}</label>)}
+      <label key={key}><input type="checkbox" checked={query[key]} onChange={e => change({ [key]: e.target.checked })}/>{label}</label>)}
   </div>;
 }
