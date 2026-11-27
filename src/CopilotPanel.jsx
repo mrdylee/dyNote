@@ -1,3 +1,4 @@
+import { prepareCaptureImage } from "./planner-image.mjs";
 import { sendBlock } from "../core/copilot-send-state.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, GitBranch, Plus, RefreshCw, Square, Sparkles, Paperclip, ChevronDown } from "lucide-react";
@@ -41,11 +42,16 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const [review, setReview] = useState(null);
   const [applying, setApplying] = useState(false);
   const [progress, setProgress] = useState([]);
+  const [attachment, setAttachment] = useState(null);
   const [references, setReferences] = useState([]);
   const [attachmentSearch, setAttachmentSearch] = useState("");
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [vaultAccess, setVaultAccess] = useState(false);
   const pending = useRef(null), transcript = useRef(null), mounted = useRef(true), loginPending = useRef(false);
+  const editPrompt = text => {
+    if (pending.current) pending.current.promptEdited = true;
+    setPrompt(text);
+  };
   const previousPath = useRef(note?.path);
   const latest = useRef(null);
   latest.current = { note, notes, vaultId, onApply, busy, liveEdits, onBeginLive };
@@ -64,8 +70,8 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         setMessages((old) => old.map((m) => m.id === request.requestId ? { ...m, content: event.content, complete: event.type === "done" } : m));
       }
       if (event.type === "done") {
+        if (request.image) setAttachment(null);
         if (request.mode === "edit") setProposals([{ id: request.requestId, kind: "edit", path: request.target.path, target: request.target, content: event.content }]);
-        setPrompt((text) => text === request.inputPrompt ? "" : text);
       }
       if (event.type === "tool") setProgress((old) => [...old, event.message].slice(-24));
       if (event.type === "proposal") {
@@ -79,7 +85,10 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       if (event.type === "canceled") setError("응답을 중지했습니다. 질문을 수정해 다시 보낼 수 있습니다.");
       if (["done", "error", "canceled"].includes(event.type)) {
         if (request.mode === "agent") latest.current.liveEdits.finish(request.requestId);
-        if (event.type !== "done") { setProposals([]); setReview(null); }
+        if (event.type !== "done") {
+          if (!request.promptEdited) setPrompt(request.inputPrompt);
+          setProposals([]); setReview(null);
+        }
         pending.current = null;
         setRunning(false);
       }
@@ -98,9 +107,10 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   useEffect(() => {
     if (previousPath.current === note?.path) return;
     previousPath.current = note?.path;
-    if (mode === "agent") return;
+    if (mode === "agent" || (provider === "copilot" && mode === "chat" && scope === "none")) return;
     if (pending.current) ai.cancel({ requestId: pending.current.requestId }).catch(() => {});
     pending.current = null;
+    setAttachment(null);
     setRunning(false); setMessages([]); setProposals([]); setReview(null); setError("");
   }, [note?.path]);
   useEffect(() => {
@@ -121,11 +131,28 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     catch (e) { loginPending.current = false; setAuth({ phase: "error", message: e.message }); }
   };
   const independent = provider === "copilot";
+  const pasteImage = async event => {
+    const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    if (running || pending.current) { setError("현재 응답이 끝난 뒤 이미지를 붙여 넣어 주세요."); return; }
+    if (files.length > 1 || attachment) { setError("이미지는 한 장씩 첨부할 수 있습니다. 교체하려면 기존 이미지를 제거해 주세요."); return; }
+    const draft = { name: files[0].name || "클립보드 이미지" };
+    setError("");
+    setAttachment(draft);
+    try {
+      const image = await prepareCaptureImage(files[0]);
+      setAttachment(current => current === draft ? { ...draft, image } : current);
+    } catch (e) {
+      setAttachment(current => current === draft ? { ...draft, error: e.message } : current);
+    }
+  };
+  const outgoingPrompt = attachment && mode !== "edit" && !prompt.trim() ? "첨부한 이미지를 검토해 주세요." : prompt;
   const otherChatRunning = Object.keys(session.activeChats).some(id => id !== String(vaultId));
   const effectiveScope = independent && !note && mode !== "edit" ? "none" : scope;
   const otherWork = independent ? mode === "agent" && (liveEdits.running || liveEdits.working)
     : liveEdits.running || liveEdits.working || session.activity.planner || otherChatRunning;
-  const blockedSend = sendBlock({ connection, model, prompt, checking, authBusy, busy: busy || otherWork, applying, running, label,
+  const blockedSend = sendBlock({ connection, model, prompt: outgoingPrompt, attachment, checking, authBusy, busy: busy || otherWork, applying, running, label,
     vaultId, note, scope: effectiveScope, selection, mode, ready: liveEdits.ready, blocked: liveEdits.blocked() });
   const canSend = !blockedSend;
   const send = async (event) => {
@@ -141,9 +168,9 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         return { path, content: found.content };
       });
       const drafts = mode === "agent" ? latest.current.liveEdits.drafts.map(({ path, content }) => ({ path, content })) : [];
-      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
+      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt: outgoingPrompt, image: attachment?.image, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
-      const request = { ...args, target, inputPrompt: prompt };
+      const request = { ...args, target, inputPrompt: prompt, promptEdited: false };
       pending.current = request;
       if (mode === "agent") await latest.current.onBeginLive(requestId, () => ai.cancel({ requestId }));
       if (!mounted.current) { latest.current.liveEdits.stop(); await latest.current.liveEdits.finish(requestId); return; }
@@ -155,10 +182,17 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         return;
       }
       setMessages((old) => [...old,
-        { id: `${requestId}-user`, role: "user", content: args.prompt, complete: true, mode },
+        { id: `${requestId}-user`, role: "user", content: args.prompt, imageName: attachment?.name, complete: true, mode },
         { id: requestId, role: "assistant", content: "", complete: false, mode },
       ]);
-      await invoke(ai.send(args));
+      if (!request.promptEdited) setPrompt("");
+      try { await invoke(ai.send(args)); }
+      catch (e) {
+        if (pending.current !== request) return;
+        setMessages(old => old.filter(message => message.id !== requestId && message.id !== `${requestId}-user`));
+        if (!request.promptEdited) setPrompt(prompt);
+        throw e;
+      }
     } catch (e) {
       if (pending.current?.mode === "agent") latest.current.liveEdits.finish(pending.current.requestId);
       pending.current = null; setRunning(false); setError(e.message);
@@ -213,7 +247,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
           </div>
         </details>
         <button type="button" title="연결 상태 확인" aria-label={`${label} 연결 상태 확인`} disabled={checking || running || applying || authBusy} onClick={refresh}><RefreshCw size={14} className={checking ? "spin" : ""}/></button>
-        <button type="button" title="새 대화" aria-label={`${label} 새 대화`} disabled={running || applying} onClick={newConversation}><Plus size={14}/></button>
+        <button type="button" title="새 대화" aria-label={`${label} 새 대화`} disabled={running || applying} onClick={() => { setAttachment(null); newConversation(); }}><Plus size={14}/></button>
       </div>
     </div>
     {auth && (authBusy || auth.phase === "error") && <div className="copilot-auth-notice">
@@ -222,10 +256,11 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     </div>}
     <div className="copilot-transcript" ref={transcript} role="log" aria-label={`${label} 대화`}>
       {!messages.length && <div className="copilot-empty"><Sparkles size={24} /><h3>생각을 더 선명하게</h3><p>내용을 요약하거나, 문장을 다듬거나,<br />시험 항목을 체크리스트로 정리해 보세요.</p>
-        <div className="copilot-suggestions">{(mode === "agent" ? ["현재 문서에 실행할 일 체크리스트를 추가해 줘", "현재 문서를 참고해서 새 요약 문서를 만들어 줘"] : ["핵심 내용을 요약해 줘", "실행할 일을 체크리스트로 정리해 줘"]).map((text) => <button key={text} onClick={() => setPrompt(text)}>{text}</button>)}</div>
+        <div className="copilot-suggestions">{(mode === "agent" ? ["현재 문서에 실행할 일 체크리스트를 추가해 줘", "현재 문서를 참고해서 새 요약 문서를 만들어 줘"] : ["핵심 내용을 요약해 줘", "실행할 일을 체크리스트로 정리해 줘"]).map((text) => <button key={text} onClick={() => editPrompt(text)}>{text}</button>)}</div>
       </div>}
       {messages.map((m) => <article className={`copilot-message ${m.role}`} key={m.id}>
         <strong>{m.role === "user" ? "나" : m.mode === "edit" ? `${label} · 수정안` : label}</strong>
+        {m.imageName && <small className="copilot-sent-image"><Paperclip size={12} />{m.imageName}</small>}
         {m.role === "assistant" && m.content ? <DiagramPreview className="copilot-message-content markdown-answer" html={answerHtml(m.content)} renderDiagrams={m.complete} />
           : <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>}
       </article>)}
@@ -250,6 +285,10 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       <div className="copilot-attachments">
         <button type="button" disabled={running || applying} onClick={() => setAttachmentsOpen(!attachmentsOpen)}><Paperclip size={12} />참고 문서 {references.length}/5</button>
         {references.map((path) => <button type="button" className="attachment-chip" key={path} disabled={running} title="첨부 제거" onClick={() => setReferences((old) => old.filter((p) => p !== path))}>{path} ×</button>)}
+        {attachment && <button type="button" disabled={running} aria-label="첨부 이미지 제거" title="첨부 이미지 제거" onClick={() => { setAttachment(null); setError(""); }}>
+          {attachment.image && <img className="copilot-image-preview" alt="첨부 이미지 미리보기" src={`data:${attachment.image.mimeType};base64,${attachment.image.data}`} />}
+          {attachment.name} ×
+        </button>}
         {attachmentsOpen && <div className="copilot-attachment-picker">
           <input aria-label="참고 문서 검색" placeholder="문서 이름 검색" value={attachmentSearch} onChange={(e) => setAttachmentSearch(e.target.value)} />
           <div>{notes.filter((n) => n.path !== note?.path && !references.includes(n.path) && n.path.toLocaleLowerCase().includes(attachmentSearch.toLocaleLowerCase())).slice(0, 100).map((n) => <button type="button" disabled={references.length >= 5 || running} key={n.path} onClick={() => { setReferences((old) => [...old, n.path]); setAttachmentsOpen(false); }}>{n.path}</button>)}</div>
@@ -258,7 +297,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 {label}에 전송됩니다.</small>}
       </div>
       <div className="copilot-input-box">
-        <textarea aria-label={`${label} 질문`} placeholder={`${label}에게 물어보세요…`} rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)}
+        <textarea aria-label={`${label} 질문`} placeholder={independent ? "질문을 입력하거나 이미지를 붙여 넣으세요…" : `${label}에게 물어보세요…`} onPaste={independent ? pasteImage : undefined} rows={3} value={prompt} onChange={(e) => editPrompt(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) send(); } }} />
         <div className="copilot-send-row">
           <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>
@@ -266,7 +305,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
           </select>
         {connection.authenticated && <label className="copilot-model"><select aria-label={`${label} 모델`} value={model} title="모델 선택" disabled={running || checking || (!independent && session.activity.planner)} onChange={(e) => setModel(e.target.value)}>
           <option value="">{connection.models.length ? "모델을 선택해 주세요" : "사용 가능한 모델 확인 필요"}</option>
-          {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {connection.models.map((m) => <option key={m.id} value={m.id}>{m.name}{attachment && m.vision ? " · 이미지 지원" : ""}</option>)}
         </select></label>}
           {running ? <button type="button" aria-label={`${label} 응답 중지`} onClick={stop}><Square size={15} />중지</button>
             : <button type="submit" className="primary-button" aria-label={`${label} 보내기`} aria-describedby="copilot-send-status" title={blockedSend?.message || "현재 전달 범위로 질문 보내기"} disabled={!canSend}><ArrowUp size={16} /></button>}

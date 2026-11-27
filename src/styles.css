@@ -971,6 +971,8 @@ kbd {
 .copilot-progress ul { padding-left: 18px; line-height: 1.8; }
 .copilot-attachments { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
 .copilot-attachments > button { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 5px; background: white; padding: 5px 7px; font-size: 10px; max-width: 100%; overflow-wrap: anywhere; }
+.copilot-image-preview { width: 48px; height: 36px; object-fit: contain; }
+.copilot-sent-image { display: flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
 .copilot-attachments small { width: 100%; color: var(--muted); font-size: 10px; }
 .copilot-vault-access { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--muted); font-size: 10px; }
 .copilot-attachment-picker { width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: white; }
@@ -2387,11 +2389,71 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .selection-format-menu button:first-child { font-weight: bold; }
 .selection-format-menu button[aria-label="선택 노란 형광펜"] { border-bottom: 3px solid #ffe58a; }
 
-.ai-suggestion { width: min(620px, calc(100vw - 40px)); max-height: 80vh; overflow: auto; box-sizing: border-box; padding: 18px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); }
-.ai-suggestion::backdrop { background: rgb(0 0 0 / 24%); }
-.ai-suggestion h2 { margin: 0; font-size: 18px; }
+.ai-suggestion {
+  width: min(624px, calc(100vw - 32px)); max-height: calc(100dvh - 48px);
+  padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 16px;
+  color: var(--text); background: var(--surface); box-shadow: 0 20px 72px rgb(0 0 0 / 18%);
+}
+.ai-suggestion[open] { display: flex; flex-direction: column; }
+.ai-suggestion::backdrop { background: color-mix(in srgb, var(--text) 24%, transparent); }
+.ai-heading, .ai-suggestion footer { display: flex; align-items: center; gap: 10px; flex: none; padding: 16px 24px; }
+.ai-heading { justify-content: space-between; border-bottom: 1px solid var(--border); }
+.ai-heading h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.ai-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 11px; background: var(--accent-soft); color: var(--accent-ink); }
+.ai-model-field { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.ai-model-field span { position: relative; }
+.ai-model-field svg { position: absolute; right: 10px; top: 50%; translate: 0 -50%; pointer-events: none; }
+.ai-model-field select {
+  appearance: none; max-width: min(210px, 34vw); padding: 7px 30px 7px 12px; text-overflow: ellipsis;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; cursor: pointer;
+}
+.ai-model-field select:hover:enabled { border-color: var(--accent-line); }
+.ai-body { display: grid; gap: 18px; padding: 22px 24px; overflow-y: auto; min-height: 0; }
+.ai-suggestion .copilot-comparison { gap: 10px; }
 .ai-suggestion .copilot-comparison:has(section:only-child) { grid-template-columns: 1fr; }
-.ai-suggestion label { display: inline-flex; align-items: center; gap: 6px; margin: 4px 12px 4px 0; }
-.ai-suggestion footer { display: flex; justify-content: flex-end; gap: 8px; }
-.ai-suggestion .ai-custom-prompt { display: flex; }
-.ai-custom-prompt input { flex: 1; min-width: 0; padding: 5px; }
+.ai-suggestion .copilot-comparison section { padding: 12px 15px; border-left: 3px solid var(--border); border-radius: 0 8px 8px 0; background: var(--soft); }
+.ai-suggestion section.ai-result { border-color: var(--accent); background: var(--accent-soft); }
+.ai-suggestion .copilot-comparison h3 { margin: 0 0 5px; color: var(--muted); font-size: 11px; }
+.ai-suggestion .ai-result h3 { color: var(--accent-ink); }
+.ai-suggestion .copilot-comparison pre { margin: 0; padding: 0; max-height: 23vh; background: transparent; font: inherit; line-height: 1.6; }
+.ai-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ai-actions legend, .ai-field { font-size: 12px; font-weight: 600; }
+.ai-actions legend { margin-bottom: 8px; padding: 0; }
+.ai-actions label {
+  display: grid; gap: 8px; position: relative; padding: 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface); font-weight: 500; line-height: 1.3;
+}
+.ai-actions label > svg { color: var(--muted); }
+.ai-actions input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ai-actions label:has(input:enabled):hover { background: var(--soft); border-color: var(--accent-line); }
+.ai-actions label:has(input:checked) { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+.ai-actions label:has(:checked) svg { color: var(--accent-ink); }
+.ai-choice-check { position: absolute; top: 10px; right: 10px; pointer-events: none; }
+.ai-actions label:has(:disabled):not(:has(:checked)) { color: var(--muted); background: var(--panel); }
+.ai-actions input:disabled { cursor: default; }
+.ai-actions label:has(:focus-visible), .ai-model-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-field { display: grid; gap: 8px; }
+.ai-suggestion p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ai-suggestion [role="alert"], .ai-suggestion [role="status"] { padding: 8px 12px; border-radius: 7px; color: var(--text); background: var(--soft); }
+.ai-field textarea, .copilot-send-row .copilot-model select,
+.conversation-document select[aria-label="AI 모델"], .planner .planner-ai-controls select {
+  min-width: 0; border: 1px solid var(--accent-line); border-radius: 8px;
+  background-color: var(--panel); color: var(--text); padding: 7px 10px; font: inherit;
+}
+.ai-field textarea { resize: vertical; padding: 10px 12px; font-size: 13px; font-weight: 400; line-height: 1.6; }
+.copilot-send-row .copilot-model select, .conversation-document select[aria-label="AI 모델"],
+.planner .planner-ai-controls select { cursor: pointer; }
+.ai-field :focus-visible, .copilot-model select:focus-visible, .conversation-document select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.copilot-send-row .copilot-model select { padding: 4px 6px; font-size: 11px; }
+.ai-suggestion footer { border-top: 1px solid var(--border); background: var(--panel); padding-block: 13px; }
+.ai-suggestion footer button { font-size: 12px; border-radius: 8px; }
+.ai-close { margin-right: auto; padding: 8px; color: var(--muted); }
+.ai-close:hover { background: var(--soft); color: var(--text); }
+@media (max-width: 500px) {
+  .ai-heading, .ai-suggestion footer, .ai-body { padding-inline: 16px; }
+  .ai-model-field { flex-direction: column; align-items: flex-end; gap: 3px; }
+  .ai-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-suggestion .copilot-comparison { grid-template-columns: 1fr; }
+}

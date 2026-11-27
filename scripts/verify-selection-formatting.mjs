@@ -8,7 +8,7 @@ const { _electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "play
 const root = await mkdtemp(path.join(tmpdir(), "dynote-format-"));
 const profile = path.join(root, "profile"), vault = path.join(root, "vault");
 const file = path.join(vault, "서식.md");
-const original = "# 회의록\n\n- [ ] 확인할 항목\n\n여기서 단어만 확대\n\n반복 색상\n\n추가 검토 예정\n\n[[서식|기본 링크]] · <span style=\"background-color:#ffe58a\">[[서식|강조 링크]]</span>\n";
+const original = "# 회의록\n\n- [ ] 확인할 항목\n\n여기서 단어만 확대\n   \n반복 색상\n\n추가 검토 예정\n\n[[서식|기본 링크]] · <span style=\"background-color:#ffe58a\">[[서식|강조 링크]]</span>\n";
 const modifier = process.platform === "darwin" ? "Meta" : "Control";
 let app, page;
 const errors = [];
@@ -31,12 +31,12 @@ async function select(text, caretOnly = false) {
   }, { text, caretOnly });
 }
 
-async function chooseContextFormat(word, action, expectAbsent = false) {
-  const point = await page.locator(".cm-content").evaluate((el, target) => {
+async function chooseContextFormat(word, action, expectAbsent = false, offset = 0) {
+  const point = await page.locator(".cm-content").evaluate((el, { word, offset }) => {
     const view = el.cmTile.root.view;
-    const rect = view.coordsAtPos(view.state.doc.toString().indexOf(target));
+    const rect = view.coordsAtPos(view.state.doc.toString().indexOf(word) + offset);
     return { x: rect.left + 1, y: (rect.top + rect.bottom) / 2 };
-  }, word);
+  }, { word, offset });
   await page.mouse.click(point.x, point.y, { button: "right" });
   await app.evaluate(async (_electron, { id, expectAbsent }) => {
     for (let i = 0; !globalThis.formattingMenu && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
@@ -96,16 +96,16 @@ try {
   await chooseContextFormat("단어만", "ai-suggestion");
   assert.equal(await proposal.locator("pre").innerText(), "여기서 단어만");
   assert.equal(await app.evaluate(() => globalThis.editRequests.length), 0);
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
   await app.evaluate(() => { globalThis.failReply = true; });
-  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("button", { name: "다시 생성" }).click();
   await proposal.getByRole("alert").filter({ hasText: "연결 끊김" }).waitFor();
   assert.equal(await proposal.locator("pre").last().innerText(), "확인 필요");
-  assert.ok(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled());
+  assert.ok(await proposal.getByRole("button", { name: "적용" }).isEnabled());
   await app.evaluate(() => { globalThis.failReply = false; globalThis.deferReply = true; });
-  await proposal.getByRole("button", { name: "다시 제안" }).click();
+  await proposal.getByRole("button", { name: "다시 생성" }).click();
   await proposal.getByRole("status").waitFor();
-  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  assert.equal(await proposal.getByRole("button", { name: "적용" }).isEnabled(), false);
   const canceledId = await app.evaluate(() => globalThis.editRequests.at(-1).requestId);
   await page.keyboard.down("Escape");
   try {
@@ -116,7 +116,7 @@ try {
   assert.equal(await docText(), original);
   await select("검토");
   await chooseContextFormat("검토 예정", "ai-suggestion");
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
   await proposal.getByRole("status").waitFor();
   await app.evaluate((_electron, canceledId) => {
     globalThis.pendingReplies.get(canceledId)({ type: "done", content: "취소한 요청의 늦은 응답" });
@@ -130,9 +130,9 @@ try {
   await select("회의록");
   await chooseContextFormat("확인할", "ai-suggestion");
   assert.equal(await proposal.locator("pre").innerText(), "확인할 항목");
-  await proposal.getByLabel("작업").selectOption("간결하게");
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
-  await proposal.getByRole("button", { name: "원문에 적용" }).click();
+  await proposal.getByRole("radio", { name: "간결하게" }).check();
+  await proposal.getByRole("button", { name: "미리보기" }).click();
+  await proposal.getByRole("button", { name: "적용" }).click();
   assert.equal(await docText(), original.replace("확인할 항목", "확인 필요"));
   await page.keyboard.press(modifier + "+z");
   assert.equal(await docText(), original);
@@ -145,23 +145,61 @@ try {
   assert.deepEqual(request.references, []);
   await select("반복 색상");
   await chooseContextFormat("반복", "ai-suggestion");
-  await proposal.getByLabel("작업").selectOption("직접 요청");
-  assert.equal(await proposal.getByRole("button", { name: "제안 받기" }).isEnabled(), false);
-  await proposal.getByLabel("요청 내용").fill("공손하게 써 줘");
-  await proposal.getByRole("button", { name: "제안 받기" }).click();
-  await proposal.getByRole("button", { name: "원문에 적용" }).waitFor();
-  assert.equal(await app.evaluate(() => globalThis.editRequests.at(-1).prompt), "공손하게 써 줘");
+  for (const name of ["문장 다듬기", "맞춤법 교정", "간결하게", "직접 요청"]) {
+    assert.ok(await proposal.getByRole("radio", { name }).isVisible());
+  }
+  await proposal.getByRole("radio", { name: "직접 요청" }).check();
+  assert.equal(await proposal.getByRole("button", { name: "미리보기" }).isEnabled(), false);
+  const instruction = "공손하게 써 줘\n두 문장으로 정리해 줘";
+  await proposal.getByLabel("요청 내용").fill(instruction);
+  await proposal.getByRole("button", { name: "미리보기" }).click();
+  await proposal.getByRole("button", { name: "적용" }).waitFor();
+  assert.equal(await app.evaluate(() => globalThis.editRequests.at(-1).prompt), instruction);
   // A sync or another editor can change the file while the review is open.
   await page.locator(".cm-content").evaluate(el => {
     const view = el.cmTile.root.view;
     view.dispatch({ changes: { from: view.state.doc.length, insert: "새 메모" } });
   });
   await proposal.getByRole("alert").filter({ hasText: "원문이 변경" }).waitFor();
-  assert.equal(await proposal.getByRole("button", { name: "원문에 적용" }).isEnabled(), false);
+  assert.equal(await proposal.getByRole("button", { name: "적용" }).isEnabled(), false);
   await proposal.getByRole("button", { name: "버리기" }).click();
   await page.locator(".cm-content").focus();
   await page.keyboard.press(modifier + "+z");
   assert.equal(await docText(), original);
+
+  for (const [word, offset] of [["\n\n- [ ]", 1], ["   \n반복", 1]]) {
+    await select("회의록");
+    await chooseContextFormat(word, "ai-suggestion", false, offset);
+    assert.ok(await proposal.getByRole("radio", { name: "직접 요청" }).isChecked());
+    const send = proposal.getByRole("button", { name: "미리보기" });
+    await proposal.getByRole("combobox", { name: "Copilot 모델" }).locator("option[value=auto]").waitFor({ state: "attached" });
+    assert.ok(await send.isEnabled());
+    const modelBox = proposal.getByRole("combobox", { name: "Copilot 모델" });
+    const themeChanges = await modelBox.evaluate(el => {
+      const root = document.documentElement.style, before = root.getPropertyValue("--accent");
+      const colors = () => [getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopColor];
+      const initial = colors();
+      root.setProperty("--accent", "#008080");
+      const changed = colors();
+      root.setProperty("--accent", before);
+      return changed.every((color, index) => color !== initial[index]);
+    });
+    assert.ok(themeChanges);
+    await proposal.getByLabel("요청 내용").fill("  ");
+    assert.equal(await send.isEnabled(), false);
+    await proposal.getByLabel("요청 내용").fill(instruction);
+    await send.click();
+    await proposal.getByRole("button", { name: "이 위치에 삽입" }).waitFor();
+    assert.equal(await docText(), original);
+    const insertion = await app.evaluate(() => globalThis.editRequests.at(-1));
+    assert.equal(insertion.context.content, "");
+    assert.equal(insertion.prompt, instruction);
+    await proposal.getByRole("button", { name: "이 위치에 삽입" }).click();
+    const position = original.indexOf(word) + offset;
+    assert.equal(await docText(), original.slice(0, position) + "확인 필요" + original.slice(position));
+    await page.keyboard.press(modifier + "+z");
+    assert.equal(await docText(), original);
+  }
 
   await select("회의록");
   await chooseContextFormat("확인할", "format-size-large");

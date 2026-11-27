@@ -173,7 +173,7 @@ export class CopilotController {
       }
       const result = await job.session.sendAndWait({
         prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history }),
-        ...(args.image ? { attachments: [{ type: 'blob', ...args.image, displayName: 'Schedule capture' }] } : {}),
+        ...(args.image ? { attachments: [{ type: 'blob', ...args.image, displayName: 'Attached image' }] } : {}),
       }, timeout);
       if (job.canceled) return;
       if (job.failure) throw new Error(job.failure);

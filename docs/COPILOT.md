@@ -19,6 +19,14 @@ the SDK's plaintext-storage consent fallback. Authentication is stored outside
 the note vault, separately from Git backup settings. This version supports
 GitHub.com sign-in, not the SDK's Enterprise Cloud or Entra login paths.
 
+## 스크린샷 검토
+
+GitHub Copilot에 직접 연결된 패널의 질문창에 이미지를 붙여 넣으세요
+(Windows `Ctrl+V`, macOS `⌘V`). PNG·JPEG·WebP 한 장을 첨부할 수 있습니다.
+미리보기 옆의 ×로 첨부를 지울 수 있습니다. 모델 목록에서 **이미지 지원** 표시가 있는
+모델을 선택하고 질문을 보내세요. **Ask**와 **Agent**에서는 이미지만 보내도 검토를 요청합니다.
+**Edit**에서는 이미지와 함께 문서에서 수정할 내용을 입력하세요.
+
 ## Ask and revise
 
 - **문서 없음:** excludes the current note. Explicit attachments and optionally

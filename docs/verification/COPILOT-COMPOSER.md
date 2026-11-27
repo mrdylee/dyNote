@@ -41,3 +41,18 @@ Evidence:
 Dynote feasibility: yes, using a request-scoped original/revision + streamed draft, ordered editor transactions, and Keep/Undo. First implementation should stop further AI writes if the user types or the disk revision changes, preserving both versions. Hold pending drafts out of Git backup until accepted; cancellation/error/shutdown need explicit pending-draft handling. Current SDK note tools return complete proposal arguments; progressive provider edit events or a bounded edit stream must be investigated/tested before claiming token-by-token edits. Replaying a finished answer would not implement actual live editing.
 
 **Live document mutation is not enabled by this change.** User requested investigation for this item; current reviewed apply workflow remains active.
+
+## Clipboard image review — 2026-11-27
+
+Craft Anything inspected the installed VS Code 1.147.0 workbench bundle
+(SHA-256 `cfd5672ad17ff2c31658327065de80c86393e64b0cc13a946313ef8bc823ec8f`).
+The static evidence covered these steps.
+
+| Workbench behavior | Evidence ID |
+| --- | --- |
+| Registers the chat image paste provider | `ev_f58cbf4f651239ee8047619c852d519b4cc70bb00e64a67945f4e211b602c8eb` |
+| Reads clipboard file bytes | `ev_52d827e54a6fc24cb7e6bf4013a8581f7ab2a1f2ed8232229d9ae0970de08561` |
+| Creates a named pasted image attachment with its MIME type | `ev_404b06b9cc30532b5e542c7e68f9eaa2dd11521cc76e45e0c82e528763c06d7f` |
+| Defines an image preview and removes entries from the attachment model | `ev_b831a6630d855418964505ca54289441d8a8ba3c7997af22a0c9740f67674a3d`, `ev_638bba3313665f7fa733703ed7513cf750e8712fa6d6ffcbaa48bc163b3cf27d` |
+
+Dynote reuses its capture decoder and single-image Copilot SDK request. The Electron composer test injects a clipboard event with a generated PNG and compares its bytes at the IPC boundary. It also covers removal, model selection, cancellation, corrupt data, an image-only question, and the next text-only turn. The controller test checks the SDK blob attachment using a test client. Live model responses and native Windows clipboard behavior require separate verification.
