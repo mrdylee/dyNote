@@ -8,7 +8,7 @@
 
 **Tech Stack:** Electron IPC, React, Node test runner.
 
-- [ ] Extend tests/copilot-journal-controller.test.mjs to assert affected paths during migration, reimport and pending replay. Run node --test tests/copilot-journal-controller.test.mjs and confirm the new expectations fail before editing the controller.
-- [ ] Update electron/copilot-journal.mjs to return the unique set of blocked paths, including the check-only scan. In electron/main.mjs distinguish pending versions from published deletions.
-- [ ] Connect capture actions in src/App.jsx to PersonalVersionReview, including cancellation, sequential files and an already-resolved file. Reuse the original vault, manual flag and project arguments. Expose resume in CopilotJournalSettings and CopilotJournalToolbar.
-- [ ] Exercise the popup, cancellation and retry through the renderer. Check background capture and preservation of the selected project. Run npm test, npm run build and git diff --check.
+- [x] Extend tests/copilot-journal-controller.test.mjs to assert affected paths during migration, reimport and pending replay. Run node --test tests/copilot-journal-controller.test.mjs and confirm the new expectations fail before editing the controller.
+- [x] Update electron/copilot-journal.mjs to return the unique set of blocked paths, including the check-only scan. In electron/main.mjs distinguish pending versions from published deletions.
+- [x] Connect capture actions in src/App.jsx to PersonalVersionReview, including cancellation, sequential files and an already-resolved file. Reuse the original vault, manual flag and project arguments. Expose resume in CopilotJournalSettings and the main status bar.
+- [x] Exercise the popup, cancellation and retry through the renderer. Check background capture and preservation of the selected project. Run npm test, npm run build and git diff --check.
