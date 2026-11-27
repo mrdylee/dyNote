@@ -1720,9 +1720,15 @@ export default function App() {
     }
     setError(snapshot.warnings.join(" · "));
   };
-  const moveWorkspaceFile = async (vaultId, from, to, revision, moveAsset = false) => {
-    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision, moveAsset }));
+  const moveWorkspaceFile = async (vaultId, from, to, revision, moveAsset = false, expectedStat) => {
+    const snapshot = await invoke(api.moveFile({ vaultId, from, to, revision, moveAsset, expectedStat }));
     applyWorkspaceRename(vaultId, from, to, snapshot);
+  };
+  const followCrossVaultMove = (sourceVaultId, sourcePath, vaultId, destination) => {
+    const from = documentKey(sourceVaultId, sourcePath), to = documentKey(vaultId, destination);
+    workspace.dispatch({ type: "rename", path: from, to });
+    setTabs(old => [...new Set(old.map(key => key === from ? to : key))]);
+    setAttachment(old => old?.vaultId === sourceVaultId && old.path === sourcePath ? { ...old, vaultId, path: destination } : old);
   };
   const transferTreeFile = async ({ source, vaultId, folder, operation, confirmed = false }) => {
     if (busy || !vaultsRef.current[source.vaultId] || !vaultsRef.current[vaultId]) return;
@@ -1736,24 +1742,23 @@ export default function App() {
     setBusy(true);
     try {
       await flush();
+      const expectedStat = await source.cutRevision;
+      if (expectedStat === null) throw new Error("잘라낸 원본 파일을 확인할 수 없습니다. 다시 잘라내 주세요.");
       const revision = revisionMap(source.vaultId).get(source.path);
       const asset = !/\.(?:md|canvas|base)$/i.test(source.path);
       if (!asset && !revision) throw new Error("원본 문서를 새로고침해 주세요.");
       const name = source.path.split("/").at(-1);
       if (operation === "move" && source.vaultId !== vaultId) {
-        const { saved } = await invoke(api.moveAcrossVaults({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
+        const { saved } = await invoke(api.moveAcrossVaults({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision, expectedStat }));
         if (saved.warning) {
           acceptSnapshot(await invoke(api.snapshot({ vaultId })));
           throw new Error(saved.warning);
         }
-        const from = documentKey(source.vaultId, source.path), to = documentKey(vaultId, saved.path);
-        workspace.dispatch({ type: "rename", path: from, to });
-        setTabs(old => [...new Set(old.map(key => key === from ? to : key))]);
-        if (asset) setAttachment(old => old?.vaultId === source.vaultId && old.path === source.path ? { ...old, vaultId, path: saved.path } : old);
+        followCrossVaultMove(source.vaultId, source.path, vaultId, saved.path);
         acceptSnapshot(await invoke(api.snapshot({ vaultId: source.vaultId })));
         acceptSnapshot(await invoke(api.snapshot({ vaultId })));
       } else if (operation === "move") {
-        await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision, asset);
+        await moveWorkspaceFile(vaultId, source.path, folder ? folder + "/" + name : name, revision, asset, expectedStat);
       } else {
         const saved = await invoke(api.copyFile({ vaultId, sourceVaultId: source.vaultId, from: source.path, folder, revision }));
         if (asset) acceptSnapshot(await invoke(api.snapshot({ vaultId })));
@@ -1828,6 +1833,7 @@ export default function App() {
     const token = crypto.randomUUID();
     event.preventDefault();
     event.clipboardData.setData(FILE_TREE_DRAG, token);
+    if (operation === "move") source.cutRevision = invoke(api.treeFileRevision(source)).catch(() => null);
     treeClipboard.current = { source, operation, token };
   };
   const pasteTreeSelection = async event => {
@@ -1862,7 +1868,13 @@ export default function App() {
             ? api.copyExternalFile({ vaultId, folder, id: file.id, revision: file.revision })
             : file.pasteTo ? file.pasteTo({ vaultId, folder }) : api.transferDroppedFile({ vaultId, folder, operation }, file));
           if (!result.unchanged) refresh.add(vaultId);
-          if (result.sourceVaultId) refresh.add(result.sourceVaultId);
+          if (result.from && !result.warning && vaultsRef.current[result.sourceVaultId]) {
+            if (result.sourceVaultId === vaultId) applyWorkspaceRename(vaultId, result.from, result.path, result.snapshot);
+            else {
+              followCrossVaultMove(result.sourceVaultId, result.from, vaultId, result.path);
+              refresh.add(result.sourceVaultId);
+            }
+          }
           if (result.warning) failed.push(file.name + " · " + result.warning);
           else if (!result.unchanged) completed.push(result.path);
         }

@@ -139,7 +139,7 @@ export class StickyNotes {
     });
   }
 
-  moveFile(vault, from, to, revision) {
+  moveFile(vault, from, to, revision, expectedStat) {
     const matches = record => record.root === vault.root && record.path === from;
     const openSource = () => [...this.#windows.values()].find(state => matches(state.record));
     const requested = openSource();
@@ -148,7 +148,7 @@ export class StickyNotes {
       const state = openSource();
       const record = state?.record ?? [...this.#records.values()].find(matches);
       const expected = followsOwnSave && state === requested ? state.revision : revision;
-      const move = () => vault.moveFile(from, to, expected);
+      const move = () => vault.moveFile(from, to, expected, expectedStat);
       if (!record) return move();
 
       const next = { ...record, path: to };

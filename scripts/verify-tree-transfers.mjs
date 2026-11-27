@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,6 +23,9 @@ try {
   await writeFile(path.join(personal, "Inbox/Plan.md"), source);
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
+  await writeFile(path.join(personal, "Shell.md"), "# Shell move");
+  await writeFile(path.join(personal, "Shell index.md"), "[link](Shell.md)");
+  await writeFile(path.join(personal, "Cut.pdf"), "original");
   await writeFile(path.join(personal, "Manual.txt"), "ordinary file");
   await writeFile(path.join(personal, "Deliver.md"), "# Hand-off\n");
   await writeFile(path.join(personal, "Linked.md"), "[Reference](Reference.md)\n");
@@ -81,11 +84,8 @@ try {
     globalThis.previousTreeClipboard = await Promise.all((await clipboard.read()).filter(item => item.types.length).map(async item =>
       new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
   });
-  const external = path.join(root, "외부 문서.txt");
-  await writeFile(external, "File from Explorer");
-  for (const operation of process.platform === "win32" ? ["copy", "move"] : process.platform === "darwin" ? ["copy"] : []) {
-    if (process.platform === "win32") {
-      execFileSync("powershell.exe", ["-NoProfile", "-STA", "-Command", `
+  const setExplorerClipboard = (file, operation) => {
+    execFileSync("powershell.exe", ["-NoProfile", "-STA", "-Command", `
         Add-Type -AssemblyName System.Windows.Forms
         $data = New-Object Windows.Forms.DataObject
         $paths = New-Object Collections.Specialized.StringCollection
@@ -94,8 +94,13 @@ try {
         $effect = [IO.MemoryStream]::new([BitConverter]::GetBytes([int]${operation === "move" ? 2 : 1}))
         $data.SetData('Preferred DropEffect', $effect)
         [Windows.Forms.Clipboard]::SetDataObject($data, $true)
-      `], { env: { ...process.env, DYNOTE_CLIPBOARD_FIXTURE: external } });
-    } else {
+      `], { env: { ...process.env, DYNOTE_CLIPBOARD_FIXTURE: file } });
+  };
+  const external = path.join(root, "외부 문서.txt");
+  await writeFile(external, "File from Explorer");
+  for (const operation of process.platform === "win32" ? ["copy", "move"] : process.platform === "darwin" ? ["copy"] : []) {
+    if (process.platform === "win32") setExplorerClipboard(external, operation);
+    else {
       await app.evaluate(async ({ clipboard, ClipboardItem }, url) => {
         await clipboard.write([new ClipboardItem({ 'electron application/osclipboard;format="public.file-url"': new Blob([url]) })]);
       }, pathToFileURL(external).href);
@@ -107,6 +112,47 @@ try {
     if (operation === "copy") assert.equal(await readFile(external, "utf8"), "File from Explorer");
     else await assert.rejects(readFile(external), { code: "ENOENT" });
   }
+  // Feed a real filesystem File through the same sidebar transfer used by Explorer paste.
+  await row(personalTree, "Shell.md").click();
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.id = "shell-move-fixture";
+    document.body.append(input);
+  });
+  const input = page.locator("#shell-move-fixture");
+  const moveShellFile = async (file, target) => {
+    if (process.platform === "win32") {
+      setExplorerClipboard(file, "move");
+      await target.press(modifier + "+v");
+      return;
+    }
+    await input.setInputFiles(file);
+    await target.evaluate(el => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(document.querySelector("#shell-move-fixture").files[0]);
+      el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+  };
+  await moveShellFile(path.join(personal, "Shell.md"), row(personalTree, "Copies"));
+  await pane("Copies/Shell.md").waitFor();
+  assert.equal(await readFile(path.join(personal, "Shell index.md"), "utf8"), "[link](Copies/Shell.md)");
+  await moveShellFile(path.join(personal, "Copies/Shell.md"), row(teamTree, "Taken"));
+  await page.getByRole("alert").filter({ hasText: "참조하는 링크" }).waitFor();
+  assert.equal(await readFile(path.join(personal, "Copies/Shell.md"), "utf8"), "# Shell move");
+  await assert.rejects(readFile(path.join(team, "Taken/Shell.md")), { code: "ENOENT" });
+  await input.evaluate(el => el.remove());
+
+  await row(personalTree, "Cut.pdf").press(modifier + "+x");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await moveDialog.waitFor();
+  await rename(path.join(personal, "Cut.pdf"), path.join(personal, "Old.pdf"));
+  await writeFile(path.join(personal, "Cut.pdf"), "replacement");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "변경" }).waitFor();
+  assert.equal(await readFile(path.join(personal, "Cut.pdf"), "utf8"), "replacement");
+  await assert.rejects(readFile(path.join(personal, "Copies/Cut.pdf")), { code: "ENOENT" });
+
   await row(teamTree, "Shared/Original.docx").press(modifier + "+c");
   await row(personalTree, "Copies").press(modifier + "+v");
   await row(personalTree, "Copies/Original.docx").press(modifier + "+x");
