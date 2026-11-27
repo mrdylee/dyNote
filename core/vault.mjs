@@ -6,11 +6,12 @@ import {
   mkdir,
   rename,
   rmdir,
-  link,
+  rm,
   unlink,
   writeFile,
   readFile,
 } from "node:fs/promises";
+import { publishFile } from "./publish-file.mjs";
 import { constants } from "node:fs";
 import { attachmentMime, validateAttachment, decodeHtml } from "./attachments.mjs";
 import path from "node:path";
@@ -79,6 +80,23 @@ const validWordPath = (value) =>
   validRelativePath(value) && /\.docx$/i.test(value) && !path.posix.basename(value).startsWith("~$");
 const wordRevision = ({ dev, ino, size, mtimeNs, ctimeNs }) =>
   `${dev}:${ino}:${size}:${mtimeNs}:${ctimeNs}`;
+
+const validTreeFile = value => validFilePath(value) || (validRelativePath(value) && !path.posix.basename(value).startsWith("~$"));
+
+async function copyTrashContent(source, output, expectedStat) {
+  const input = await open(source, constants.O_RDONLY | noFollow);
+  try {
+    if (expectedStat && wordRevision(await input.stat({ bigint: true })) !== expectedStat)
+      throw new Error("삭제 전 외부 변경이 감지되었습니다.");
+    const hash = createHash("sha256");
+    for await (const chunk of input.createReadStream({ autoClose: false })) {
+      await output.writeFile(chunk);
+      hash.update(chunk);
+    }
+    await output.sync();
+    return hash.digest("hex");
+  } finally { await input.close(); }
+}
 
 export const validNotePath = (value) =>
   validFilePath(value) && /\.md$/i.test(value);
@@ -442,6 +460,11 @@ export class Vault {
     return file;
   }
 
+  async treeFileRevision(relative) {
+    if (!validTreeFile(relative)) throw new Error("탐색기에서 파일을 선택해 주세요.");
+    return wordRevision(await lstat(await this.fileLocation(relative), { bigint: true }));
+  }
+
   async officeFilePath(relative) {
     await this.#tail;
     if (!officeKind(relative)) throw new Error("Excel 또는 PowerPoint 파일을 선택해 주세요.");
@@ -746,13 +769,13 @@ export class Vault {
           !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
       await write(handle);
       if (await realpath(working) !== actual || !sameEntry(await lstat(actual, { bigint: true }), opened)) throw changed();
-      const result = await handle.stat({ bigint: staged });
       if (staged) {
         await handle.sync();
         if (!sameEntry(await lstat(path.dirname(destination), { bigint: true }), parent)) throw changed();
-        await link(actual, destination);
-        if (!sameEntry(await lstat(destination, { bigint: true }), opened)) throw changed();
+        await publishFile(actual, destination);
       }
+      const result = await handle.stat({ bigint: staged });
+      if (staged && !sameEntry(await lstat(destination, { bigint: true }), result)) throw changed();
       completed = true;
       return result;
     } finally {
@@ -773,7 +796,7 @@ export class Vault {
     return { ...file, path: to, content, revision: digest(content), metadata: { size: stat.size, mtime: stat.mtimeMs, ctime: stat.birthtimeMs } };
   }
 
-  transferDroppedFile(source, folder, operation, filename) {
+  transferDroppedFile(source, folder, operation, filename, expectedStat) {
     return this.#enqueue(async () => {
       if (typeof source !== "string" || !path.isAbsolute(source) || typeof folder !== "string")
         throw new Error("디스크에서 파일을 선택해 주세요.");
@@ -793,7 +816,7 @@ export class Vault {
       const input = await open(original, constants.O_RDONLY | noFollow);
       try {
         const before = await input.stat({ bigint: true });
-        if (!sameEntry(stat, before)) throw new Error("원본 파일이 변경되었습니다.");
+        if (!sameEntry(stat, before) || (expectedStat !== undefined && wordRevision(before) !== expectedStat)) throw new Error("원본 파일이 변경되었습니다.");
         if (validFilePath(copied) && before.size > 25n * 1024n * 1024n)
           throw new Error("Git 복원 대상 파일은 25MB 이하만 옮기거나 복사할 수 있습니다.");
         if (documentKind(copied) && before.size > BigInt(MAX_BYTES))
@@ -872,9 +895,11 @@ export class Vault {
     });
   }
 
-  async moveDocumentTo(from, folder, revision, target) {
+  async moveDocumentTo(from, folder, revision, target, expectedStat) {
+    if (expectedStat !== undefined && await this.treeFileRevision(from) !== expectedStat)
+      throw new Error("잘라낸 원본 파일이 변경되었습니다.");
     const snapshot = await this.documentSnapshot();
-    const entries = [...snapshot.notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...snapshot.documents, ...snapshot.attachments];
+    const entries = [...snapshot.notes.map(note => ({ ...note, aliases: noteAliases(parseMetadata(note.content).properties) })), ...snapshot.documents, ...snapshot.attachments, ...snapshot.wordDocuments, ...snapshot.otherFiles];
     for (const file of [...snapshot.notes, ...snapshot.documents]) {
       if (file.path === from) continue;
       const links = file.kind === 'canvas' ? (parseCanvas(file.content).data.nodes ?? []).flatMap(node =>
@@ -884,12 +909,16 @@ export class Vault {
     }
     const destination = folder ? `${folder}/${path.basename(from)}` : path.basename(from);
     const existing = await target.documentSnapshot();
-    if ([...existing.notes, ...existing.documents, ...existing.attachments, ...(existing.folders ?? []).map(path => ({ path }))]
+    if ([...existing.notes, ...existing.documents, ...existing.attachments, ...existing.wordDocuments, ...existing.otherFiles, ...(existing.folders ?? []).map(path => ({ path }))]
       .some(file => file.path.normalize('NFC').toLowerCase() === destination.normalize('NFC').toLowerCase()))
       throw new Error('대상 폴더에 같은 이름의 문서가 있습니다.');
+    if (!validNotePath(from) && !documentKind(from)) {
+      const saved = await target.transferDroppedFile(await this.fileLocation(from), folder, "move", undefined, expectedStat);
+      return { saved };
+    }
     const saved = await target.copyDocument(from, folder, revision, this);
     try {
-      const trash = await this.trashFile(from, revision);
+      const trash = await this.trashFile(from, revision, expectedStat);
       return { saved, trash };
     } catch (error) {
       await target.trashFile(saved.path, saved.revision).catch(() => {});
@@ -910,11 +939,12 @@ export class Vault {
     });
   }
 
-  renameTreeEntry(from, to, { folder, revision } = {}) {
+  renameTreeEntry(from, to, { folder, revision, moveAsset = false, expectedStat } = {}) {
     return this.#enqueue(async () => {
       const word = !folder && validWordPath(from);
-      const valid = folder ? validRelativePath : word ? validWordPath : validFilePath;
-      if (!valid(from) || !valid(to) || from === to || path.posix.dirname(from) !== path.posix.dirname(to))
+      const valid = folder ? validRelativePath : validTreeFile;
+      const unchangedPart = moveAsset ? path.posix.basename : path.posix.dirname;
+      if (!valid(from) || !valid(to) || from === to || unchangedPart(from) !== unchangedPart(to))
         throw new Error("같은 위치에서 사용할 수 있는 다른 이름을 입력해 주세요.");
       if (!folder && path.extname(from).toLowerCase() !== path.extname(to).toLowerCase())
         throw new Error("기존 확장자를 유지해 주세요.");
@@ -925,9 +955,12 @@ export class Vault {
       const entry = await lstat(source, { bigint: true });
       if (entry.isSymbolicLink() || !(folder ? entry.isDirectory() : entry.isFile()))
         throw new Error("보관함 안의 일반 파일이나 폴더를 선택해 주세요.");
-      if (!folder && (revision || !word) && (word ? wordRevision(entry) : (await this.#binary(from)).revision) !== revision)
-        throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
-      const destination = path.join(this.root, to);
+      if (expectedStat !== undefined && wordRevision(entry) !== expectedStat) throw new Error("잘라낸 원본 파일이 변경되었습니다.");
+      if (!folder && !moveAsset && (revision || !word)) {
+        const currentRevision = word || revision?.includes(":") ? wordRevision(entry) : (await this.#binary(from)).revision;
+        if (currentRevision !== revision) throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
+      }
+      const destination = moveAsset ? await checkedPath(to) : path.join(this.root, to);
       const existing = await lstat(destination, { bigint: true }).catch(error => {
         if (error.code !== "ENOENT") throw error;
         return null;
@@ -935,7 +968,7 @@ export class Vault {
       const sameName = from.normalize('NFC').toLowerCase() === to.normalize('NFC').toLowerCase();
       if (existing && !(sameName && sameEntry(entry, existing))) throw new Error("같은 이름의 파일 또는 폴더가 있습니다.");
       const snapshot = await this.#snapshot();
-      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.wordDocuments, ...snapshot.attachments];
+      const files = [...snapshot.notes, ...snapshot.documents, ...snapshot.wordDocuments, ...snapshot.attachments, ...snapshot.otherFiles];
       const index = createLinkIndex(files), moved = name => renamedTreePath(name, from, to);
       const edits = [...snapshot.notes, ...snapshot.documents].flatMap(file => {
         const content = file.kind === "canvas" ? rewriteCanvasPaths(file.content, file.path, moved, files, index)
@@ -950,9 +983,17 @@ export class Vault {
       if (reserve) await mkdir(destination);
       try {
         if (!folder && !existing) {
-          await link(source, destination);
-          try { await unlink(source); }
-          catch (error) { await unlink(destination).catch(() => {}); throw error; }
+          if (!await publishFile(source, destination)) {
+            try {
+              const linked = await lstat(source, { bigint: true });
+              if (!sameEntry(entry, linked) || linked.mtimeNs !== entry.mtimeNs)
+                throw new Error("이동 중 원본 파일이 변경되었습니다.");
+              await unlink(source);
+            } catch (error) {
+              if (sameEntry(entry, await lstat(destination, { bigint: true }))) await unlink(destination);
+              throw error;
+            }
+          }
         } else await rename(source, destination);
       }
       catch (error) { if (reserve) await rmdir(destination).catch(() => {}); throw error; }
@@ -976,17 +1017,19 @@ export class Vault {
     });
   }
 
-  moveFile(from, to, expectedRevision) {
+  moveFile(from, to, expectedRevision, expectedStat) {
     if (typeof from === 'string' && typeof to === 'string' && from !== to &&
         from.normalize('NFC').toLowerCase() === to.normalize('NFC').toLowerCase() &&
         path.posix.dirname(from) === path.posix.dirname(to))
-      return this.renameTreeEntry(from, to, { folder: false, revision: expectedRevision });
+      return this.renameTreeEntry(from, to, { folder: false, revision: expectedRevision, expectedStat });
     return this.#enqueue(async () => {
       if (
         from === to ||
         path.extname(from).toLowerCase() !== path.extname(to).toLowerCase()
       )
         throw new Error("확장자를 유지한 다른 경로를 입력해 주세요.");
+      if (expectedStat !== undefined && wordRevision(await lstat(await this.#file(from), { bigint: true })) !== expectedStat)
+        throw new Error("잘라낸 원본 파일이 변경되었습니다.");
       const current = await this.#binary(from);
       if (current.revision !== expectedRevision)
         throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
@@ -1032,7 +1075,10 @@ export class Vault {
           flag: "wx",
           mode: 0o600,
         });
-        await unlink(await this.#file(from));
+        const original = await this.#file(from);
+        if (expectedStat !== undefined && wordRevision(await lstat(original, { bigint: true })) !== expectedStat)
+          throw new Error("잘라낸 원본 파일이 변경되었습니다.");
+        await unlink(original);
       } catch (error) {
         for (const edit of saved.reverse())
           try {
@@ -1069,26 +1115,31 @@ export class Vault {
     });
   }
 
-  trashFile(relative, expectedRevision) {
+  trashFile(relative, expectedRevision, expectedStat) {
     return this.#enqueue(async () => {
-      const current = await this.#binary(relative);
-      if (current.revision !== expectedRevision)
+      const file = await this.#file(relative, false, validTreeFile);
+      const stat = wordRevision(await lstat(file, { bigint: true }));
+      if (!expectedRevision || (expectedStat !== undefined && stat !== expectedStat) || (expectedRevision.includes(":") && expectedRevision !== stat))
         throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
       const id = randomUUID();
       const directory = path.join(this.recoveryRoot, "trash", id);
       await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(path.join(directory, "content"), current.bytes, {
-        flag: "wx",
-        mode: 0o600,
-      });
-      await writeFile(
-        path.join(directory, "entry.json"),
-        JSON.stringify({ path: relative, revision: current.revision }),
-        { flag: "wx", mode: 0o600 },
-      );
-      if ((await this.#binary(relative)).revision !== current.revision)
-        throw new Error("삭제 전 외부 변경이 감지되었습니다.");
-      await unlink(await this.#file(relative));
+      try {
+        const output = await open(path.join(directory, "content"), "wx", 0o600);
+        let revision;
+        try { revision = await copyTrashContent(file, output, stat); }
+        finally { await output.close(); }
+        if (expectedRevision !== stat && expectedRevision !== revision)
+          throw new Error("외부에서 파일이 변경되었습니다. 새로고침해 주세요.");
+        await writeFile(path.join(directory, "entry.json"), JSON.stringify({ path: relative, revision }), { flag: "wx", mode: 0o600 });
+        const current = await this.#file(relative, false, validTreeFile);
+        if (wordRevision(await lstat(current, { bigint: true })) !== stat)
+          throw new Error("삭제 전 외부 변경이 감지되었습니다.");
+        await unlink(current);
+      } catch (error) {
+        await rm(directory, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
       return { id, path: relative };
     });
   }
@@ -1097,17 +1148,16 @@ export class Vault {
     return this.#enqueue(async () => {
       if (typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id))
         throw new Error("잘못된 휴지통 항목입니다.");
-      const directory = path.join(this.recoveryRoot, "trash", id);
+      const directory = path.join(await realpath(this.recoveryRoot), "trash", id);
       const entry = JSON.parse(
         await readFile(path.join(directory, "entry.json"), "utf8"),
       );
-      const bytes = await readFile(path.join(directory, "content"));
-      if (digest(bytes) !== entry.revision)
-        throw new Error("복구 사본이 변경되었습니다.");
-      await writeFile(await this.#file(entry.path, true), bytes, {
-        flag: "wx",
-        mode: 0o600,
-      });
+      const destination = await this.#file(entry.path, true, validTreeFile);
+      const parent = await lstat(path.dirname(destination), { bigint: true });
+      await this.#createCopy(entry.path, parent, validTreeFile, async output => {
+        if (await copyTrashContent(path.join(directory, "content"), output) !== entry.revision)
+          throw new Error("복구 사본이 변경되었습니다.");
+      }, true);
       return this.#snapshot();
     });
   }

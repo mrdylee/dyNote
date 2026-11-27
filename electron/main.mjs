@@ -20,6 +20,7 @@ import { DocumentDrafts } from "./document-drafts.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Vault, validNotePath } from "../core/vault.mjs";
+import { documentKind } from "../core/documents.mjs";
 import { canTrashFolder, managedCopilotPath, treeRenameDestination } from "../core/file-tree.mjs";
 import { assetPath, safeExternalUrl, trustedFrame, allowFontPermission, allowAudioPermission } from "../core/security.mjs";
 import { openWebViewer } from "./web-viewer.mjs";
@@ -44,6 +45,7 @@ import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
 import { ExternalDocuments } from "../core/external-documents.mjs";
+import { readExplorerClipboard } from "./explorer-clipboard.mjs";
 import { createStartupLog } from "./startup-log.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -248,6 +250,38 @@ function workspaceVault(id) {
   if (id === vault?.id) return vault;
   const entry = openedVaults.get(id);
   return entry && togetherEntries().some(space => space.root === entry.vault.root) ? entry.vault : null;
+}
+
+function moveWithinVault(vault, from, to, revision, asset, expectedStat) {
+  if (asset && !validNotePath(from) && !documentKind(from))
+    return vault.renameTreeEntry(from, to, { moveAsset: true, expectedStat });
+  return stickyNotes && validNotePath(from)
+    ? stickyNotes.moveFile(vault, from, to, revision, expectedStat)
+    : vault.moveFile(from, to, revision, expectedStat);
+}
+
+async function moveRegisteredFile(root, from, target, folder) {
+  const controller = [...openedVaults.values()].find(entry => entry.vault.root === root);
+  await controller?.ready;
+  const source = controller?.vault ?? await Vault.open(root, recovery);
+  if (await realpath(root) !== root) throw new Error("원본 보관함 위치가 변경되었습니다.");
+  const expectedStat = await source.treeFileRevision(from);
+  const to = folder ? folder + "/" + path.posix.basename(from) : path.posix.basename(from);
+  if (source.id === target.id && to === from) return { path: from, unchanged: true };
+  const asset = !validNotePath(from) && !documentKind(from);
+  let revision;
+  if (!asset) {
+    const snapshot = await source.snapshot();
+    revision = [...snapshot.notes, ...snapshot.documents].find(file => file.path === from)?.revision;
+    if (!revision) throw new Error("원본 문서를 읽을 수 없습니다.");
+  }
+  if (source.id === target.id) {
+    const snapshot = await moveWithinVault(source, from, to, revision, asset, expectedStat);
+    return { path: to, from, sourceVaultId: source.id, snapshot };
+  }
+  const { saved } = await source.moveDocumentTo(from, folder, revision, target, expectedStat);
+  controller?.git.markDirty(source.id);
+  return { path: saved.path, warning: saved.warning, from, sourceVaultId: source.id };
 }
 
 async function workspaceSnapshots() {
@@ -631,13 +665,17 @@ app
     const chatHistory = new CopilotHistory(path.join(app.getPath("userData"), "copilot-history"));
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
+    if (process.platform === "win32") ipcMain.handle("notes:explorer-clipboard", event => {
+      validateSender(event);
+      return readExplorerClipboard();
+    });
     const scopedActions = new Set([
       "copilot-history", "open-sticky", "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
       "git-status", "git-connect", "github-login", "git-sync", "git-disconnect", "git-clone", "personal-sync-action", "personal-sync-zips", "show-personal-sync-recovery",
-      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
+      "create", "open-or-create", "save", "create-document", "save-document", "import-attachment", "transfer-dropped-file", "tree-file-revision", "read-other-file", "read-attachment", "copy-text", "choose-attachments",
       "move-file", "rename-tree-entry", "copy-file", "trash-file", "trash-folder", "restore-trash", "recovery",
       "read-office-document", "open-office-document", "read-word-document", "open-word-document",
     ]);
@@ -661,7 +699,7 @@ app
         await openedVaults.get(source.id)?.ready;
         if (source === target || workspaceVault(source.id) !== source || await realpath(source.root) !== source.root)
           throw new Error("원본 보관함을 다시 확인해 주세요.");
-        const result = await source.moveDocumentTo(args.from, args.folder, args.revision, target);
+        const result = await source.moveDocumentTo(args.from, args.folder, args.revision, target, args.expectedStat);
         openedVaults.get(source.id)?.git.markDirty(source.id);
         return result;
       },
@@ -1026,24 +1064,21 @@ app
         checkVault(args, vault);
         const result = args.externalId
           ? await externalDocuments().copyToVault(args.externalId, vault, args.folder, args.revision)
-          : await vault.transferDroppedFile(args.source, args.folder, args.operation);
+          : args.registeredSource
+            ? await moveRegisteredFile(args.registeredSource.root, args.registeredSource.from, vault, args.folder)
+            : await vault.transferDroppedFile(args.source, args.folder, args.operation);
         const sync=openedVaults.get(vault.id)?.git.personal;
         if(sync?.disk && result.path && /\.(?:zip|pdf|pptx|xlsx)$/i.test(result.path)) {
           const copy=await sync.disk.read(result.path).catch(()=>null);
           if(copy) sync.confirmed.set(result.path,copy.oid);
         }
-        if (args.operation === "move" && !result.warning && !result.unchanged) {
-          for (const { vault: source, git } of openedVaults.values()) {
-            if (source.id !== vault.id && args.source.startsWith(source.root + path.sep)) {
-              git.markDirty(source.id);
-              result.sourceVaultId = source.id;
-              break;
-            }
-          }
-        }
         return result;
       },
       "reveal-file": revealFile,
+      "tree-file-revision": (args, vault) => {
+        checkVault(args, vault);
+        return vault.treeFileRevision(args.path);
+      },
       "read-other-file": (args, vault) => {
         checkVault(args, vault);
         return vault.readOtherFile(args.path);
@@ -1137,9 +1172,7 @@ app
       },
       "move-file": (args, vault) => {
         checkVault(args, vault);
-        return stickyNotes && validNotePath(args.from)
-          ? stickyNotes.moveFile(vault, args.from, args.to, args.revision)
-          : vault.moveFile(args.from, args.to, args.revision);
+        return moveWithinVault(vault, args.from, args.to, args.revision, args.moveAsset, args.expectedStat);
       },
       "rename-tree-entry": (args, vault, gitBackup) => gitBackup.enqueueLocal(async () => {
         checkVault(args, vault);
@@ -1154,7 +1187,7 @@ app
         if (folder && (!canTrashFolder(from, args.protectedFolders) || !canTrashFolder(to, args.protectedFolders) ||
             from === "포스트잇" || stickyNotes?.hasNotesWithin(vault, from)))
           throw new Error("저널, 첨부파일 또는 Sticky Note가 사용하는 폴더는 이름을 바꿀 수 없습니다.");
-        if (folder || /\.docx$/i.test(from)) return vault.renameTreeEntry(from, to, { folder, revision });
+        if (folder || (!validNotePath(from) && !documentKind(from))) return vault.renameTreeEntry(from, to, { folder, revision });
         return stickyNotes && validNotePath(from) ? stickyNotes.moveFile(vault, from, to, revision) : vault.moveFile(from, to, revision);
       }),
       "copy-file": async (args, target) => {
@@ -1166,6 +1199,8 @@ app
           if (workspaceVault(source.id) !== source || await realpath(source.root) !== source.root)
             throw new Error("원본 보관함 위치가 변경되었습니다.");
         }
+        if (!validNotePath(args.from) && !documentKind(args.from))
+          return target.transferDroppedFile(await source.fileLocation(args.from), args.folder, "copy");
         return target.copyDocument(args.from, args.folder, args.revision, source);
       },
       "trash-file": (args, vault) => {
@@ -1199,7 +1234,7 @@ app
         const transfer = name === "move-across-vaults" || name === "copy-file";
         const changesCheckout = name === "git-workspace-action" && ["switch-branch", "create-branch"].includes(args?.action?.kind);
         const exclusive = registering || globalOperation || transfer || changesCheckout || (!checkingCapture && ["git-restore", "composer-apply", "classification-apply", "pdf-apply", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore"].includes(name));
-        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
+        const readOnly = checkingCapture || /^(copilot|codex|claude|update|ai)-/.test(name) || ["document-drafts", "capture-status", "capture-sessions", "snapshot", "workspace-snapshots", "vaults", "git-status", "git-history", "git-preview", "git-workspace-status", "git-workspace-diff", "composer-preview", "classification-preview", "pdf-preview", "check-updates", "open-web-viewer", "reveal-file", "tree-file-revision", "read-other-file", "read-attachment", "read-office-document", "open-office-document", "read-word-document", "open-word-document", "choose-external-file", "open-external-file", "read-external-file", "close-external-file", "open-external-file-source", "copy-text", "recovery", "external"].includes(name);
         let release;
         try {
           validateSender(event);
@@ -1220,9 +1255,21 @@ app
               const source = workspaceVault(args.sourceVaultId);
               if (source) roots.push(source.root);
             }
-            if (name === "transfer-dropped-file" && args?.operation === "move" && typeof args.source === "string") {
-              for (const {vault: source} of openedVaults.values()) {
-                if (args.source.startsWith(source.root + path.sep)) roots.push(source.root);
+            let managedMove = false;
+            if (name === "transfer-dropped-file") {
+              args = { ...args, registeredSource: null };
+              if (args.operation === "move" && typeof args.source === "string" && path.isAbsolute(args.source)) {
+                // Canonicalize the parent only. The vault must still reject a symlink at the file itself.
+                args.source = path.join(await realpath(path.dirname(args.source)), path.basename(args.source));
+                const root = [...registry.roots, target.root].sort((a, b) => b.length - a.length).find(root => {
+                  const relative = path.relative(root, args.source);
+                  return relative && !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
+                });
+                if (root) {
+                  args.registeredSource = { root, from: path.relative(root, args.source).split(path.sep).join("/") };
+                  roots.push(root);
+                  managedMove = true;
+                }
               }
             }
             const reviewRead = name === "personal-sync-action" && ["versions", "comparison", "hunks", "preview"].includes(args?.action);
@@ -1230,7 +1277,7 @@ app
               await vaultOperations.waitForReviewReads(target.root);
               if (target !== (scoped ? workspaceVault(args.vaultId) : vault)) throw new Error("보관함 위치가 변경되었습니다.");
             }
-            release = vaultOperations.begin(roots, exclusive, selecting || exclusive || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry", reviewRead ? target?.root : undefined);
+            release = vaultOperations.begin(roots, exclusive || managedMove, selecting || exclusive || managedMove || name === "git-workspace-action" || name === "trash-folder" || name === "rename-tree-entry", reviewRead ? target?.root : undefined);
           }
           const entry = openedVaults.get(target?.id);
           if (entry && scoped) {

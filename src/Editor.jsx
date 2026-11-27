@@ -36,7 +36,7 @@ import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { suggestNotes } from "../core/knowledge.mjs";
 import { changedRange } from "./copilotEdits.mjs";
 import { headingId } from "../core/headings.mjs";
-import { livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
+import { copyEditorSelection, livePreview, refreshLivePreview, wikiSyntax } from "./live-preview.mjs";
 import { outlineFolding, runOutlineCommand, runMarkdownFormat, runTextColor, runTextSize, runHighlight, runBulletFormat, contextSelectionContains } from "./editorCommands.mjs";
 import { journalOutline, journalInsertAttachments, addJournalBlock } from "./journal-outline.mjs";
 import { applyOutlineRegion, selectedOutlineRegion } from "./outline-regions.mjs";
@@ -89,6 +89,7 @@ export default function Editor({
   const host = useRef(null);
   const editor = useRef(null);
   const beforeContextMenu = useRef(null);
+  const pointerSelection = useRef(null);
   const callback = useRef(onChange);
   const lineBreak = useRef("\n");
   // CodeMirror keeps normalized offsets internally; disk content retains the
@@ -218,6 +219,8 @@ export default function Editor({
             if (update.docChanged && !syncing.current)
               callback.current(update.state.doc.sliceString(0, update.state.doc.length, lineBreak.current));
             if (update.selectionSet || update.docChanged) {
+              const selectionChange = update.transactions.findLast(tr => tr.selection);
+              pointerSelection.current = selectionChange?.isUserEvent("select.pointer") ? update.state.selection : null;
               trackRegionSelection(update.state);
               const { from, to } = update.state.selection.main;
               if (from === to) {
@@ -370,7 +373,9 @@ export default function Editor({
       view.focus();
     }
   }, [jump, note.path]);
-  return <div className="code-editor">
+  return <div className="code-editor" onCopy={event => {
+    if (pointerSelection.current === editor.current?.state.selection) copyEditorSelection(event, editor.current);
+  }}>
     {journal && <div className="journal-outline-toolbar" role="toolbar" aria-label="저널 블록 작성">
       <span>Enter 새 블록 · Tab 하위 · Shift+Tab 상위 · Shift+Enter 줄바꿈</span>
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => addJournalBlock(editor.current)}>저널 블록 추가</button>

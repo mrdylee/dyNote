@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 const call = (method, args) => ipcRenderer.invoke(`notes:${method}`, args);
+let cutSequence, movedPaths = new Set();
 contextBridge.exposeInMainWorld(
   "notes",
   Object.freeze({
@@ -136,6 +137,20 @@ contextBridge.exposeInMainWorld(
     chooseExternalFile: () => call("choose-external-file"),
     copyExternalFile: ({ vaultId, workspace, folder, id, revision }) =>
       call("transfer-dropped-file", { vaultId, workspace, folder, externalId: id, revision, operation: "copy" }),
+    ...(process.platform === "win32" && { readExplorerFiles: async () => {
+      const { paths, operation, sequence } = await call("explorer-clipboard");
+      if (sequence !== cutSequence) { movedPaths = new Set(); cutSequence = sequence; }
+      const moved = movedPaths;
+      return { operation, files: paths.filter(source => !moved.has(source)).map(source => ({
+        name: source.split("\\").at(-1),
+        pasteTo: async ({ vaultId, folder }) => {
+          if (moved.has(source)) return { ok: true, value: { unchanged: true } };
+          const result = await call("transfer-dropped-file", { vaultId, folder, workspace: true, source, operation });
+          if (operation === "move" && result.ok && !result.value.warning && !result.value.unchanged) moved.add(source);
+          return result;
+        },
+      })) };
+    } }),
     transferDroppedFile: (args, file) => {
       const source = webUtils.getPathForFile(file);
       if (!source) return Promise.resolve({ ok: false, error: "디스크에 저장된 파일을 놓아 주세요." });
@@ -164,6 +179,7 @@ contextBridge.exposeInMainWorld(
     moveFile: (args) => call("move-file", args),
     renameTreeEntry: (args) => call("rename-tree-entry", { ...args, workspace: true }),
     copyFile: (args) => call("copy-file", args),
+    treeFileRevision: args => call("tree-file-revision", args),
     trashFile: (args) => call("trash-file", args),
     trashFolder: (args) => call("trash-folder", args),
     restoreTrash: (args) => call("restore-trash", args),

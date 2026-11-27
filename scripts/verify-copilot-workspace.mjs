@@ -32,6 +32,7 @@ async function launch() {
     ipcMain.removeHandler("notes:copilot-send");
     ipcMain.handle("notes:copilot-send", (event, args) => {
       globalThis.actualChat = args;
+      if (args.prompt === "전송 실패 확인") return { ok: false, error: "테스트 전송 거절" };
       const emit = (type, fields) => event.sender.send("notes:copilot-event", { requestId: args.requestId, type, ...fields });
       if (args.mode === "agent" && args.prompt === "두 노트를 작성") {
         emit("proposal", { proposal: { id: "a", kind: "edit", path: "Home.md", content: "by agent" } });
@@ -121,6 +122,13 @@ try {
   assert.deepEqual((await app.evaluate(() => globalThis.actualChat)).history, [
     { role: "user", content: "기준 확인" }, { role: "assistant", content: "기준 확인 완료" },
   ]);
+  await page.getByLabel("Copilot 질문").fill("전송 실패 확인");
+  await button("Copilot 보내기").click();
+  await page.getByText("테스트 전송 거절", { exact: true }).waitFor();
+  await button("복원 지점").first().click(); await button("대화 복원").click();
+  await page.getByRole("dialog", { name: "대화 복원" }).waitFor({ state: "hidden" });
+  assert.equal(await button("복원 지점").count(), 1);
+  assert.equal(await page.getByLabel("Copilot 질문").inputValue(), "전송 실패 확인");
   assert.deepEqual(errors, []);
   console.log("PASS: mentions, extensions, conversation-only rewind, saved files and pending draft preserved, restart, next-turn context.");
 } finally { await close(); }

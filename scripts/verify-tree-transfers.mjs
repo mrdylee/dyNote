@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { localDate } from "../core/periodic-notes.mjs";
 
 const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODULE || "playwright");
@@ -21,6 +23,15 @@ try {
   await writeFile(path.join(personal, "Inbox/Plan.md"), source);
   await writeFile(path.join(personal, "Conflict/Plan.md"), "# Existing\n");
   await writeFile(path.join(personal, "Reference.md"), "[Plan](Inbox/Plan.md)\n");
+  const tableSource = "| 항목 | 상태 |\n| :--- | ---: |\n| **보고서** | 검토 중 |\n\n표 밖 문단";
+  await writeFile(path.join(personal, "Table.md"), tableSource);
+  const selectionLine = "앞 선택 ```기호 `유지` 본문``` 마침 뒤";
+  const styleLine = '앞 색상시작 <span style="background-color:#ffe58a"><span style="color:#c62828">강조</span></span> 색상끝 뒤';
+  await writeFile(path.join(personal, "Selection.md"), styleLine + "\n\n" + selectionLine + "\n\n```txt\n첫 줄\n둘째 줄\n```\n");
+  await writeFile(path.join(personal, "Shell.md"), "# Shell move");
+  await writeFile(path.join(personal, "Shell index.md"), "[link](Shell.md)");
+  await writeFile(path.join(personal, "Cut.pdf"), "original");
+  await writeFile(path.join(personal, "Manual.txt"), "ordinary file");
   await writeFile(path.join(personal, "Deliver.md"), "# Hand-off\n");
   await writeFile(path.join(personal, "Linked.md"), "[Reference](Reference.md)\n");
   await writeFile(path.join(team, "Shared/Reference.md"), "# Another reference\n");
@@ -72,8 +83,125 @@ try {
   const folderDialog = page.getByRole("dialog", { name: "폴더 추가", exact: true });
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   const keyboardFile = row(teamTree, "Shared/Keyboard.md");
+  const keyCopy = row(personalTree, "Copies/Keyboard.md");
+  const moveDialog = page.getByRole("dialog", { name: "이동할까요?", exact: true });
+  await app.evaluate(async ({ clipboard, ClipboardItem }) => {
+    globalThis.previousTreeClipboard = await Promise.all((await clipboard.read()).filter(item => item.types.length).map(async item =>
+      new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
+  });
+  const setExplorerClipboard = (file, operation) => {
+    execFileSync("powershell.exe", ["-NoProfile", "-STA", "-Command", `
+        Add-Type -AssemblyName System.Windows.Forms
+        $data = New-Object Windows.Forms.DataObject
+        $paths = New-Object Collections.Specialized.StringCollection
+        [void]$paths.Add($env:DYNOTE_CLIPBOARD_FIXTURE)
+        $data.SetFileDropList($paths)
+        $effect = [IO.MemoryStream]::new([BitConverter]::GetBytes([int]${operation === "move" ? 2 : 1}))
+        $data.SetData('Preferred DropEffect', $effect)
+        [Windows.Forms.Clipboard]::SetDataObject($data, $true)
+      `], { env: { ...process.env, DYNOTE_CLIPBOARD_FIXTURE: file } });
+  };
+  const external = path.join(root, "외부 문서.txt");
+  await writeFile(external, "File from Explorer");
+  for (const operation of process.platform === "win32" ? ["copy", "move"] : process.platform === "darwin" ? ["copy"] : []) {
+    if (process.platform === "win32") setExplorerClipboard(external, operation);
+    else {
+      await app.evaluate(async ({ clipboard, ClipboardItem }, url) => {
+        await clipboard.write([new ClipboardItem({ 'electron application/osclipboard;format="public.file-url"': new Blob([url]) })]);
+      }, pathToFileURL(external).href);
+    }
+    const folder = operation === "copy" ? "Copies" : "Archive";
+    await row(personalTree, folder).press(modifier + "+v");
+    await row(personalTree, folder + "/" + path.basename(external).normalize(process.platform === "darwin" ? "NFD" : "NFC")).waitFor();
+    assert.equal(await readFile(path.join(personal, folder, "외부 문서.txt"), "utf8"), "File from Explorer");
+    if (operation === "copy") assert.equal(await readFile(external, "utf8"), "File from Explorer");
+    else await assert.rejects(readFile(external), { code: "ENOENT" });
+  }
+  // Feed a real filesystem File through the same sidebar transfer used by Explorer paste.
+  await row(personalTree, "Shell.md").click();
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.id = "shell-move-fixture";
+    document.body.append(input);
+  });
+  const input = page.locator("#shell-move-fixture");
+  const moveShellFile = async (file, target) => {
+    if (process.platform === "win32") {
+      setExplorerClipboard(file, "move");
+      await target.press(modifier + "+v");
+      return;
+    }
+    await input.setInputFiles(file);
+    await target.evaluate(el => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(document.querySelector("#shell-move-fixture").files[0]);
+      el.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer }));
+    });
+  };
+  await moveShellFile(path.join(personal, "Shell.md"), row(personalTree, "Copies"));
+  await pane("Copies/Shell.md").waitFor();
+  assert.equal(await readFile(path.join(personal, "Shell index.md"), "utf8"), "[link](Copies/Shell.md)");
+  await moveShellFile(path.join(personal, "Copies/Shell.md"), row(teamTree, "Taken"));
+  await page.getByRole("alert").filter({ hasText: "참조하는 링크" }).waitFor();
+  assert.equal(await readFile(path.join(personal, "Copies/Shell.md"), "utf8"), "# Shell move");
+  await assert.rejects(readFile(path.join(team, "Taken/Shell.md")), { code: "ENOENT" });
+  await input.evaluate(el => el.remove());
+
+  await row(personalTree, "Cut.pdf").press(modifier + "+x");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await moveDialog.waitFor();
+  await rename(path.join(personal, "Cut.pdf"), path.join(personal, "Old.pdf"));
+  await writeFile(path.join(personal, "Cut.pdf"), "replacement");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "변경" }).waitFor();
+  assert.equal(await readFile(path.join(personal, "Cut.pdf"), "utf8"), "replacement");
+  await assert.rejects(readFile(path.join(personal, "Copies/Cut.pdf")), { code: "ENOENT" });
+
+  await row(teamTree, "Shared/Original.docx").press(modifier + "+c");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await row(personalTree, "Copies/Original.docx").press(modifier + "+x");
+  await row(personalTree, "Archive").press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(personalTree, "Archive/Original.docx").waitFor();
+  assert.deepEqual(await readFile(path.join(personal, "Archive/Original.docx")), await readFile(path.join(team, "Shared/Original.docx")));
+  await row(personalTree, "Archive/Original.docx").press(modifier + "+x");
+  await row(teamTree, "Taken").press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(teamTree, "Taken/Original.docx").waitFor();
+  await assert.rejects(readFile(path.join(personal, "Archive/Original.docx")), { code: "ENOENT" });
+  assert.deepEqual(await readFile(path.join(team, "Taken/Original.docx")), await readFile(path.join(team, "Shared/Original.docx")));
+  await keyboardFile.click();
+  await page.keyboard.press(modifier + "+c");
+  await row(personalTree, "Copies").press(modifier + "+v");
+  await keyCopy.waitFor();
+  await keyCopy.press(modifier + "+v");
+  await row(personalTree, "Copies/Keyboard (복사본).md").waitFor();
+  await keyCopy.press(modifier + "+x");
+  const rootHeading = personalTree.locator("h3");
+  await rootHeading.press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "취소" }).click();
+  assert.equal(await readFile(path.join(personal, "Copies/Keyboard.md"), "utf8"), "# Keyboard\n");
+  await rootHeading.press(modifier + "+v");
+  await moveDialog.getByRole("button", { name: "이동", exact: true }).click();
+  await row(personalTree, "Keyboard.md").waitFor();
+  await assert.rejects(readFile(path.join(personal, "Copies/Keyboard.md")), { code: "ENOENT" });
+  assert.equal(await readFile(path.join(personal, "Keyboard.md"), "utf8"), "# Keyboard\n");
+  await row(teamTree, "Shared").press(modifier + "+v");
+  assert.equal(await moveDialog.count(), 0);
   await keyboardFile.click();
   const keyboardEditor = pane("Shared/Keyboard.md").getByRole("textbox", { name: "Markdown 편집기", exact: true });
+  await keyboardFile.press(modifier + "+c");
+  await keyboardEditor.press(modifier + "+a");
+  await keyboardEditor.press(modifier + "+x");
+  assert.equal(await keyboardEditor.evaluate(el => el.cmTile.root.view.state.doc.toString()), "");
+  await keyboardEditor.press(modifier + "+v");
+  assert.equal(await keyboardEditor.evaluate(el => el.cmTile.root.view.state.doc.toString()), "# Keyboard\n");
+  await keyboardEditor.press(modifier + "+a");
+  await keyboardEditor.press(modifier + "+c");
+  await row(personalTree, "Archive").press(modifier + "+v");
+  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), "# Keyboard\n");
+  assert.equal(await row(personalTree, "Archive/Keyboard.md").count(), 0);
   await keyboardEditor.press("Home");
   await keyboardEditor.press("Delete");
   assert.equal(await trashDialog.count(), 0);
@@ -220,9 +348,127 @@ try {
   await row(personalTree,"Journal").press("F2");
   await page.getByText("앱에서 사용하는 기본 폴더입니다.",{exact:true}).waitFor();
   assert.equal(await renameDialog.count(),0);
+  await renameWithF2(personalTree, "Manual.txt", "Renamed.txt");
+  const undo = page.locator(".undo-toast").getByRole("button", { name: "되돌리기", exact: true });
+  for (const [tree, directory, name] of [[personalTree, personal, "Renamed.txt"], [teamTree, team, "Taken/Original.docx"]]) {
+    const file = row(tree, name);
+    await file.waitFor();
+    const bytes = await readFile(path.join(directory, name));
+    await file.press("Delete");
+    await trashDialog.getByRole("button", { name: "취소" }).click();
+    assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+    await file.press("Delete");
+    await trashDialog.getByRole("button", { name: "휴지통으로 이동" }).click();
+    await file.waitFor({ state: "detached" });
+    await assert.rejects(readFile(path.join(directory, name)), { code: "ENOENT" });
+    await undo.click();
+    await file.waitFor();
+    assert.deepEqual(await readFile(path.join(directory, name)), bytes);
+  }
+  await row(personalTree, "Deliver.md").press("Enter");
+  const shortcutEditor = pane("Deliver.md").getByRole("textbox", { name: "Markdown 편집기", exact: true });
+  await shortcutEditor.press(modifier + "+f");
+  await page.locator(".cm-search").waitFor();
+  await page.keyboard.press("Escape");
+  await shortcutEditor.press(modifier + "+End");
+  await page.keyboard.insertText("Saved by shortcut");
+  await shortcutEditor.press(modifier + "+s");
+  await page.waitForFunction(async id => (await window.notes.snapshot({ vaultId: id, workspace: true })).value.notes
+    .some(file => file.path === "Deliver.md" && file.content.includes("Saved by shortcut")), await personalTree.getAttribute("data-tree-drop-vault"));
+  for (const [key, title] of [["k", "문서로 이동"], ["p", "명령 팔레트"], ["n", "새로운 생각 기록하기"]]) {
+    await shortcutEditor.press(modifier + "+" + key);
+    const dialog = page.getByRole("dialog", { name: title, exact: true });
+    await dialog.waitFor();
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+  }
+  const settingsKey = await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu().getMenuItemById("dynote-settings");
+    item.click();
+    return item.accelerator;
+  });
+  assert.equal(settingsKey, "CmdOrCtrl+,");
+  const settings = page.getByRole("dialog", { name: "설정", exact: true });
+  await settings.getByRole("button", { name: "단축키", exact: true }).click();
+  await settings.getByText("복사 · 잘라내기 · 붙여넣기", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 900));
+  await row(personalTree, "Selection.md").click();
+  const dragText = async (surface, first, last) => {
+    const [start, end] = await surface.evaluate((element, [first, last]) => {
+      const point = (text, after) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode, offset = node.data.indexOf(text);
+          if (offset < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, offset + (after ? text.length : 0));
+          range.collapse(true);
+          const box = range.getBoundingClientRect();
+          return { x: box.left, y: box.top + box.height / 2 };
+        }
+        throw new Error("Missing text " + text);
+      };
+      return [point(first, false), point(last, true)];
+    }, [first, last]);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 15 });
+    await page.mouse.up();
+  };
+  const checkCopy = async (surface, first, last, expected) => {
+    await dragText(surface, first, last);
+    await page.keyboard.press(modifier + "+c");
+    const actual = await app.evaluate(async ({ clipboard }) => ({
+      text: await clipboard.readText(), html: (await clipboard.read()).some(item => item.types.includes("text/html")),
+    }));
+    assert.deepEqual(actual, { text: expected, html: false });
+  };
+  for (const mode of ["Live Preview", "편집 보기", "분할 보기", "읽기 보기"]) {
+    await page.locator(".view-segments").getByRole("button", { name: mode, exact: true }).click();
+    if (mode !== "읽기 보기") {
+      const editor = page.locator(".document-pane.focused .cm-content");
+      await checkCopy(editor, "선택", "마침", mode === "Live Preview" ? "선택 기호 `유지` 본문 마침" : selectionLine.slice(2, -2));
+      await checkCopy(editor, "색상시작", "색상끝", "색상시작 강조 색상끝");
+      await checkCopy(editor, "첫 줄", "둘째 줄", "첫 줄\n둘째 줄");
+    }
+    if (mode === "읽기 보기" || mode === "분할 보기") {
+      const preview = page.locator(".document-pane.focused .markdown-preview");
+      await checkCopy(preview, "선택", "마침", "선택 기호 `유지` 본문 마침");
+      await checkCopy(preview, "색상시작", "색상끝", "색상시작 강조 색상끝");
+      await checkCopy(preview, "첫 줄", "둘째 줄", "첫 줄\n둘째 줄");
+    }
+  }
+  await row(personalTree, "Table.md").click();
+  await page.locator(".view-segments").getByRole("button", { name: "Live Preview", exact: true }).click();
+  const tableEditor = pane("Table.md").locator(".cm-content");
+  const table = tableEditor.locator(".cm-live-table table");
+  await table.locator("th").filter({ hasText: /^상태$/ }).waitFor();
+  assert.equal(await table.locator("td strong").innerText(), "보고서");
+  const cell = table.locator("td").filter({ hasText: /^검토 중$/ });
+  await checkCopy(cell, "검토", "중", "검토 중");
+  await cell.click();
+  await table.waitFor({ state: "detached" });
+  await page.keyboard.insertText("입니다");
+  await tableEditor.getByText("표 밖 문단", { exact: true }).click();
+  await table.locator("td").filter({ hasText: /^검토 중입니다$/ }).waitFor();
+  await page.keyboard.press(modifier + "+s");
+  assert.equal(await readFile(path.join(personal, "Table.md"), "utf8"), tableSource.replace("검토 중", "검토 중입니다"));
+  await table.locator("th").first().click();
+  await table.waitFor({ state: "detached" });
+  await page.keyboard.press("Home");
+  assert.equal(await table.count(), 0);
+  await row(personalTree, "Table.md").focus();
+  await table.waitFor();
+  console.log("Live table cell copy, source editing, saved Markdown and preview on blur passed.");
+  console.log("Mouse selection copied the displayed text in live, source, split and reading views.");
   assert.deepEqual(errors, []);
   console.log("Native folder drops move drafts and links, copy with Ctrl, protect conflicts, preserve originals, block cross-vault link changes, and rename personal and team entries by F2 and context menu with links intact.");
 } finally {
+  await app?.evaluate(async ({ clipboard }) => {
+    if (globalThis.previousTreeClipboard?.length) await clipboard.write(globalThis.previousTreeClipboard);
+    else if (globalThis.previousTreeClipboard) clipboard.clear();
+  }).catch(() => {});
   await app?.close();
   await rm(root, { recursive: true, force: true });
 }

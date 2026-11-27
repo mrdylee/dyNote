@@ -13,7 +13,7 @@ test("rewind keeps the selected exchange, rejects a stale tail and persists the 
   let store = new CopilotHistory(root);
   const run = (action, requestId, extra = {}) => store.run(vaultId, { action, chatId, requestId, ...extra });
   for (const [requestId, prompt] of [[first, "A"], [second, "B"]]) {
-    await run("begin", requestId, { prompt, mode: "chat" });
+    await run("begin", requestId, { prompt, mode: "chat", lastRequestId: requestId === first ? undefined : first });
     await run("finish", requestId, { status: "done", content: prompt + " answer" });
   }
   await assert.rejects(run("rewind", first, { lastRequestId: first }), /변경/);
@@ -25,7 +25,13 @@ test("rewind keeps the selected exchange, rejects a stale tail and persists the 
   assert.deepEqual(await run("open"), restored);
   assert.deepEqual(await store.run("team", { action: "list" }), []);
   const next = randomUUID();
-  await run("begin", next, { prompt: "C", mode: "chat" });
+  await assert.rejects(run("begin", next, { lastRequestId: second, prompt: "stale" }), /변경/);
+  await run("begin", next, { lastRequestId: first, prompt: "unsent" });
+  await run("discardUnsent", next);
+  assert.deepEqual(await run("open"), restored);
+  await run("discardUnsent", first);
+  assert.deepEqual(await run("open"), restored);
+  await run("begin", next, { lastRequestId: first, prompt: "C", mode: "chat" });
   assert.deepEqual((await run("open")).filter(m => m.role === "user").map(m => m.content), ["A", "C"]);
 });
 

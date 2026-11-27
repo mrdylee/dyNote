@@ -5,7 +5,7 @@ import path from "node:path";
 const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 function messages(turns) {
   return turns.flatMap(t => [
-    { id: t.id + "-user", role: "user", content: t.prompt, imageName: t.imageName, mode: t.mode, complete: true },
+    { id: t.id + "-user", requestId: t.id, role: "user", content: t.prompt, imageName: t.imageName, mode: t.mode, complete: true },
     { id: t.id, checkpoint: t.status === "done" ? t.id : null, role: "assistant", content: t.content || (t.status === "canceled" ? "중지된 응답" : "완료되지 않은 응답"), mode: t.mode, complete: t.status === "done" },
     ...(t.applied ? [{ id: t.id + "-applied", role: "assistant", mode: "agent", complete: true, content: t.applied }] : []),
   ]);
@@ -43,7 +43,11 @@ export class CopilotHistory {
     let result;
     if (action === "begin") {
       if (turn) throw new Error("이미 저장된 요청입니다.");
+      if (chat.turns.at(-1)?.id !== args.lastRequestId) throw new Error("대화가 변경되었습니다. 최근 대화에서 다시 열어 주세요.");
       chat.turns.push({ id: requestId, prompt: args.prompt, mode: args.mode, imageName: args.imageName });
+    } else if (action === "discardUnsent") {
+      if (turn.status) return;
+      chat.turns.splice(index, 1);
     } else if (action === "finish") {
       turn.status = args.status; turn.content = args.content ?? "";
     } else if (action === "applied") {

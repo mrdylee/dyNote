@@ -646,18 +646,20 @@ kbd {
 ::highlight(tok-invalid), ::highlight(tok-deleted) { color: #a53336; }
 :is(pre code, .code-editor) .tok-comment,
 ::highlight(tok-comment) { color: #596575; font-style: italic; }
-.markdown-preview table {
+.cm-live-table { padding: 0 22px; overflow-x: auto; white-space: normal; user-select: text; }
+.cm-live-table table, .markdown-preview table {
   width: 100%;
   border-collapse: collapse;
   font-size: 11px;
   margin: 16px 0 25px;
   text-align: left;
 }
-.markdown-preview th {
+.cm-live-table th, .markdown-preview th {
   background: var(--panel);
   color: var(--muted);
   font-weight: 500;
 }
+.cm-live-table :is(td, th),
 .markdown-preview td,
 .markdown-preview th {
   padding: 9px 12px;

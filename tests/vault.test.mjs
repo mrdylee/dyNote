@@ -1,4 +1,5 @@
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -366,4 +367,96 @@ test('batch document changes accept large Markdown and preserve type and structu
   await assert.rejects(store.applyDocumentChanges([{ path: 'Invalid.md', content: {} }], snapshot.revision), /내용/);
   await assert.rejects(store.save('Batch.md', {}, result.snapshot.notes.find(n => n.path === 'Batch.md').revision), /내용/);
   assert.equal(await readFile(join(root, board.path), 'utf8'), board.content);
+});
+
+test("a cut file replaced at the same path stays in place on same- and cross-vault paste", async t => {
+  const { dir, root, store, recovery } = await fixture(t);
+  const targetRoot = join(dir, "team");
+  await mkdir(targetRoot);
+  await mkdir(join(root, "Inbox"));
+  const target = await Vault.open(targetRoot, recovery);
+  for (const name of ["Plan.md", "Report.pdf"]) {
+    await writeFile(join(root, name), "original");
+    const expectedStat = await store.treeFileRevision(name);
+    const note = (await store.snapshot()).notes.find(file => file.path === name);
+    await fs.rename(join(root, name), join(root, "old-" + name));
+    await writeFile(join(root, name), "original"); // Even identical contents belong to a different file.
+    const to = "Inbox/" + name;
+    await assert.rejects(note ? store.moveFile(name, to, note.revision, expectedStat)
+      : store.renameTreeEntry(name, to, { moveAsset: true, expectedStat }), /변경/);
+    await assert.rejects(store.moveDocumentTo(name, "", note?.revision, target, expectedStat), /변경/);
+    assert.equal(await readFile(join(root, name), "utf8"), "original");
+    await assert.rejects(fs.stat(join(root, to)), { code: "ENOENT" });
+    await assert.rejects(fs.stat(join(targetRoot, name)), { code: "ENOENT" });
+  }
+});
+
+test("file rename and staged restore also publish exclusively without hard links", async t => {
+  const { root, store } = await fixture(t);
+  await writeFile(join(root, "Report.pdf"), "pdf contents");
+  await store.create("Index.md", "[read](Report.pdf)");
+  let competing = false;
+  t.mock.method(fs, "link", async (_from, to) => {
+    if (competing) await writeFile(to, "competing", { flag: "wx" });
+    throw Object.assign(new Error("no hard links"), { code: "ENOTSUP" });
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await store.renameTreeEntry("Report.pdf", "Renamed.pdf", { revision: await store.treeFileRevision("Report.pdf") });
+  assert.equal(await readFile(join(root, "Index.md"), "utf8"), "[read](Renamed.pdf)");
+  const item = await store.trashFile("Renamed.pdf", await store.treeFileRevision("Renamed.pdf"));
+  competing = true;
+  await assert.rejects(store.restoreTrash(item.id));
+  assert.equal(await readFile(join(root, "Renamed.pdf"), "utf8"), "competing");
+  await fs.unlink(join(root, "Renamed.pdf"));
+  competing = false;
+  await store.restoreTrash(item.id);
+  assert.equal(await readFile(join(root, "Renamed.pdf"), "utf8"), "pdf contents");
+});
+
+test("an interrupted restore leaves the final name free for a complete retry", async t => {
+  const { root, store, recovery } = await fixture(t);
+  const name = "Archive.bin", bytes = Buffer.alloc(256 * 1024, 42);
+  await writeFile(join(root, name), bytes);
+  const entry = await store.trashFile(name, await store.treeFileRevision(name));
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import fs from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    import { Vault } from ${JSON.stringify(new URL("../core/vault.mjs", import.meta.url).href)};
+    const vault = await Vault.open(process.argv[1], process.argv[2]);
+    const open = fs.open;
+    fs.open = async (...args) => {
+      const handle = await open(...args);
+      if (args[0].startsWith(vault.root) && typeof args[1] === "number" && (args[1] & 1)) {
+        const write = handle.writeFile.bind(handle);
+        handle.writeFile = async chunk => { await write(chunk.subarray(0, 16)); process.exit(71); };
+      }
+      return handle;
+    };
+    syncBuiltinESMExports();
+    await vault.restoreTrash(process.argv[3]);
+  `, root, recovery, entry.id], { encoding: "utf8", timeout: 10000 });
+  assert.equal(child.status, 71, child.stderr);
+  await assert.rejects(fs.stat(join(root, name)), { code: "ENOENT" });
+  await store.restoreTrash(entry.id);
+  assert.deepEqual(await readFile(join(root, name)), bytes);
+});
+
+test("replacing a cut file during publication preserves the replacement", async t => {
+  const { root, store } = await fixture(t);
+  await mkdir(join(root, "Inbox"));
+  await writeFile(join(root, "Report.pdf"), "original");
+  const expectedStat = await store.treeFileRevision("Report.pdf");
+  const link = fs.link;
+  t.mock.method(fs, "link", async (source, destination) => {
+    await link(source, destination);
+    await fs.rename(source, join(root, "Old.pdf"));
+    await writeFile(source, "replacement", { flag: "wx" });
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await assert.rejects(store.renameTreeEntry("Report.pdf", "Inbox/Report.pdf", { moveAsset: true, expectedStat }), /변경/);
+  assert.equal(await readFile(join(root, "Report.pdf"), "utf8"), "replacement");
+  assert.equal(await readFile(join(root, "Old.pdf"), "utf8"), "original");
+  await assert.rejects(fs.stat(join(root, "Inbox/Report.pdf")), { code: "ENOENT" });
 });
