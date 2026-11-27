@@ -7,6 +7,7 @@ test("desktop bridge routes each AI provider through its own channel", async () 
   let api;
   const calls = [], listeners = new Map();
   runInNewContext(await readFile(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+    process: { platform: process.platform },
     require: () => ({
       contextBridge: { exposeInMainWorld(name, value) { assert.equal(name, "notes"); api = value; } },
       ipcRenderer: { invoke: async (...args) => { calls.push(args); }, on: (name, fn) => listeners.set(name, fn), removeListener: name => listeners.delete(name) },
@@ -38,8 +39,40 @@ test("desktop bridge routes each AI provider through its own channel", async () 
 
 test('journal capture bridge keeps the vault and selected import/delete arguments intact',async()=>{
  let api;const calls=[];
- runInNewContext(await readFile(new URL('../electron/preload.cjs',import.meta.url),'utf8'),{require:()=>({contextBridge:{exposeInMainWorld(_name,value){api=value;}},ipcRenderer:{invoke:async(...args)=>calls.push(args)}})});
+ runInNewContext(await readFile(new URL('../electron/preload.cjs',import.meta.url),'utf8'),{process:{platform:process.platform},require:()=>({contextBridge:{exposeInMainWorld(_name,value){api=value;}},ipcRenderer:{invoke:async(...args)=>calls.push(args)}})});
  const input={vaultId:'personal',manual:true,dailyOptions:{folder:'Journal'}};
  await api.syncCapture(input);await api.trashCapture({vaultId:'personal',id:'record',sessionId:'session'});await api.restoreCapture({vaultId:'personal',trashId:'trash'});
  assert.deepEqual(calls,[['notes:capture-sync',input],['notes:capture-trash',{vaultId:'personal',id:'record',sessionId:'session'}],['notes:capture-restore',{vaultId:'personal',trashId:'trash'}]]);
+});
+
+test("Windows Explorer paste keeps the selected folder and consumes each successful cut once", async () => {
+  let api, sequence = 1, operation = "move";
+  const paths = ["C:\\Temp\\원본.docx", "C:\\Temp\\budget.xlsx"];
+  const transfers = [];
+  runInNewContext(await readFile(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+    process: { platform: "win32" },
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: async (name, args) => {
+        if (name === "notes:explorer-clipboard") return { paths, operation, sequence };
+        assert.equal(name, "notes:transfer-dropped-file");
+        transfers.push({ ...args });
+        return { ok: true, value: { path: "Reports/원본.docx" } };
+      } },
+    }),
+  });
+  const target = { vaultId: "team", folder: "Reports" };
+  const { files } = await api.readExplorerFiles();
+  assert.equal(files[0].name, "원본.docx");
+  await files[0].pasteTo(target);
+  await files[0].pasteTo(target);
+  assert.deepEqual(transfers, [{ ...target, workspace: true, source: paths[0], operation: "move" }]);
+  assert.equal((await api.readExplorerFiles()).files.length, 1);
+  sequence++;
+  operation = "copy";
+  const fresh = await api.readExplorerFiles();
+  assert.equal(fresh.files.length, 2);
+  await fresh.files[0].pasteTo(target);
+  assert.equal(transfers[1].operation, "copy");
+  assert.equal((await api.readExplorerFiles()).files.length, 2);
 });
