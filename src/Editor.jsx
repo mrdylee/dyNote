@@ -8,7 +8,6 @@ import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
-  panels,
   lineNumbers,
   highlightActiveLine,
   drawSelection,
@@ -74,7 +73,7 @@ export default function Editor({
   onFontSettings,
   onSelection,
   editorRef,
-  searchHost,
+  onFindState,
   pendingOriginal,
 }) {
   const [suggestion, setSuggestion] = useState(null);
@@ -101,7 +100,7 @@ export default function Editor({
   const outlining = useRef(new Compartment());
   const pendingMarks = useRef(new Compartment());
   const latest = useRef(null);
-  latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
+  latest.current = { onFindState, note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
   const liveExtensions = () => livePreview({
     getContext: () => ({ path: latest.current.note.path, vaultId: latest.current.vaultId, attachments: latest.current.attachments }),
     onLink: (target, kind) => latest.current.onLink?.(target, kind),
@@ -121,8 +120,23 @@ export default function Editor({
           history(),
           drawSelection(),
           highlightActiveLine(),
-          search({ top: true }),
-          panels({ topContainer: searchHost?.current }),
+          search(onFindState ? {
+            top: true,
+            scrollToMatch: range => EditorView.scrollIntoView(range, { y: "center" }),
+            // The workspace renders the controls. Keep CodeMirror's match decorations and commands.
+            createPanel(view) {
+              const dom = document.createElement("span");
+              dom.className = "document-find-engine";
+              return { dom, top: true,
+                mount: () => latest.current.onFindState(view.state),
+                update(update) {
+                  if (update.docChanged || update.selectionSet || update.startState.readOnly !== update.state.readOnly)
+                    latest.current.onFindState(update.state);
+                },
+                destroy: () => latest.current.onFindState(null),
+              };
+            },
+          } : { top: true }),
           EditorState.phrases.of({
             Find: "문서에서 찾기", next: "다음", previous: "이전", all: "모두 선택",
             "match case": "대소문자 구분", "by word": "단어 단위", regexp: "정규식",

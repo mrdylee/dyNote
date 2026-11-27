@@ -760,132 +760,45 @@ kbd {
 .code-editor .cm-selectionBackground {
   background: #4285ed66 !important;
 }
-.mindmap-editor { position: relative; }
-.document-search-host {
-  width: min(320px, calc(100% - 12px));
-  margin-left: auto;
-  margin-right: 6px;
+.markdown-find-view { display:flex; flex-direction:column; height:100%; min-height:0; }
+.markdown-find-view > :is(.document-pane,.mindmap-editor) { flex:1; min-height:0; height:auto; }
+.document-search-host { flex:none; width:min(340px,calc(100% - 12px)); margin-left:auto; margin-right:6px; container-type:inline-size; }
+.document-search-host:empty, .cm-panels:has(> .document-find-engine:only-child) { display:none; }
+.document-find {
+  margin:4px 0;
+  padding:4px;
+  border:1px solid var(--accent-line);
+  border-radius:8px;
+  background:var(--surface);
+  color:var(--text);
+  box-shadow:0 2px 8px rgb(0 0 0 / 10%);
+  font:12px/1.3 var(--ui-font,sans-serif);
 }
-.mindmap-editor > .document-search-host {
-  position: sticky;
-  top: 6px;
-  align-self: flex-end;
-  height: 0;
-  z-index: 6;
+.document-find-row { display:grid; grid-template-columns:minmax(0,1fr) 46px 65px repeat(4,22px); gap:2px; align-items:center; }
+.document-find input:not([type=checkbox]), .document-find select {
+  height:26px; width:100%; min-width:0; padding:2px 5px;
+  background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:4px; font:inherit;
 }
-.pane-header > .document-search-host { position: relative !important; }
-.document-search-host:has(.cm-search) {
-  border: 1px solid var(--accent-line);
-  border-radius: 9px;
-  background: var(--surface);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
-  color: var(--text);
+.document-find select { font-size:11px; padding:0; }
+.document-find select:disabled { opacity:1; color:var(--muted); }
+.document-find [role=status] { text-align:center; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.document-find button { border-radius:4px; padding:0 3px; color:var(--muted); }
+.document-find-row button { display:grid; place-items:center; height:25px; }
+.document-find button svg { width:15px; height:15px; }
+.document-find button:hover:enabled, .document-find button[aria-expanded=true] { background:var(--accent-soft); color:var(--accent-ink); }
+.document-find-options { display:grid; gap:4px; margin-top:5px; font-size:11px; }
+.document-find-options > div { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.document-find-options label { display:flex; align-items:center; gap:2px; white-space:nowrap; }
+.document-find-options input[type=checkbox] { margin:0; }
+.document-find-options input[name=replace] { flex:1 1 45px; }
+.document-find :disabled { cursor:default; }
+.document-find-options :disabled { opacity:0.45; }
+@container (max-width: 270px) {
+  .document-find-row { grid-template-columns:minmax(0,1fr) repeat(4,22px); }
+  .document-find-row input { grid-column:1 / 4; }
+  .document-find-row [role=status] { grid-column:4 / 6; }
+  .document-find-row select { grid-column:1; }
 }
-.mindmap-editor > .document-search-host:has(.cm-search) { height: auto; }
-.document-search-host .cm-panels-top:has(.cm-search) {
-  position: static;
-  z-index: auto;
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-.document-search-host .cm-panel.cm-search {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  padding: 4px;
-  font: 12px/1.3 var(--ui-font, sans-serif);
-}
-.document-search-host .cm-panel.cm-search :is(input, button, label) { margin: 0; font-family: inherit; }
-.document-search-host .cm-search .cm-textfield {
-  min-width: 0;
-  width: 0;
-  font-size: 12px;
-  flex: 1 1 0;
-  height: 26px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text);
-  background: var(--panel);
-}
-.document-search-host .cm-textfield:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
-.document-search-host .cm-panel.cm-search button, .find-options {
-  height: 25px;
-  padding: 0 5px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.document-search-host button:hover:enabled, .find-options[aria-expanded=true] {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-.document-search-host .cm-panel.cm-search :is([name=prev], [name=next]) {
-  width: 23px;
-  font-size: 0;
-}
-.document-search-host .cm-search [name=prev] { order: 1; }
-.document-search-host .cm-search [name=next] { order: 2; }
-.document-search-host .cm-search :is([name=prev], [name=next])::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border: solid currentColor;
-  border-width: 1.5px 1.5px 0 0;
-  transform: translateY(2px) rotate(-45deg);
-}
-.document-search-host .cm-search [name=next]::before { transform: translateY(-2px) rotate(135deg); }
-.document-search-host .cm-panel.cm-search [name=close] {
-  position: static;
-  order: 3;
-  margin-left: 27px;
-  width: 23px;
-  font-size: 18px;
-  line-height: 1;
-}
-.document-search-host .cm-search [role=status] {
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.document-search-host .cm-search :is(label, br, [name=select], [name=replace], [name=replaceAll]),
-.document-search-host:not(:has(.cm-search)) .find-controls { display: none; }
-.document-search-host.find-expanded .cm-search::after { content: ""; order: 4; flex-basis: 100%; }
-.document-search-host.find-expanded .cm-search :is(label, [name=select], [name=replace], [name=replaceAll]) {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  order: 5;
-  font-size: 11px;
-}
-.document-search-host.find-expanded .cm-search input[name=replace] { flex-basis: max(65px, calc(100% - 115px)); }
-.document-search-host.find-expanded .cm-search :is([name=replace], [name=replaceAll]) { order: 7; }
-.find-options {
-  position: absolute;
-  top: 5px;
-  right: 29px;
-  width: 25px;
-  display: grid;
-  place-content: center;
-}
-.find-scope {
-  display: flex;
-  gap: 2px;
-  padding: 0 5px 4px;
-}
-.find-scope button {
-  border-radius: 4px;
-  padding: 2px 8px;
-  font: 11px/1.4 var(--ui-font, sans-serif);
-  color: var(--muted);
-}
-.find-scope button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 ::highlight(note-find) { background: #ffeb86; color: #211b0a; }
 ::highlight(note-find-current) { background: #ffad57; color: #211170; }
 .split .code-editor {
