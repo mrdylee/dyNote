@@ -20,7 +20,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[ready,setReady]=useState(false);
   const [annotations,setAnnotations]=useState([]),viewportRef=useRef(null);
   const [pen,setPen]=useState(null),[penColor,setPenColor]=useState('#ffff00'),[strokes,setStrokes]=useState([]);
-  const resumeView=useRef(null),strokeId=useRef(0);
+  const resumeView=useRef(null),strokeId=useRef(0),penStart=useRef(null);
   // Keep the text layer stable while successive strokes are written to the PDF.
   const displayBytes=pen?.bytes??bytes;
   const saving=strokes.some(stroke=>stroke.pending);
@@ -191,10 +191,27 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
     run().catch(e=>{if(!cancelled&&e.name!=='RenderingCancelledException'&&e.name!=='AbortException')setError(e.message);});
     return()=>{cancelled=true;render?.cancel();layer?.cancel();if(textLayer.current===layer)textLayer.current=null;};
   },[pdf,page,scale,target]);
+  function penCaret(event) {
+    const caret=document.caretPositionFromPoint(event.clientX,event.clientY);
+    return caret?.offsetNode.nodeType===Node.TEXT_NODE && textHost.current?.contains(caret.offsetNode) ? caret : null;
+  }
   const captureSelection=event=>{
     const selected=window.getSelection(),layer=textLayer.current;
-    if(!layer || !selected?.rangeCount || selected.isCollapsed){setSelection(null);return;}
-    const range=selected.getRangeAt(0);
+    let range=selected?.rangeCount && !selected.isCollapsed ? selected.getRangeAt(0) : null;
+    const press=penStart.current;
+    if(event.type==='mouseup')penStart.current=null;
+    // Chromium can leave the selection collapsed on a vertical drag between PDF text spans.
+    if(!range && pen && event.type==='mouseup' && event.button===0 && press &&
+       Math.hypot(event.clientX-press.x,event.clientY-press.y)>=4 && textHost.current.contains(press.caret.offsetNode)){
+      const end=penCaret(event);
+      if(end){
+        range=document.createRange();
+        range.setStart(press.caret.offsetNode,press.caret.offset);range.collapse(true);
+        if(range.comparePoint(end.offsetNode,end.offset)<0)range.setStart(end.offsetNode,end.offset);
+        else range.setEnd(end.offsetNode,end.offset);
+      }
+    }
+    if(!layer || !range || range.collapsed){setSelection(null);return;}
     const locate=(node,offset)=>{
       const index=layer.textDivs.findIndex(span=>span===node || span.contains(node));
       if(index<0)return null;
@@ -203,7 +220,7 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
     };
     const start=locate(range.startContainer,range.startOffset),end=locate(range.endContainer,range.endOffset);
     if(pen){
-      if(event.type!=='mouseup'||event.button!==0||!ready||!start||!end||!selected.toString().trim())return;
+      if(event.type!=='mouseup'||event.button!==0||!ready||!start||!end||!range.toString().trim())return;
       const rects=pdfRects(start,end,true);
       if(!rects.length)return;
       const viewport=viewportRef.current;
@@ -250,7 +267,10 @@ export default function PdfViewer({bytes,path,fragment='',backlinks=[],onCopy,on
       {selection?.text&&<p className="pdf-selected-text">선택: {selection.text}</p>}
       {onPreviewEdit&&!pen&&<PdfAnnotationTools penColor={penColor} onPenColor={setPenColor} path={path} page={page} selection={selection} annotations={annotations} onPreview={onPreviewEdit} onApply={onApplyEdit} onFollow={followFragment} onCopy={onCopy}/>}
       <div ref={scrollArea} className="pdf-scroll-area">
-        <div className="pdf-page" aria-busy={!ready}><canvas ref={canvas} aria-label={`PDF ${page}페이지`}/><div ref={textHost} className="native-pdf-text" style={pen?{'--pdf-selection-color':penColor}:undefined} onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="PDF 텍스트"/>
+        <div className="pdf-page" aria-busy={!ready}><canvas ref={canvas} aria-label={`PDF ${page}페이지`}/><div ref={textHost} className="native-pdf-text" style={pen?{'--pdf-selection-color':penColor}:undefined} onMouseDown={event=>{
+          const caret=pen && event.button===0 && penCaret(event);
+          penStart.current=caret ? {caret,x:event.clientX,y:event.clientY} : null;
+        }} onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="PDF 텍스트"/>
           {strokes.filter(stroke=>stroke.page===page).map(stroke=>stroke.styleRects.map((rect,i)=><div key={`${stroke.id}-${i}`} className="pdf-pen-stroke" style={{...rect,backgroundColor:stroke.color,opacity:markerOpacity}}/>))}
           {annotationRect&&<div ref={annotationMarker} className="pdf-annotation-target" aria-label="PDF 링크 주석" style={annotationRect.style}/>}</div>
       </div>

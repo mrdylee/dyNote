@@ -257,10 +257,25 @@ try {
   await teamPane.getByRole('button', { name: `${same} 영역 닫기`, exact: true }).click();
   assert.equal(await panes.count(), 1);
   checks.push('closing panes returns to two and one pane');
+  await dragToSide(teamTree.getByRole('button', { name: '회의록', exact: true }), personalPane);
+  await dragToSide(teamTree.getByRole('button', { name: '계획', exact: true }), teamPane);
+  await teamPane.locator('.pane-title').click();
+  const sessionLayout = window => window.locator('.document-pane').evaluateAll(panes => panes.map(pane => ({
+    vault: pane.dataset.vaultId, path: pane.dataset.documentPath, focused: pane.classList.contains('focused'),
+    basis: pane.closest('.pane-slot').style.flexBasis,
+  })));
+  const beforeQuit = await sessionLayout(page);
+  assert.equal(beforeQuit.length, 3);
+  assert.equal(beforeQuit[1].vault, teamId);
+  assert.ok(beforeQuit[1].focused);
 
   await app.close();
   app = await launch();
   const restarted = await app.firstWindow();
+  restarted.on('pageerror', error => errors.push(error.message));
+  await restarted.locator('.document-pane').nth(2).waitFor();
+  assert.deepEqual(await sessionLayout(restarted), beforeQuit);
+  checks.push('three panes from two vaults restore on startup, including separate same-name notes and the active middle pane');
   await restarted.getByRole('region', { name: '개인 노트 · Personal', exact: true }).waitFor();
   await restarted.getByRole('region', { name: '팀 공유 노트 · Team', exact: true }).waitFor();
   assert.equal(await readFile(path.join(personal, same), 'utf8'), personalText);

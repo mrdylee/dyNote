@@ -54,3 +54,16 @@ test('finishing a folder rename maps the current panes and their saved view mode
     assert.deepEqual(updated.modes, { [key('New/note.md')]: 'edit', [key('New/closed.md')]: 'read', [paths[2]]: 'live' });
   }
 });
+
+test('a saved layout keeps available tabs and panes when the active file or its vault is gone', () => {
+  const id = '1111111111111111', key = name => workspace.documentKey(id, name);
+  const gone = workspace.documentKey('2222222222222222', 'Left.md');
+  const left = key('Left.md'), right = key('Right.md'), hidden = key('Hidden.md');
+  const vaults = { [id]: { id, notes: ['Left.md','Right.md','Hidden.md'].map(path => ({path})) } };
+  const saved = {tabs:[hidden,right,gone,left], paths:[left,gone,right], active:gone,
+    widths:{[left]:255,[gone]:360}, modes:{[right]:'split',[gone]:'read'}, viewingDocuments:true};
+  assert.deepEqual(workspace.documentSession(saved, vaults), {
+    tabs:[hidden,right,left], paths:[left,right], active:left, widths:{[left]:255}, modes:{[right]:'split'}, viewingDocuments:true,
+  });
+  assert.equal(workspace.documentSession(saved, {}), null);
+});

@@ -383,24 +383,50 @@ try {
   await page.getByRole("button", { name: "시작 화면", exact: true }).click();
   await page.getByRole("combobox", { name: "시작 화면" }).selectOption("last");
   await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  const separator = page.getByRole("separator", { name: "문서 영역 너비" });
+  await separator.press("ArrowLeft");
+  const layout = () => page.locator(".document-pane").evaluateAll(panes => panes.map(pane => ({
+    path: pane.dataset.documentPath, width: Math.round(pane.getBoundingClientRect().width),
+    active: pane.classList.contains("focused"),
+  })));
+  const documentTabs = () => page.locator(".tab[data-tab-key]").evaluateAll(tabs => tabs
+    .filter(tab => !tab.dataset.tabKey.startsWith("external:"))
+    .map(tab => [tab.dataset.tabKey, tab.classList.contains("active")]));
   await place(other, 68, "editor");
   await tab("Long").click();
   await place(first, 85, "preview");
-  await app.close();
-  app = await launch();
-  await connectWindow();
-  first = page.getByRole("region", { name: "문서 Long.md", exact: true });
-  other = page.getByRole("region", { name: "문서 Other.md", exact: true });
+  await tab("Other").click();
+  const expectedLayout = await layout();
+  const expectedTabs = await documentTabs();
+  assert.equal(expectedLayout.length, 2);
+  assert.ok(expectedLayout[1].active);
+  const relaunchPanels = async () => {
+    await app.close();
+    app = await launch();
+    await connectWindow();
+    first = page.getByRole("region", { name: "문서 Long.md", exact: true });
+    other = page.getByRole("region", { name: "문서 Other.md", exact: true });
+    await other.waitFor();
+  };
+  await relaunchPanels();
+  assert.deepEqual(await layout(), expectedLayout, "restart restores pane order, sizes and the active pane without input");
+  assert.deepEqual(await documentTabs(), expectedTabs, "restart restores open note tabs and the active tab");
   await checkSplit(first, 85, "preview");
-  await addOther();
   await checkSplit(other, 68, "editor");
-  await checkSplit(first, 85, "preview");
   for (const [name, pane, section] of [["Other", other, 68], ["Long", first, 85]]) {
     await tab(name).click();
     await switchMode("읽기 보기");
     await page.waitForTimeout(250);
     assert.ok(Math.abs(await paragraphOffset(pane, section) + 3) < 32, `restored tab ${name} follows its reading side`);
   }
+  await switchMode("편집 보기");
+  await place(first, 42, "editor");
+  await relaunchPanels();
+  await first.locator(".document-content.edit").waitFor();
+  await other.locator(".document-content.read").waitFor();
+  await page.waitForTimeout(250);
+  assert.ok(Math.abs(await paragraphOffset(first, 42) + 3) < 32, "the source pane resumes its latest paragraph");
+  assert.ok(Math.abs(await paragraphOffset(other, 68) + 3) < 32, "the reading pane resumes its own paragraph");
   assert.deepEqual(errors, []);
   report.checks.push("relaunching with both panes open restores the latest preview and editor paragraphs and remembers both reading sides");
   assert.equal(await readFile(`${vaultRoot}/Long.md`, "utf8"), longText);
