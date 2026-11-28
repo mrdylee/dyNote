@@ -9,7 +9,8 @@ const root = await realpath(await mkdtemp(path.join(tmpdir(), "dynote-first-use-
 const folder = path.join(root, "개인 메모");
 let app, page;
 async function launch() {
-  app = await _electron.launch({ executablePath: createRequire(import.meta.url)("electron"), args: ["."],
+  app = await _electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || createRequire(import.meta.url)("electron"),
+    args: process.env.DYNOTE_EXECUTABLE ? [] : ["."],
     env: { ...process.env, OPEN_NOTES_DATA: path.join(root, "profile") } });
   page = await app.firstWindow();
   page.setDefaultTimeout(10000);
