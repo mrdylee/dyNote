@@ -1,13 +1,16 @@
 const keyFor = documentKey => `dynote.splitReading.${documentKey}`;
 
+export function validReadingPosition(saved) {
+  const anchor = saved?.anchor;
+  return typeof saved?.preview === "boolean" && (anchor?.start === true ||
+    (Number.isSafeInteger(anchor?.line) && anchor.line >= 0 && Number.isFinite(anchor.offset) &&
+      Number.isFinite(anchor.fraction) && anchor.fraction >= 0 && anchor.fraction <= 1));
+}
+
 export function readSplitPosition(documentKey) {
   try {
     const saved = JSON.parse(localStorage.getItem(keyFor(documentKey)));
-    const anchor = saved?.anchor;
-    if (typeof saved?.preview !== "boolean" || !anchor) return null;
-    if (anchor.start === true) return saved;
-    if (Number.isSafeInteger(anchor.line) && anchor.line >= 0 && Number.isFinite(anchor.offset) &&
-        Number.isFinite(anchor.fraction) && anchor.fraction >= 0 && anchor.fraction <= 1) return saved;
+    if (validReadingPosition(saved)) return saved;
   } catch { /* A missing or unreadable preference uses the default view. */ }
   return null;
 }

@@ -108,9 +108,7 @@ export default class PaneReadingPosition extends Component {
 
   componentDidMount() {
     const { positions, tabKey, readingPreview, jump } = this.props;
-    this.offClose = window.notes?.onBeforeClose(() => {
-      if (this.props.mode === "split") this.savePosition();
-    });
+    this.offClose = window.notes?.onBeforeClose(() => this.savePosition());
     const saved = positions.get(tabKey) ?? (this.props.mode === "split" && readSplitPosition(tabKey));
     if (!saved) return;
     positions.delete(tabKey);
