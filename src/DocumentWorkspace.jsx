@@ -36,7 +36,7 @@ function DocumentPane(props) {
   const readingPreview = useRef(false);
   const trackReadingSide = event => {
     if (mode !== "split") return;
-    if (preview.current?.contains(event.target)) readingPreview.current = true;
+    if (event.target.closest(".preview-column")) readingPreview.current = true;
     else if (event.target.closest(".code-editor")) readingPreview.current = false;
   };
   const [previewOpen,setPreviewOpen] = useState(false);
@@ -102,10 +102,10 @@ function DocumentPane(props) {
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
     </section>}>
     {pending&&compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
-    <div className="editor-preview" onWheelCapture={trackReadingSide} onPointerDownCapture={trackReadingSide}
+    <div className="editor-preview" onTouchStartCapture={trackReadingSide} onWheelCapture={trackReadingSide} onPointerDownCapture={trackReadingSide}
       onFocusCapture={trackReadingSide} onKeyDownCapture={trackReadingSide}>
       {mode!=='read'&&<Editor onFindState={setEditorState} note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
-      {(mode==='read'||mode==='split')&&<DiagramPreview tabIndex={-1} previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/>}
+      {(mode==='read'||mode==='split')&&<div className="preview-column"><DiagramPreview tabIndex={-1} previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/></div>}
     </div>
     {mode==='read'&&<div className="document-bottom"><button onClick={()=>{focus();props.onEdit();}}>이 문서 편집</button></div>}
   </Pane></PaneReadingPosition></div>;

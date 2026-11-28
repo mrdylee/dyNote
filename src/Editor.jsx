@@ -393,7 +393,8 @@ export default function Editor({
     }
     if (view && lineNumber !== undefined) {
       const line = view.state.doc.line(Math.min(view.state.doc.lines, lineNumber + 1));
-      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 52 }) });
+      const yMargin = view.dom.closest(".document-content.split") ? 8 : 52;
+      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin }) });
       view.focus();
     }
   }, [jump, note.path]);

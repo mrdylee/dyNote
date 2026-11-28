@@ -832,8 +832,17 @@ kbd {
 .cm-live-bullet { color: var(--accent); }
 .cm-outline-regions .cm-line:not(.cm-outline-enabled) .cm-live-bullet { pointer-events: none; }
 .cm-live-image { display: inline-block; max-width: 100%; max-height: 420px; vertical-align: middle; object-fit: contain; border-radius: 7px; cursor: text; }
+.preview-column { display: contents; }
+.document-pane:has(> .document-content.split) { display: flex; flex-direction: column; overflow: hidden; }
+.document-pane > .document-content.split { flex: 1; min-height: 0; margin: 0; padding-block: 0; }
+.document-pane:has(> .split) > .pane-header { max-height: 40%; overflow: auto; flex-shrink: 0; }
+.split .copilot-live-comparison { max-height: 30%; overflow: auto; }
+.split .preview-column { display: block; flex: 1; min-width: 0; overflow: auto; }
+.split .code-editor { display: flex; flex-direction: column; min-height: 0; }
+.split .editor-host { flex: 1; min-height: 0; }
+.split .cm-scroller { min-height: 0; }
 .split .markdown-preview {
-  width: 50%;
+  width: 100%;
   padding: 12px 10px 20px 25px;
 }
 .split .markdown-preview h1 {

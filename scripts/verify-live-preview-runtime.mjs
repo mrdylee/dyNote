@@ -2,6 +2,7 @@ const { _electron: electron } = await import(process.env.DYNOTE_PLAYWRIGHT_MODUL
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import electronPath from "electron";
 
 const profile = await mkdtemp(`${tmpdir()}/dynote-live-profile-`);
 const vaultRoot = await mkdtemp(`${tmpdir()}/dynote-live-vault-`);
@@ -11,12 +12,17 @@ const original = '# Live Preview\n\n**bold** and *italic* and ~~old~~ and `code`
 await writeFile(`${vaultRoot}/Home.md`, original);
 await writeFile(`${vaultRoot}/Guide.md`, "---\ntags: [fixture]\n---\n\n# Guide\n\n## Procedure\nTesting instructions\n");
 const wrappedParagraph = "긴 문장 ".repeat(180) + "\n**내용 130** · 줄바꿈 뒤의 문장\n짧은 줄\n\n";
-const longText = "---\ntags: [scroll]\n---\n\n" + Array.from({ length: 120 }, (_, i) => `${i === 75 ? wrappedParagraph : ""}### Section ${i}\n\n**내용 ${i}** · *한글* · [[Guide]]\n\n`).join("");
+const references = Array.from({ length: 48 }, (_, i) => `[^ref${i}]`).join(" ");
+const definitions = Array.from({ length: 48 }, (_, i) => `[^ref${i}]: **내용 ${200 + i}**`).join("\n\n");
+const table = "| 항목 | 값 |\n| --- | --- |\n" + Array.from({ length: 30 }, (_, i) => `| **내용 ${300 + i}** | ${i} |`).join("\n");
+const diagram = ["```mermaid", "graph TD", "A-->B", "B-->C", "C-->D", "```", "", "$$", "x^2", "$$"].join("\n");
+const extra = new Map([[6, references], [30, definitions], [58, table], [69, "![[assets/pixel.png]]"], [70, diagram]]);
+const longText = "---\ntags: [scroll]\n---\n\n" + Array.from({ length: 120 }, (_, i) => `${extra.has(i) ? extra.get(i) + "\n\n" : ""}${i === 75 ? wrappedParagraph : ""}### Section ${i}\n\n**내용 ${i}** · *한글* · [[Guide]]\n\n`).join("");
 await writeFile(`${vaultRoot}/Long.md`, longText);
 await writeFile(`${vaultRoot}/Other.md`, longText);
 await writeFile(`${vaultRoot}/assets/pixel.png`, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAPAAAABICAYAAADIzHiKAAAA/ElEQVR4nO3TOQ2AQAAAwVOMCDQhhxoH1ODhEp5Npph+mx3Hfl5A0/g6AJhnYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwqYGXpcNeICBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGGvDAz8g4EhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAi7AdxvIjaEtAftAAAAAElFTkSuQmCC", "base64"));
 await writeFile(`${profile}/settings.json`, JSON.stringify({ vaultRoot }));
-const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || `${process.cwd()}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
+const launch = () => electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || electronPath, args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...process.env, OPEN_NOTES_DATA: profile }, timeout: 30000 });
 const errors = [], remoteRequests = [], report = { checks: [], vaultRoot, profile };
 let app = await launch();
 report.runtime = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, electron: process.versions.electron, version: app.getVersion() }));
@@ -219,7 +225,8 @@ try {
   // Use visible paragraph text as the oracle, independent of the app's source mapping.
   const paragraphOffset = (pane, section, align = false, preview = false) => pane.evaluate((el, {section, align, preview}) => {
     const text = `내용 ${section}`;
-    const y = el.querySelector(".pane-header").getBoundingClientRect().bottom;
+    const scroller = el.querySelector(preview ? ".split .preview-column" : ".split .cm-scroller") ?? el;
+    const y = scroller === el ? el.querySelector(".pane-header").getBoundingClientRect().bottom : scroller.getBoundingClientRect().top;
     const cm = el.querySelector(".cm-content");
     let top;
     if (cm && !preview) {
@@ -229,12 +236,14 @@ try {
       const marker = [...el.querySelectorAll(".markdown-preview strong")].find(node => node.textContent === text);
       top = marker.getBoundingClientRect().top;
     }
-    if (align) el.scrollTop += top - y + 3;
+    if (align) scroller.scrollTop += top - y + 3;
     return top - y;
   }, {section, align, preview});
   const place = async (pane, section, side) => {
     const preview = side === "preview";
-    await (side ? pane.locator(preview ? ".markdown-preview" : ".cm-content") : pane).hover();
+    const split = await pane.locator(".document-content.split").count();
+    await (side ? pane.locator(split ? (preview ? ".preview-column" : ".cm-scroller") :
+      (preview ? ".markdown-preview" : ".cm-content")) : pane).hover();
     await page.mouse.wheel(0, 80);
     await page.waitForTimeout(100);
     for (let i = 0; i < 5; i++) {
@@ -247,25 +256,34 @@ try {
   const switchMode = name => page.locator(".view-segments").getByRole("button", { name, exact: true }).click();
   await place(first, 18);
   await place(other, 64);
-  const firstScroll = await first.evaluate(el => el.scrollTop);
+  const scrollPosition = pane => pane.evaluate(el => {
+    const view = el.querySelector(".split .cm-content")?.cmTile.root.view;
+    if (!view) return String(el.scrollTop);
+    // CodeMirror refines scrollHeight as offscreen lines are measured. Compare
+    // the actual visible character and its offset, not its estimated scrollTop.
+    const top = view.scrollDOM.getBoundingClientRect().top + 1;
+    const pos = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y: top }, false);
+    return JSON.stringify([pos, Math.round(view.coordsAtPos(pos).top - top), el.querySelector(".preview-column").scrollTop]);
+  });
+  const firstScroll = await scrollPosition(first);
   for (const mode of ["읽기 보기", "분할 보기", "편집 보기", "Live Preview", "읽기 보기"]) {
     await switchMode(mode);
     await page.waitForTimeout(160);
     const offset = await paragraphOffset(other, 64);
     assert.ok(Math.abs(offset + 3) < 32, `second pane paragraph offset ${offset} in ${mode}`);
-    assert.equal(await first.evaluate(el => el.scrollTop), firstScroll);
+    assert.equal(await scrollPosition(first), firstScroll);
   }
   await place(other, 91);
   await switchMode("Live Preview");
   await page.waitForTimeout(160);
   const movedOffset = await paragraphOffset(other, 91);
   assert.ok(Math.abs(movedOffset + 3) < 32, `read-to-live paragraph offset ${movedOffset}`);
-  const otherScroll = await other.evaluate(el => el.scrollTop);
+  const otherScroll = await scrollPosition(other);
   await first.locator(".pane-title").click();
   await switchMode("읽기 보기");
   await page.waitForTimeout(160);
   assert.ok(Math.abs(await paragraphOffset(first, 18) + 3) < 32, "first pane keeps its own paragraph");
-  assert.equal(await other.evaluate(el => el.scrollTop), otherScroll);
+  assert.equal(await scrollPosition(other), otherScroll);
   const beforeWheel = await first.evaluate(el => el.scrollTop);
   await first.hover();
   await page.mouse.wheel(0, 500);
@@ -275,17 +293,118 @@ try {
   await page.waitForTimeout(250);
   const wrappedOffset = await paragraphOffset(first, 130);
   assert.ok(Math.abs(wrappedOffset + 3) < 32, `paragraph after a long wrapped line moved to ${wrappedOffset}`);
-  assert.equal(await other.evaluate(el => el.scrollTop), otherScroll);
+  assert.equal(await scrollPosition(other), otherScroll);
   await switchMode("분할 보기");
   await place(first, 45, "preview");
-  assert.ok(Math.abs(await paragraphOffset(first, 45)) > 80, "the editor and preview show different source positions");
-  const firstSplitScroll = await first.evaluate(el => el.scrollTop);
+  const alignedEditor = await paragraphOffset(first, 45);
+  assert.ok(Math.abs(alignedEditor) < 32, `preview scrolling aligns the same editor paragraph: ${alignedEditor} px; ${await scrollPosition(first)}`);
+  const stateBeforeWheel = () => first.evaluate(el => {
+    const editor = el.querySelector(".cm-content").cmTile.root.view;
+    return { selection: editor.state.selection.toJSON(), focus: document.activeElement.className };
+  });
+  await first.locator(".cm-content").evaluate(el => {
+    const view = el.cmTile.root.view;
+    const from = view.state.doc.toString().indexOf("내용 45");
+    view.dispatch({ selection: { anchor: from, head: from + 4 } });
+    view.focus();
+  });
+  const beforeSync = await stateBeforeWheel();
+  for (const section of [205, 314]) {
+    await place(first, section, "editor");
+    assert.ok(Math.abs(await paragraphOffset(first, section, false, true)) < 32, `source aligns rendered marker ${section}`);
+    await place(first, section + 1, "preview");
+    assert.ok(Math.abs(await paragraphOffset(first, section + 1)) < 32, `rendered marker ${section + 1} aligns source`);
+  }
+  const article = first.locator(".markdown-preview");
+  await article.evaluate(el => {
+    el.dataset.indexScans = "0";
+    el.querySelectorAll = function(selector) {
+      if (selector === "[data-source-lines]") this.dataset.indexScans = String(Number(this.dataset.indexScans) + 1);
+      return Element.prototype.querySelectorAll.call(this, selector);
+    };
+  });
+  for (const side of ["editor", "preview"]) {
+    const column = first.locator(side === "editor" ? ".cm-scroller" : ".preview-column");
+    await column.hover();
+    const positions = () => first.evaluate(el => [el.querySelector(".cm-scroller").scrollTop, el.querySelector(".preview-column").scrollTop]);
+    const before = await positions();
+    await page.mouse.wheel(0, side === "editor" ? 420 : -220);
+    await page.waitForFunction(({ before, side }) => {
+      const el = document.querySelector('[data-document-path="Long.md"]');
+      const direction = side === "editor" ? 1 : -1;
+      return [el.querySelector(".cm-scroller"), el.querySelector(".preview-column")].every((box, i) =>
+        (box.scrollTop - before[i]) * direction > 10);
+    }, { before, side });
+    await first.evaluate(async el => {
+      const boxes = [el.querySelector(".cm-scroller"), el.querySelector(".preview-column")];
+      let stable = 0, previous = boxes.map(box => box.scrollTop);
+      for (let frame = 0; frame < 120; frame++) {
+        await new Promise(requestAnimationFrame);
+        const current = boxes.map(box => box.scrollTop);
+        stable = current.every((top, i) => Math.abs(top - previous[i]) <= 1) ? stable + 1 : 0;
+        if (stable === 5) return;
+        previous = current;
+      }
+      throw new Error("split scrolling kept moving after wheel input stopped");
+    });
+  }
+  const indexScans = await article.evaluate(el => {
+    const count = Number(el.dataset.indexScans);
+    delete el.querySelectorAll;
+    delete el.dataset.indexScans;
+    return count;
+  });
+  assert.equal(indexScans, 0, "scrolling a rendered note reuses the source-line index");
+  await place(first, 72, "editor");
+  await first.locator(".markdown-preview .mermaid-diagram svg").waitFor({ state: "attached" });
+  await first.locator(".markdown-preview .katex-block[data-source-lines]").waitFor({ state: "attached" });
+  for (const selector of [".mermaid-diagram", ".katex-block"]) {
+    const block = first.locator(".markdown-preview " + selector);
+    await first.locator(".preview-column").hover();
+    const previousTop = await first.locator(".preview-column").evaluate(el => el.scrollTop);
+    await page.mouse.wheel(0, -40);
+    await page.waitForFunction(top => document.querySelector('[data-document-path="Long.md"] .preview-column').scrollTop < top, previousTop);
+    const [start, end] = await block.evaluate(el => {
+      const column = el.closest(".preview-column");
+      const rect = el.getBoundingClientRect();
+      column.scrollTop += rect.top + rect.height / 2 - column.getBoundingClientRect().top;
+      return el.dataset.sourceLines.split(":").map(Number);
+    });
+    await page.waitForFunction(({ start, end }) => {
+      const view = document.querySelector('[data-document-path="Long.md"] .cm-content').cmTile.root.view;
+      const y = view.scrollDOM.getBoundingClientRect().top + 1;
+      const pos = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y }, false);
+      const line = view.state.doc.lineAt(pos).number - 1;
+      return line >= start && line < end;
+    }, { start, end }).catch(async error => {
+      const offsets = await block.evaluate(el => {
+        const column = el.closest(".preview-column");
+        const view = column.closest(".split").querySelector(".cm-content").cmTile.root.view;
+        const y = view.scrollDOM.getBoundingClientRect().top + 1;
+        const pos = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 24, y }, false);
+        return { relativeTop: el.getBoundingClientRect().top - column.getBoundingClientRect().top, line: view.state.doc.lineAt(pos).number - 1 };
+      });
+      throw new Error(`${selector} expected lines ${start}..${end}, got ${JSON.stringify(offsets)}`, { cause: error });
+    });
+  }
+  await place(first, 72, "editor");
+  const image = first.locator(".markdown-preview img");
+  await image.evaluate(img => { img.style.height = "480px"; });
+  await page.waitForTimeout(120);
+  assert.ok(Math.abs(await paragraphOffset(first, 72, false, true)) < 32, "image layout change preserves the source paragraph after the diagram");
+  await image.evaluate(img => { img.style.removeProperty("height"); });
+  await place(first, 45, "preview");
+  assert.deepEqual(await stateBeforeWheel(), beforeSync, "wheel synchronization preserves selection and focus");
+  report.checks.push("both directions align text, reordered footnotes and table rows; wheel input settles, preserves selection and focus, and reuses the line index");
+  report.checks.push("Mermaid and math map to their source ranges, and resizing an image preserves the next paragraph");
+  const firstSplitScroll = await scrollPosition(first);
   await other.locator(".pane-title").click();
   await switchMode("분할 보기");
   await place(other, 20, "preview");
   await place(other, 26, "editor");
-  const otherSplitScroll = await other.evaluate(el => el.scrollTop);
-  assert.equal(await first.evaluate(el => el.scrollTop), firstSplitScroll);
+  assert.ok(Math.abs(await paragraphOffset(other, 26, false, true)) < 32, "editor scrolling aligns the same preview paragraph");
+  const otherSplitScroll = await scrollPosition(other);
+  assert.equal(await scrollPosition(first), firstSplitScroll);
 
   await first.locator(".pane-title").click();
   for (const target of ["읽기 보기", "편집 보기", "Live Preview"]) {
@@ -293,23 +412,23 @@ try {
     await page.waitForTimeout(250);
     const offset = await paragraphOffset(first, 45);
     assert.ok(Math.abs(offset + 3) < 32, `preview paragraph moved to ${offset} in ${target}`);
-    assert.equal(await other.evaluate(el => el.scrollTop), otherSplitScroll);
+    assert.equal(await scrollPosition(other), otherSplitScroll);
     await switchMode("분할 보기");
     await page.waitForTimeout(250);
     const restored = await paragraphOffset(first, 45, false, true);
     assert.ok(Math.abs(restored + 3) < 32, `returning to split moved the preview paragraph to ${restored}`);
   }
-  const restoredFirst = await first.evaluate(el => el.scrollTop);
+  const restoredFirst = await scrollPosition(first);
   await other.locator(".pane-title").click();
   await switchMode("읽기 보기");
   await page.waitForTimeout(250);
   assert.ok(Math.abs(await paragraphOffset(other, 26) + 3) < 32, "using the editor again makes it the reading side");
-  assert.equal(await first.evaluate(el => el.scrollTop), restoredFirst);
+  assert.equal(await scrollPosition(first), restoredFirst);
   report.checks.push("each split pane follows its last used side when leaving and returning, without scrolling its neighbour");
   const tab = name => page.locator(`.tab-label[title="${name}.md"]`);
   await switchMode("분할 보기");
   await place(other, 32, "editor");
-  const parkedOther = await other.evaluate(el => el.scrollTop);
+  const parkedOther = await scrollPosition(other);
   await tab("Long").click();
   await place(first, 72, "preview");
   await tab("Home").click();
@@ -319,11 +438,11 @@ try {
   await page.waitForTimeout(250);
   const previewReturn = await paragraphOffset(first, 72, false, true);
   assert.ok(Math.abs(previewReturn + 3) < 32, `tab return moved the preview paragraph to ${previewReturn}`);
-  assert.equal(await other.evaluate(el => el.scrollTop), parkedOther);
+  assert.equal(await scrollPosition(other), parkedOther);
   await switchMode("읽기 보기");
   await page.waitForTimeout(250);
   assert.ok(Math.abs(await paragraphOffset(first, 72) + 3) < 32, "the returned tab still follows its preview");
-  const parkedFirst = await first.evaluate(el => el.scrollTop);
+  const parkedFirst = await scrollPosition(first);
 
   await tab("Other").click();
   await tab("Home").click();
@@ -336,7 +455,7 @@ try {
   await switchMode("읽기 보기");
   await page.waitForTimeout(250);
   assert.ok(Math.abs(await paragraphOffset(other, 32) + 3) < 32, "the returned tab still follows its editor");
-  assert.equal(await first.evaluate(el => el.scrollTop), parkedFirst);
+  assert.equal(await scrollPosition(first), parkedFirst);
   report.checks.push("tab round trips restore each split document's paragraph and reading side without moving its neighbour");
   await switchMode("분할 보기");
   await place(other, 32, "editor");
@@ -409,6 +528,10 @@ try {
     await other.waitFor();
   };
   await relaunchPanels();
+  await page.waitForFunction(expected => {
+    const panes = [...document.querySelectorAll(".document-pane")];
+    return panes.length === expected.length && panes.every((pane, i) => Math.round(pane.getBoundingClientRect().width) === expected[i].width);
+  }, expectedLayout);
   assert.deepEqual(await layout(), expectedLayout, "restart restores pane order, sizes and the active pane without input");
   assert.deepEqual(await documentTabs(), expectedTabs, "restart restores open note tabs and the active tab");
   await checkSplit(first, 85, "preview");

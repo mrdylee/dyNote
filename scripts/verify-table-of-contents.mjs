@@ -37,6 +37,14 @@ try{
   assert.equal(selected.line,expected);assert.equal(selected.text,'### 같은 제목');
   assert.match(await page.locator('.view-segments').getByRole('button',{name:label,exact:true}).getAttribute('class'),/active/);
   await page.waitForFunction(()=>document.querySelectorAll('.toc-list button')[3]?.getAttribute('aria-current')==='location');
+  if (label === '분할 보기') {
+   await page.waitForFunction(() => {
+    const column = document.querySelector('.split .preview-column');
+    const heading = column.querySelectorAll('h3')[1].getBoundingClientRect();
+    const bounds = column.getBoundingClientRect();
+    return heading.top >= bounds.top && heading.bottom <= bounds.bottom && document.activeElement.matches('.cm-content');
+   });
+  }
   report.checks.push(`${label}: duplicate heading navigates to the correct source line without switching mode`);
  }
  await mode('읽기 보기');

@@ -19,7 +19,9 @@ export default function TableOfContents({ note, mode, editorRef, previewRef, onJ
       const reading = mode === "read";
       const pane = (reading ? preview : editor?.dom)?.closest(".document-pane");
       if (!pane || pane.dataset.documentPath !== note.path) return;
-      const top = pane.getBoundingClientRect().top + (pane.querySelector(".pane-heading")?.offsetHeight ?? 0) + 48;
+      const top = mode === "split"
+        ? editor.scrollDOM.getBoundingClientRect().top + 12
+        : pane.getBoundingClientRect().top + (pane.querySelector(".pane-heading")?.offsetHeight ?? 0) + 48;
       let index = 0;
       if (reading) {
         const nodes = [...preview.querySelectorAll("h1,h2,h3,h4,h5,h6")].filter(node => !node.closest("[data-embed]"));

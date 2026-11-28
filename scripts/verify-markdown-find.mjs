@@ -122,11 +122,12 @@ try {
         const rect = range.getBoundingClientRect();
         return !!document.elementFromPoint(rect.x + 2, rect.y + rect.height / 2)?.closest(".markdown-preview");
       });
+      assert.ok(await input.evaluate(el => document.activeElement === el), "scrolling to a preview result keeps search focus");
       await page.locator(".cm-content").focus();
       await find();
       assert.equal(await side.inputValue(),"editor");
       assert.equal(await panel.count(), 1);
-      await page.locator(".document-pane").evaluate(pane => { pane.scrollTop = 0; });
+      await page.locator(".split .cm-scroller").evaluate(el => { el.scrollTop = 0; });
       await input.selectText();
       await input.pressSequentially("source-only-target");
       await input.press("Enter");
@@ -139,7 +140,7 @@ try {
     }
     if (name === "분할 보기") {
       await side.selectOption("preview");
-      await page.locator(".document-pane").evaluate(pane => { pane.scrollTop = 0; });
+      await page.locator(".split .cm-scroller").evaluate(el => { el.scrollTop = 0; });
       await side.selectOption("editor");
       await page.waitForFunction(() => {
         const match = document.querySelector(".cm-searchMatch-selected");

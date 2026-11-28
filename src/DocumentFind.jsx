@@ -123,10 +123,11 @@ export default function DocumentFind({ target, editor, editorState, scope, onSco
     if (revealNode) revealNode(range.startContainer.parentElement.closest(".react-flow__node").dataset.id);
     else {
       const pane = target.current.closest(".document-pane");
-      const rect = range.getBoundingClientRect(), bounds = pane.getBoundingClientRect();
-      const panel = pane.querySelector(".pane-header").getBoundingClientRect();
-      if (rect.top < panel.bottom || rect.bottom > bounds.bottom) {
-        pane.scrollTop += rect.top - (panel.bottom + bounds.bottom) / 2;
+      const scroller = target.current.closest(".split .preview-column") ?? pane;
+      const rect = range.getBoundingClientRect(), bounds = scroller.getBoundingClientRect();
+      const top = scroller === pane ? pane.querySelector(".pane-header").getBoundingClientRect().bottom : bounds.top;
+      if (rect.top < top || rect.bottom > bounds.bottom) {
+        scroller.scrollTop += rect.top - (top + bounds.bottom) / 2;
       }
     }
     return () => CSS.highlights.delete("note-find-current");

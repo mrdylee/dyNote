@@ -310,3 +310,8 @@ test('a failed link update restores the original name of a self-linking note', a
   assert.equal(await readFile(join(root,'Alpha.md'),'utf8'),selfLink);
   assert.equal(await readFile(join(root,'Zed.md'),'utf8'),'[Alpha](Alpha.md)\n');
 });
+
+test("display math carries the original lines after frontmatter", () => {
+  const html = knowledge.renderMarkdown("---\ntags: []\n---\n$$\nx^2\n$$", [], "", {sourceLines: true});
+  assert.match(html, /<[^>]*data-source-lines="3:6"[^>]*>/);
+});

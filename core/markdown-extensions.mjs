@@ -9,6 +9,12 @@ export function installMarkdownExtensions(
 ) {
   installTextStyle(md);
   installOutlineRegions(md);
+  const renderMath = md.renderer.rules.math_block;
+  md.renderer.rules.math_block = (tokens, index, options, env, renderer) => {
+    const html = renderMath(tokens, index, options, env, renderer);
+    const lines = tokens[index].attrGet("data-source-lines");
+    return lines ? html.replace("<p ", `<p data-source-lines="${lines}" `) : html;
+  };
   const escape = md.utils.escapeHtml;
   const fragment = (target) => target.split("#").slice(1).join("#");
   md.renderer.rules.heading_open = (tokens, index, options, _env, renderer) => {
