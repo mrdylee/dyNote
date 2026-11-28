@@ -104,7 +104,7 @@ the chosen text and dialogue are transmitted to Copilot when sent.
 ## Implementation and verification
 
 `@github/copilot-sdk` is pinned to 1.0.23 with runtime 1.0.100. Its SDK account-flow
-API is currently marked experimental. Agent sessions expose the four Dynote note tools and any explicitly registered skills and MCP servers. The selected JSON controls which tools each MCP server exposes. Ask and Edit use the supplied context. Project-enabled Agent sessions additionally expose the SDK file and shell tools in the chosen folder. Other sessions use the private runtime workspace. Automatic configuration discovery stays disabled.
+API is currently marked experimental. Agent sessions expose the four Dynote note tools and any explicitly registered skills and MCP servers. The selected JSON controls which tools each MCP server exposes. Ask and Edit use the supplied context. Project-enabled Agent sessions expose the SDK file viewer and shell plus Dynote’s reviewed code creation and editing tools in the chosen folder. Other sessions use the private runtime workspace. Automatic configuration discovery stays disabled.
 The four tools use `skipPermission` because they only read explicitly permitted
 snapshots or stage drafts. Actual note writes still require Keep (Agent) or
 reviewed Apply (Edit), and use the vault's path, exclusive-create and revision checks.

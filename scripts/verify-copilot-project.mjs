@@ -30,15 +30,15 @@ try {
       const request = JSON.parse(prompt).request;
       const run = (name, args) => this.rpc.tools.execute({ name, arguments: args });
       const file = project + "/sample.js";
-      if (request === "해제 확인") return { data: { content: tools.some(t => t.name === "edit") ? "해제 실패" : "프로젝트 도구 해제됨" } };
-      if (request === "중지 확인") { await run("edit", { path: file, old_str: "PASS", new_str: "STOP" }); return { data: { content: "종료" } }; }
+      if (request === "해제 확인") return { data: { content: tools.some(t => ["edit", "dynote_project_edit", "dynote_project_create"].includes(t.name)) ? "해제 실패" : "프로젝트 도구 해제됨" } };
+      if (request === "중지 확인") { await run("dynote_project_edit", { path: file, old_str: "PASS", new_str: "STOP" }); return { data: { content: "종료" } }; }
       const outside = await run("view", { path: project + "/../vault/Home.md" });
       if (outside.resultType !== "denied") throw Error("프로젝트 밖 읽기 허용됨");
-      const create = await run("create", { path: file, file_text: "console.log('FIRST')" });
+      const create = await run("dynote_project_create", { path: file, file_text: "console.log('FIRST')" });
       if (create.resultType !== "success") throw Error(create.textResultForLlm);
-      const edit = await run("edit", { path: file, old_str: "FIRST", new_str: "PASS" });
+      const edit = await run("dynote_project_edit", { path: file, old_str: "FIRST", new_str: "PASS" });
       if (edit.resultType !== "success") throw Error(edit.textResultForLlm);
-      const refused = await run("edit", { path: file, old_str: "PASS", new_str: "DECLINED" });
+      const refused = await run("dynote_project_edit", { path: file, old_str: "PASS", new_str: "DECLINED" });
       if (refused.resultType !== "denied") throw Error("거절한 변경 적용됨");
       const shell = process.platform === "win32" ? "powershell" : "bash";
       const blocked = await run(shell, { command: "echo SKIP", description: "건너뛰기" });
