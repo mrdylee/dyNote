@@ -32,8 +32,14 @@ export default function CopilotMentions({ prompt, setPrompt, notes, references, 
       note.path.toLocaleLowerCase().includes(query)).slice(0, 8) : [];
   function update(input) {
     const end = input.selectionStart;
-    const match = enabled && input.selectionEnd === end && /(?:^|\s)([#$])([^\s#$][^#$\n]*|)$/u.exec(input.value.slice(0, end));
-    setToken(match ? { start: end - match[2].length - 1, end, marker: match[1], query: match[2] } : null);
+    const prefix = input.value.slice(0, end);
+    const note = /(?:^|\s)#([^\s#][^#\n]*|)$/u.exec(prefix);
+    const skill = listSkills && /(?:^|\s)\$([^\s$][^$\n]*|)$/u.exec(prefix);
+    const isSkill = skill && (!note || skill.index > note.index);
+    const match = isSkill ? skill : note;
+    setToken(enabled && input.selectionEnd === end && match
+      ? { start: end - match[1].length - 1, end, marker: isSkill ? "$" : "#", query: match[1] }
+      : null);
     setIndex(0);
   }
   function attach(item) {

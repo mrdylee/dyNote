@@ -9,7 +9,8 @@ await mkdir(vault); await mkdir(skill);
 await writeFile(path.join(profile, "settings.json"), JSON.stringify({ vaultRoot: vault }));
 await writeFile(path.join(vault, "Home.md"), "original");
 await writeFile(path.join(vault, "기준.md"), "검증 기준");
-await writeFile(path.join(skill, "SKILL.md"), "---\nname: sample\ndescription: fixture\n---\nLocal instructions.");
+await writeFile(path.join(vault, "Budget$2026.md"), "budget");
+await writeFile(path.join(skill, "SKILL.md"), "---\nname: sample\ndescription: fixture C#\n---\nLocal instructions.");
 await writeFile(config, JSON.stringify({ mcpServers: { fixture: { type: "http", url: "http://127.0.0.1:1" } } }));
 const errors = [];
 let app, page;
@@ -76,6 +77,12 @@ try {
   await extensions.getByRole("button", { name: "닫기" }).click();
 
   const input = page.getByLabel("Copilot 질문");
+  await input.fill("#Budget$2026");
+  await page.getByRole("option", { name: "Budget$2026.md", exact: true }).waitFor();
+  await input.press("Escape");
+  await input.fill("$C#");
+  await page.getByRole("option", { name: /sample.*fixture C#/ }).waitFor();
+  await input.press("Escape");
   await input.fill("$fixture");
   const option = page.getByRole("option", { name: /sample.*fixture/ });
   await option.waitFor();
