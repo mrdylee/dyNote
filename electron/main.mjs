@@ -723,7 +723,7 @@ app
       "plugin-context": args => { checkVault(args); plugins.update({ notes: args.notes, active: args.active, dailyOptions: args.dailyOptions }); },
       "ai-extensions": () => aiExtensions.snapshot(),
       "ai-list-skills": async () => {
-        const { skillDirectories } = await aiExtensions.getExtensions();
+        const { skillDirectories } = await aiExtensions.getExtensions({ includeMcp: false });
         const skills = await discoverSkills(skillDirectories);
         return [...skills.values()].map(({ name, description, directory }) => ({ name, description, path: directory }));
       },
