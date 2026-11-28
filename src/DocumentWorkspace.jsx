@@ -99,7 +99,7 @@ function DocumentPane(props) {
       {active && scope && <DocumentFind scope={scope} target={preview} editor={editor.current} editorState={editorState}
         onScope={mode==="split" ? openFind : undefined} onClose={closeFind}/>}
     </div>
-    <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={header} editor={editor} preview={preview}><Pane {...props} header={header} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+    <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} paneCount={props.paneCount} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={header} editor={editor} preview={preview}><Pane {...props} header={header} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
       {pending.userEdited&&<p>직접 편집한 내용이 포함되어 있습니다. 유지하거나 복구본을 저장해 주세요.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
@@ -138,7 +138,7 @@ export default function DocumentWorkspace({workspace,sizing,resolveDocument,onOp
     return doc ? [{...doc,key}] : [];
   });
   return <DocumentPanes sizing={sizing} panes={visible} renderPane={({key,...doc})=>(
-    <DocumentPane {...props} {...doc} docKey={key} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
+    <DocumentPane {...props} {...doc} docKey={key} paneCount={visible.length} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
           onFocus={()=>{if(workspace.active!==key)onOpen(key);}} onContext={onContext}
           onClose={()=>workspace.dispatch({type:'close',path:key})} onDrop={(path,side)=>onAdd(path,side,key)}
           onEdit={()=>workspace.dispatch({type:'mode',path:key,mode:'live'})} pending={doc.edits.drafts.find(d=>d.path===doc.note.path)}/>

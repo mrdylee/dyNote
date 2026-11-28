@@ -95,7 +95,8 @@ export default class PaneReadingPosition extends Component {
 
   // Capture while the old editor/preview and its original layout still exist.
   getSnapshotBeforeUpdate(previous) {
-    return previous.mode === this.props.mode ? null : this.capture(previous.mode);
+    const splitResized = previous.mode === "split" && previous.paneCount !== this.props.paneCount;
+    return previous.mode !== this.props.mode || splitResized ? this.capture(previous.mode) : null;
   }
 
   blocks() {
