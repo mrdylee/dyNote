@@ -20,7 +20,7 @@ function ReceivedLinks({note,records,notes,onOpen}) {
     ? <button className="capture-record-title" key={name} onClick={()=>onOpen(name)}>{title}</button>
     : <p key={name}>연결된 대화 파일 확인 필요 · {title}</p>);
 }
-export default function JournalFeed({notes,preferences,vault,currentDate,pendingDate,conflicts,onReview,onOpen,onChange,onImportFiles,onLink,jump,fonts,onFontSettings,disabled,isPathLocked,capture}) {
+export default function JournalFeed({hint,notes,preferences,vault,currentDate,pendingDate,conflicts,onReview,onOpen,onChange,onImportFiles,onLink,jump,fonts,onFontSettings,disabled,isPathLocked,capture}) {
   const [editingDate,setEditingDate]=useState(null),[count,setCount]=useState(14);
   const today=editingDate??currentDate;
   const editor=useRef(null),focused=useRef(false);
@@ -61,6 +61,7 @@ export default function JournalFeed({notes,preferences,vault,currentDate,pending
       {conflictNotice(current.path)}
       <ReceivedLinks note={current} notes={notes} records={capture?.state?.records} onOpen={onOpen}/>
       {capture&&<CopilotJournalEntries records={capture.state?.records?.filter(record=>record.journalPath===current.path)} disabled={disabled} onOpen={onOpen} onTrash={capture.onTrash}/>}
+      {hint}
       <Editor key={current.path} note={current} notes={notes} journal live editorRef={editor}
         onChange={content=>{setEditingDate(today);onChange(current.path,content);}} vaultId={vault.id} attachments={vault.attachments}
         onImportFiles={onImportFiles} onLink={(target,kind)=>onLink(target,kind,current.path,vault.id)}

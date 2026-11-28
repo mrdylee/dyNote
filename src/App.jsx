@@ -82,6 +82,7 @@ import { normalizePanelWidths, fitPanelWidths, panelWidthBudget } from "../core/
 import FontSettings from "./FontSettings.jsx";
 import GitSettings from "./GitSettings.jsx";
 import CloudRepositorySettings from "./CloudRepositorySettings.jsx";
+import FirstUseGuide, { FeatureTip } from "./FirstUseGuide.jsx";
 import VaultSettings from "./VaultSettings.jsx";
 import GitHistory from "./GitHistory.jsx";
 import FileVersionHistory from "./FileVersionHistory.jsx";
@@ -548,6 +549,18 @@ export default function App() {
   const [hover, setHover] = useState(null);
   const hoverTimer = useRef(null), hoverClose = useRef(null), hoverAnchor = useRef(null);
   const [modal, setModal] = useState(null);
+  const [guideStep, setGuideStep] = useState(() => stored("dynote.firstUse.journal", null));
+  const [featureTips, setFeatureTips] = useState(() => stored("dynote.firstUse.features", false));
+  const enableFeatureTips = () => {
+    setFeatureTips(true);
+    persist("dynote.firstUse.features", true);
+  };
+  const guideEdit = useRef(null);
+  const changeGuideStep = useCallback(value => {
+    persist("dynote.firstUse.journal", value);
+    setGuideStep(value);
+    guideEdit.current = null;
+  }, []);
   const modalRef = useRef(modal);
   modalRef.current = modal;
   useEffect(() => {
@@ -572,7 +585,12 @@ export default function App() {
     invoke(api.plugins({ vaultId: selectedVaultId })).then(update).catch(error => { if (mounted) setPluginData({ entries: [], error: error.message }); });
     return () => { mounted = false; unsubscribe(); };
   }, [selectedVaultId]);
-  useEffect(() => api?.onOpenSettings(tab => { if (audioActive.current) setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); else if (!busy) { if (tab === "fonts") setSettingsTab("fonts"); setModal("settings"); } }), [busy]);
+  useEffect(() => api?.onOpenSettings(tab => {
+    if (audioActive.current) { setAudioNotice("녹음을 저장하거나 취소한 뒤 이동해 주세요."); return; }
+    if (busy) return;
+    if (tab === "fonts") setSettingsTab("fonts");
+    setModal(tab === "first-use" ? "first-use" : "settings");
+  }), [busy]);
   const [newName, setNewName] = useState("");
   const [newDocumentTarget, setNewDocumentTarget] = useState(null);
   const [switchQuery, setSwitchQuery] = useState("");
@@ -880,7 +898,10 @@ export default function App() {
       if (!id) return;
       if (imported.importError) {
         setGitSettingsId(id); setSettingsTab("personal-sync"); setError(imported.importError);
-      } else setModal(null);
+      } else {
+        if (settingsTab === "guide-import") setSection("files");
+        setModal(null);
+      }
     } catch (error) {
       if (currentSettingsView.current !== settingsView) setError(error.message);
       throw error;
@@ -968,6 +989,9 @@ export default function App() {
     setStatus("saving");
     try {
       await queue.flush(vaultId);
+      const edited = guideEdit.current;
+      if (edited && (!vaultId || edited.id === vaultId) && !queue.get(edited.id, edited.path))
+        changeGuideStep({ id: edited.id, step: "saved" });
       setStatus(queue.dirty ? "dirty" : "saved");
       setError("");
     } catch (err) {
@@ -975,7 +999,7 @@ export default function App() {
       setError(err.message);
       throw err;
     }
-  }, [queue]);
+  }, [queue, changeGuideStep]);
 
   const syncNow = async (vaultId, personalOnly) => {
     await flush(false, vaultId);
@@ -1275,6 +1299,21 @@ export default function App() {
     setSection(old => (["graph", "planner", "journal", stickyBoardKey].includes(old) ? "files" : old));
     setModal(null);
   }, [vault?.id, vaultsRef, updateNavigation, workspace.setActive]);
+  const guideExample = registryReady && spaces.isDemo && vaults[selectedVaultId]?.notes.some(note => note.path === "시작하기.md");
+  const showWelcome = registryReady && spaces.isDemo && spaces.entries.length === 1 && !spaces.entries[0].purpose;
+  const openGuideSettings = tab => { enableFeatureTips(); setSettingsTab(tab); setModal("settings"); };
+  const guide = <FirstUseGuide personal={!!personalSpace} example={guideExample} busy={busy || switchingVault} shortcut={shortcut}
+    onWrite={async () => {
+      try {
+        const id = dailyVaultId ?? await switchVault(api.pickVault, { purpose: "personal" });
+        if (!id) return;
+        enableFeatureTips();
+        changeGuideStep({ id, step: "write" });
+        setJournalCalendar(false); setSection("journal"); setModal(null);
+      } catch (error) { setError(error.message); }
+    }}
+    onImport={() => openGuideSettings("guide-import")} onTeam={() => openGuideSettings("guide-team")}
+    onExample={() => { enableFeatureTips(); openNote("시작하기.md", selectedVaultId); }}/>;
   const openDocumentDraft = draft => {
     workspace.setActive(draftKey(draft));
     setTabs(old => old.includes(draftKey(draft)) ? old : [...old, draftKey(draft)]);
@@ -1428,6 +1467,7 @@ export default function App() {
     if (!scope || (!source && !allowCreate) || source?.content === content || busy) return;
     const revision = !source || source.revision === null ? null : revisionMap(id).get(path) ?? source.revision;
     queue.set(id, { path, content, revision });
+    if (allowCreate && guideStep?.step === "write" && guideStep.id === id) guideEdit.current = { id, path };
     updateVault(id, old => ({ ...old, [field]: source
       ? old[field].map(file => file.path === path ? { ...file, content } : file)
       : [...old[field], { path, content, revision }] }));
@@ -2645,6 +2685,8 @@ export default function App() {
             event.preventDefault(); event.stopPropagation(); setTreeDrop(null);
             if (!busy) void transferSidebarFiles(files, sidebarTarget(event), event.ctrlKey ? "copy" : "move");
           }}>
+          {featureTips && !modal && (section !== "journal" || showCalendar) &&
+            <FeatureTip key={showCalendar ? "calendar" : section} topic={showCalendar ? "calendar" : section}/>}
           {(treeDrop?.operation.startsWith("import-") || copyStatus) && <div className="sidebar-copy-status" role="status">{treeDrop?.operation === "import-move" ? "파일 이동 · Ctrl을 누르면 복사" : treeDrop?.operation === "import-copy" ? "파일 복사" : copyStatus}</div>}
           <button className="vault-switch" aria-label="공간 전환·관리" disabled={busy} {...(!together ? treeDropProps(vault.id, "") : {})} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>
             <span className="vault-icon">
@@ -2944,12 +2986,16 @@ export default function App() {
           {section!=="journal"&&!attachment&&!["planner","graph"].includes(section)&&note&&<CopilotJournalEntries records={captureState?.records?.filter(record=>record.sessions.some(session=>session.path===note.path))} disabled={busy||captureLocked||edits.blocked()} onOpen={openNote} onTrash={captureControls.onTrash}/>}
           <div className="document-area" ref={fileLocationRef(documentKey(attachment?.vaultId ?? vault.id, singleViewPath))} hidden={!!activeDocumentDraft && section === "files" && !attachment} onMouseOver={showLinkPreview} onMouseOut={closeLinkPreview}>
             {showingBoard ? <StickyBoard cards={stickyCards} onOpen={openSticky} vaultId={stickyVault?.id}/>
-            : section === "journal" ? !dailyVaultId ? <div className="empty-workspace">
+            : section === "journal" ? showWelcome ? guide : !dailyVaultId ? <div className="empty-workspace">
               <NotebookPen size={40} />
               <h2>저널은 개인 노트에 저장됩니다</h2>
               <p>보관함에서 개인 노트를 연결해 주세요.</p>
               <button className="primary-button" disabled={busy} onClick={() => { setSettingsTab("vault"); setModal("settings"); }}>개인 노트 설정</button>
             </div> : <JournalFeed key={vault.id} notes={model.notes} preferences={journalPreferences} vault={vault}
+              hint={guideStep?.step === "write" && guideStep.id === dailyVaultId && <aside className="first-use-tip">
+                <strong>오늘의 저널에 한 줄을 적어 보세요.</strong>
+                <button onClick={() => changeGuideStep(null)}>안내 닫기</button>
+              </aside>}
               conflicts={gitStatus.enabled ? gitStatus.conflicts : undefined} onReview={path=>openReview(vault.id,path)}
               currentDate={today} pendingDate={vault.id === dailyVaultId && checkedJournal !== dailyKey ? today : null}
               onOpen={openNote} onChange={(path, content) => changeFile(path, content, vault.id, true)}
@@ -3077,6 +3123,11 @@ export default function App() {
             document={draft} hidden={activeDocumentDraft?.id !== draft.id || section !== "files" || !!attachment}
             session={aiSession} prompts={documentPrompts} folders={vaults[draft.vaultId].folders ?? []}
             onUpdate={updateDocumentDraft} onPersist={persistDocumentDraft} onSave={saveCopilotDocument} />)}
+          {section === "journal" && guideStep?.step === "saved" && guideStep.id === dailyVaultId && <aside className="first-use-tip" aria-label="첫 저장 안내">
+            <div role="status"><strong>이 PC에 저장했어요.</strong> <span>{dailyRoot}</span></div>
+            <button onClick={() => { changeGuideStep(null); openPanelSettings(dailyVaultId); }}>동기화 설정 열기</button>
+            <button onClick={() => changeGuideStep(null)}>안내 닫기</button>
+          </aside>}
           <footer className="statusbar">
             {captureConflicts[captureVaultId] && <button onClick={() => openCaptureConflict(captureVaultId)}>Copilot 가져오기 · 남은 충돌 해결</button>}
             {switchingVault && <span role="status">보관함 전환 중…</span>}
@@ -3130,6 +3181,7 @@ export default function App() {
                 문서 정보
               </button>
             </div>
+            {featureTips && !modal && rightTab === "copilot" && <FeatureTip topic="copilot"/>}
             {together && <div className="context-space" aria-label="현재 문서 공간">{spaceLabel(vault)}</div>}
             {rightTab === "outline" && <TableOfContents key={`${vault.id}:${note?.path ?? ""}`} note={!["planner", "graph"].includes(section) && mode !== "mindmap" ? note : null} mode={mode}
               editorRef={editorView} previewRef={preview} onJump={heading => setEditorJump({ path: note.path, heading })} />}
@@ -3683,6 +3735,7 @@ export default function App() {
         onPreview={async input=>{await flush();return invoke(api.previewClassification({vaultId:vault.id,input}));}}
         onApply={async value=>{const id=vault.id;setBusy(true);try{await flush();const result=await invoke(api.applyClassification({vaultId:id,input:value.input,revision:value.revision}));if(currentVault.current!==id)return;install(result.snapshot);setModal(null);}finally{setBusy(false);}}}/></Modal>}
       {modal === "compare" && <Modal title="문서 나란히 보기" onClose={()=>setModal(null)}><p>파일이나 탭을 문서의 왼쪽·오른쪽으로 끌어 놓으면 최대 3개를 비교합니다.</p>{searchAcross("").filter(n=>!workspace.paths.includes(n.key)).map(n=><button key={n.key} disabled={workspace.paths.length>=3} onClick={()=>{addPane(n.key);setModal(null);}}>{together ? `${n.scopeLabel} · ` : ""}{n.path} 옆에 열기</button>)}</Modal>}
+      {modal === "first-use" && <Modal title="처음 사용 안내" onClose={() => setModal(null)}>{guide}</Modal>}
       {modal === "about" && (
         <Modal title="Dynote 정보" onClose={() => setModal(null)}>
           <p className="app-version-details">현재 버전 v{version}</p>
@@ -3707,6 +3760,7 @@ export default function App() {
             <FolderOpen size={15} />
             복구 사본 폴더 열기
           </button>
+          <button className="secondary-button" onClick={() => setModal("first-use")}>처음 사용 안내</button>
           <div className="about-footer">
             Dynote {version} · 독립적으로 제작한 노트 앱
           </div>
@@ -3716,14 +3770,14 @@ export default function App() {
         <Modal title="설정" wide className="settings-modal" onClose={() => !busy && setModal(null)}>
           <nav className="settings-tabs" aria-label="설정 항목">
             {[["general", "시작 화면"], ["vault", "보관함"], ["fonts", "글꼴"], ["theme", "테마"], ["shortcuts", "단축키"], ["plugins", "플러그인"], ["capture", "Copilot 대화 자동 저장"], ["document-prompts", "문서 프롬프트"], ["git", "백업·복원"], ["cloud-repository", "Copilot 중계 Git"], ["updates", "업데이트"]].map(([key, label]) =>
-              <button key={key} aria-current={(settingsTab === key || (key === "vault" && settingsTab === "team-sync-setup") || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
+              <button key={key} aria-current={(settingsTab === key || (key === "vault" && ["team-sync-setup","guide-team","guide-import"].includes(settingsTab)) || (key === "git" && ["git-workspace", "history", "personal-sync"].includes(settingsTab))) ? "page" : undefined} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>
           {["git", "history", "git-workspace", "personal-sync"].includes(settingsTab) && <nav className="backup-sections" aria-label="백업 작업">
             {[["git", "자동 백업"], ["history", "복원"], ["git-workspace", "고급 Git 관리"]].map(([key, label]) =>
               <button key={key} aria-pressed={settingsTab === key || (key === "git" && settingsTab === "personal-sync")} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "cloud-repository" && <CloudRepositorySettings api={api} openBackup={() => setSettingsTab("git")} />}
-          {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="auto">다중 패널 이어 보기 (없으면 오늘의 저널)</option><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
+          {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="auto">다중 패널 이어 보기 (없으면 오늘의 저널)</option><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p><button className="secondary-button" onClick={() => setModal("first-use")}>처음 사용 안내</button></section>}
           {settingsTab === "theme" && <fieldset className="theme-picker">
             <legend>색상 테마</legend>
             <div className="theme-options">
@@ -3749,7 +3803,7 @@ export default function App() {
             <p><strong>새 Sticky Note 열기</strong> <kbd>{STICKY_SHORTCUT}</kbd></p>
             <p>Dynote가 백그라운드에서 실행 중이면 다른 앱을 사용하는 중에도 새 Sticky Note를 열 수 있습니다. 메뉴 막대에서도 Sticky Note를 열 수 있습니다.</p>
           </section>}
-          {["vault","team-sync-setup"].includes(settingsTab) && <VaultSettings key={settingsTab} currentId={selectedVaultId} gitStates={gitStates}
+          {["vault","team-sync-setup","guide-team","guide-import"].includes(settingsTab) && <VaultSettings entry={settingsTab} key={settingsTab} currentId={selectedVaultId} gitStates={gitStates}
             teamSetup={settingsTab === "team-sync-setup" ? gitVault : null}
             onList={loadSpaces} openSpaces={connectedSpaces} onReadGit={readSpaceGit}
             onPurpose={async (root, purpose) => {
