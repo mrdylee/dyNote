@@ -51,6 +51,13 @@ export function prepareRequest(args) {
   if (!model.trim()) throw new Error("모델을 선택해 주세요.");
   if (!["chat", "edit", "agent"].includes(args.mode)) throw new Error("작업 방식을 선택해 주세요.");
   if (args.reasoningEffort !== undefined && args.reasoningEffort !== "" && !validEffort(args.reasoningEffort)) throw new Error("추론 강도를 확인해 주세요.");
+  let selectedSkill;
+  if (args.selectedSkill != null) {
+    const { name, path } = args.selectedSkill;
+    if (args.mode !== "agent" || typeof name !== "string" || !name.trim() || name.length > 200 || typeof path !== "string" || !path || path.length > 4096)
+      throw new Error("Agent에서 등록된 스킬을 다시 선택해 주세요.");
+    selectedSkill = { name, path };
+  }
   const input = args.context;
   if (!input || !["none", "document", "selection"].includes(input.kind)) throw new Error("문서 범위를 선택해 주세요.");
   const context = input.kind === "none" ? { kind: "none" } : {
@@ -102,7 +109,7 @@ export function prepareRequest(args) {
       throw new Error('이미지는 PNG/JPEG/WebP, 최대 6MB로 보내 주세요.');
     image = { mimeType: value.mimeType, data: value.data };
   }
-  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, drafts, vaultAccess: args.vaultAccess === true, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}), ...(image ? { image } : {}) };
+  return { requestId: args.requestId, vaultId: args.vaultId, model, mode: args.mode, prompt, context, history, references, drafts, ...(selectedSkill ? { selectedSkill } : {}), vaultAccess: args.vaultAccess === true, ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}), ...(image ? { image } : {}) };
 }
 
 export function sessionOptions(model, mode, tools = [], reasoningEffort) {

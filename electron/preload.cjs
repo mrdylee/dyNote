@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld(
     previewPdf: (args) => call("pdf-preview", args),
     applyPdf: (args) => call("pdf-apply", args),
     copilotHistory: args => call("copilot-history", args),
+    aiListSkills: () => call("ai-list-skills"),
     aiExtensions: () => call("ai-extensions"),
     aiImportMcp: () => call("ai-import-mcp"),
     aiAddSkills: () => call("ai-add-skills"),

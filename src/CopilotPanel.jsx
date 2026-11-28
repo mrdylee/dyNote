@@ -52,6 +52,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const [projectReviews, setProjectReviews] = useState([]);
   const [progress, setProgress] = useState([]);
   const [attachment, setAttachment] = useState(null);
+  const [selectedSkill, setSelectedSkill] = useState(null);
   const [references, setReferences] = useState([]);
   const [attachmentSearch, setAttachmentSearch] = useState("");
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
@@ -81,6 +82,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       }
       if (event.type === "done") {
         if (request.image) setAttachment(null);
+        if (request.selectedSkill) setSelectedSkill(null);
         if (request.mode === "edit") setProposals([{ id: request.requestId, kind: "edit", path: request.target.path, target: request.target, content: event.content }]);
       }
       if (event.type === "project-review") setProjectReviews(old => [...old, event]);
@@ -136,6 +138,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     return () => session.setActivity("chat", false, vaultId);
   }, [running, authBusy, vaultId, session.setActivity]);
   const newConversation = () => {
+    setSelectedSkill(null);
     chat.current = null; setHistoryList(null); setCheckpoint(null);
     setMessages([]); setProposals([]); setReview(null); setError(""); setProgress([]);
   };
@@ -184,14 +187,14 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         return { path, content: found.content };
       });
       const drafts = mode === "agent" ? latest.current.liveEdits.drafts.map(({ path, content }) => ({ path, content })) : [];
-      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt: outgoingPrompt, image: attachment?.image, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
+      const args = prepareRequest({ requestId, vaultId, model, reasoningEffort, prompt: outgoingPrompt, image: attachment?.image, selectedSkill: independent && mode === "agent" ? selectedSkill : undefined, mode, context, references: attached, drafts, vaultAccess: mode === "agent" && vaultAccess, history: mode === "edit" ? [] : history });
       setError(""); setProposals([]); setReview(null); setProgress([]); setRunning(true);
       if (independent) chat.current ??= crypto.randomUUID();
       request = { ...args, target, inputPrompt: prompt, promptEdited: false, chatId: independent ? chat.current : null };
       pending.current = request;
       setPrompt("");
       if (request.chatId) {
-        await chatHistory("begin", { requestId, lastRequestId, prompt: args.prompt, mode, imageName: attachment?.name });
+        await chatHistory("begin", { requestId, lastRequestId, prompt: args.prompt, mode, imageName: attachment?.name, skillName: args.selectedSkill?.name });
         request.recorded = true;
       }
       if (!mounted.current || pending.current !== request) return;
@@ -206,7 +209,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         return;
       }
       setMessages((old) => [...old,
-        { id: `${requestId}-user`, requestId, role: "user", content: args.prompt, imageName: attachment?.name, complete: true, mode },
+        { id: `${requestId}-user`, requestId, role: "user", content: args.prompt, imageName: attachment?.name, skillName: args.selectedSkill?.name, complete: true, mode },
         { id: requestId, checkpoint: request.chatId ? requestId : null, role: "assistant", content: "", complete: false, mode },
       ]);
       try { await invoke(ai.send(independent && mode === "agent" && project ? { ...args, projectId: project.id } : args)); request.sent = true; }
@@ -346,6 +349,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       </div>}
       {messages.map((m) => <article className={`copilot-message ${m.role}`} key={m.id}>
         <strong>{m.role === "user" ? "나" : m.mode === "edit" ? `${label} · 수정안` : label}</strong>
+        {m.skillName && <small className="copilot-sent-image">스킬 · {m.skillName}</small>}
         {m.imageName && <small className="copilot-sent-image"><Paperclip size={12} />{m.imageName}</small>}
         {m.role === "assistant" && m.content ? <DiagramPreview className="copilot-message-content markdown-answer" html={answerHtml(m.content)} renderDiagrams={m.complete} />
           : <div className="copilot-message-content">{m.content || (running ? "답변을 준비하고 있어요…" : "완료되지 않은 응답")}</div>}
@@ -386,6 +390,8 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       </div>
       <div className="copilot-attachments">
         <button type="button" disabled={running || applying} onClick={() => setAttachmentsOpen(!attachmentsOpen)}><Paperclip size={12} />참고 문서 {references.length}/5</button>
+        {selectedSkill && independent && mode === "agent" && <button type="button" className="attachment-chip" disabled={running}
+          aria-label={selectedSkill.name + " 스킬 제거"} title={selectedSkill.description} onClick={() => setSelectedSkill(null)}>${selectedSkill.name} ×</button>}
         {references.map((path) => <button type="button" className="attachment-chip" key={path} disabled={running} title="첨부 제거" onClick={() => setReferences((old) => old.filter((p) => p !== path))}>{path} ×</button>)}
         {attachment && <button type="button" disabled={running} aria-label="첨부 이미지 제거" title="첨부 이미지 제거" onClick={() => { setAttachment(null); setError(""); }}>
           {attachment.image && <img className="copilot-image-preview" alt="첨부 이미지 미리보기" src={`data:${attachment.image.mimeType};base64,${attachment.image.data}`} />}
@@ -405,6 +411,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       <div className="copilot-input-box">
         <CopilotMentions enabled={independent && !running} label={label} prompt={prompt} setPrompt={editPrompt}
           notes={notes.filter(n => effectiveScope === "none" || n.path !== note?.path)} references={references} onAttach={path => setReferences(old => [...old, path])}
+          listSkills={independent && mode === "agent" ? api.aiListSkills : undefined} onSelectSkill={setSelectedSkill}
           onSend={send} onPaste={independent ? pasteImage : undefined} />
         <div className="copilot-send-row">
           <select aria-label={`${label} 작업`} title="작업 모드" value={mode} disabled={running || applying} onChange={(e) => { newConversation(); setMode(e.target.value); }}>

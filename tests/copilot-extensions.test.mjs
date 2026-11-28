@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CopilotController } from "../electron/copilot-controller.mjs";
@@ -18,7 +18,7 @@ function fixture({ getExtensions = async () => extensions, respond } = {}) {
   const session = {
     sessionId: "fixture-session", rpc: { options: { update: async () => {} } },
     on(callback) { handler = callback; return () => {}; }, async abort() {},
-    async sendAndWait() { await respond?.(options.at(-1), event => handler(event)); return { data: { content: "Completed fixture" } }; },
+    async sendAndWait(input) { await respond?.(options.at(-1), event => handler(event), input); return { data: { content: "Completed fixture" } }; },
   };
   const client = {
     async start() {}, async stop() {}, async getAuthStatus() { return { isAuthenticated: true }; },
@@ -125,4 +125,22 @@ test("Copilot cancellation during extension loading does not start a session", a
     await f.controller.settled();
     assert.equal(f.options.length, 0); assert.equal(f.events.at(-1).type, "canceled");
   } finally { extensionsReady.resolve(extensions); await f.controller.close(); }
+});
+
+test("explicit skill instructions reach only the selected Agent request", async () => {
+  const prompts = [];
+  const f = fixture({ respond: (_options, _emit, input) => prompts.push(JSON.parse(input.prompt)) });
+  const selectedSkill = { name: "fixture-skill", path: realpathSync(path.join(skillDirectory, "fixture-skill")) };
+  try {
+    f.controller.send(request({ selectedSkill })); await f.controller.settled();
+    f.controller.send(request()); await f.controller.settled();
+    assert.equal(prompts[0]?.selectedSkill?.name, selectedSkill.name);
+    assert.match(prompts[0].selectedSkill.content, /Use references.md/);
+    assert.equal(prompts[1].selectedSkill, undefined);
+    for (const invalid of [{ ...selectedSkill, path: "/unregistered" }, { ...selectedSkill, name: "missing" }]) {
+      f.controller.send(request({ selectedSkill: invalid })); await f.controller.settled();
+      assert.equal(f.events.at(-1).type, "error");
+    }
+    assert.equal(prompts.length, 2);
+  } finally { await f.controller.close(); }
 });
