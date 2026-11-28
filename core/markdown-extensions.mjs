@@ -43,6 +43,7 @@ export function installMarkdownExtensions(
         target: target.trim(),
         label: alias.join("|").trim() || target.trim(),
         embed: !!match[1],
+        ...(match[1] && state.env.sourceLines ? { inlineOffset: state.pos } : {}),
       };
     }
     state.pos += match[0].length;
@@ -65,7 +66,9 @@ export function installMarkdownExtensions(
         return `<a href="#" data-note="${escape(target)}">노트 · ${escape(label)}</a>`;
       if (visited.includes(note.path) || visited.length >= 4)
         return `<span class="embed-limit">순환/깊이 제한 · ${escape(label)}</span>`;
-      return `<section class="note-embed" data-embed="${escape(note.path)}"><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true, sourceLines: false })}</section>`;
+      const lines = tokens[index].attrGet("data-source-lines");
+      const origin = lines ? ` data-source-lines="${lines}"` : "";
+      return `<section class="note-embed" data-embed="${escape(note.path)}"${origin}><strong>${escape(note.title ?? note.path)}</strong>${renderMarkdown(note.content, env.notes, note.path, { ...env, visited: [...visited, note.path], readonly: true, sourceLines: false })}</section>`;
     }
     if (asset.status === "resolved")
       return `<a href="#" data-attachment="${escape(asset.path)}" data-attachment-fragment="${escape(fragment(target))}">${escape(label)}</a>`;
@@ -101,12 +104,25 @@ export function installMarkdownExtensions(
     return renderer.renderToken(tokens, index, options);
   };
   md.core.ruler.after("inline", "tasks_and_callouts", (state) => {
+    let tableRow;
     for (let i = 0; i < state.tokens.length; i++) {
       const token = state.tokens[i];
       if (state.env.sourceLines && !token.hidden && token.map && token.tag && token.nesting >= 0) {
         const [start, end] = token.map;
         const offset = state.env.bodyOffset ?? 0;
         if (end > start) token.attrSet("data-source-lines", `${start + offset}:${end + offset}`);
+      }
+      if (token.type === "tr_open") tableRow = token.map?.[0];
+      if (token.type === "tr_close") tableRow = undefined;
+      if (token.type === "inline" && state.env.sourceLines) {
+        const start = token.map?.[0] ?? tableRow;
+        const skip = token.meta?.embedPrefixLength ?? 0;
+        for (const child of token.children ?? []) {
+          if (start == null || child.meta?.inlineOffset == null) continue;
+          const prefix = token.content.slice(0, skip + child.meta.inlineOffset);
+          const line = start + (state.env.bodyOffset ?? 0) + (prefix.match(/\n/g)?.length ?? 0);
+          child.attrSet("data-source-lines", `${line}:${line + 1}`);
+        }
       }
       const inline = state.tokens[i + 2];
       if (
@@ -118,6 +134,7 @@ export function installMarkdownExtensions(
         md.inline.parse(inline.content.slice(4), md, state.env, children);
         const input = new state.Token("html_inline", "", 0);
         input.content = `<input type="checkbox" class="task-checkbox" data-task-line="${(token.map?.[0] ?? 0) + (state.env.bodyOffset ?? 0)}"${/^\[[xX]\]/.test(inline.content) ? " checked" : ""}${state.env.readonly ? " disabled" : ""}> `;
+        inline.meta = { ...inline.meta, embedPrefixLength: 4 };
         inline.children = [input, ...children];
       }
       if (token.type === "blockquote_open" && inline?.type === "inline") {
@@ -134,6 +151,7 @@ export function installMarkdownExtensions(
           );
           const title = new state.Token("html_inline", "", 0);
           title.content = `<strong class="callout-title">${escape(match[2] || match[1])}</strong><br>`;
+          inline.meta = { ...inline.meta, embedPrefixLength: match[0].length };
           inline.children = [title, ...children];
         }
       }

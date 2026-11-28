@@ -37,7 +37,7 @@ function blockPosition(block, { y, line }) {
 // Screen order differs from source order for footnotes. Populate the line map in
 // DOM order so a child (a table row, for example) wins over its container.
 function indexBlocks(preview) {
-  const blocks = [...preview.querySelectorAll("[data-source-lines]")].filter(el => !el.closest("[data-embed]"));
+  const blocks = [...preview.querySelectorAll("[data-source-lines]")].filter(el => !el.parentElement.closest("[data-embed]"));
   const lines = [];
   for (const block of blocks) {
     const [start, end] = blockLines(block);
@@ -57,7 +57,7 @@ function indexBlocks(preview) {
 function previewAnchor(preview, y, index) {
   const x = preview.getBoundingClientRect().left + preview.clientWidth / 2;
   const hit = preview.ownerDocument.elementFromPoint(x, y)?.closest("[data-source-lines]");
-  let block = hit && preview.contains(hit) && !hit.closest("[data-embed]") ? hit : null;
+  let block = hit && preview.contains(hit) ? hit : null;
   if (!block) {
     // A gutter or paragraph margin can have no hit. Locate its visual neighbours.
     const blocks = index.blocks;
@@ -80,10 +80,11 @@ function previewAnchor(preview, y, index) {
   return { line, fraction: source - line, offset: top + ratio * height - y };
 }
 
-function previewTop(index, { line, fraction }) {
+function previewTop(index, { line, fraction }, fromEditor = false) {
   const block = index.lines[Math.min(line, index.lines.length - 1)];
   if (!block) return null;
   const { start, end, top, height } = blockPosition(block, { line });
+  if (fromEditor && block.hasAttribute("data-embed")) return top;
   return top + height * Math.max(0, Math.min(1, (line + fraction - start) / (end - start)));
 }
 
@@ -178,7 +179,7 @@ export default class PaneReadingPosition extends Component {
             if (rect) move(target, target.scrollTop + rect.top - this.top("split", target) - anchor.offset);
           });
         }
-      } else top = previewTop(this.blocks(), anchor);
+      } else top = previewTop(this.blocks(), anchor, true);
       if (top != null) move(target, target.scrollTop + top - this.top("split", target) - anchor.offset);
     };
     const schedule = () => { if (frame == null) frame = requestAnimationFrame(sync); };

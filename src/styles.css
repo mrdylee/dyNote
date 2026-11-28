@@ -839,6 +839,11 @@ kbd {
 .split .copilot-live-comparison { max-height: 30%; overflow: auto; }
 .split .preview-column { display: block; flex: 1; min-width: 0; overflow: auto; }
 .split .code-editor { display: flex; flex-direction: column; min-height: 0; }
+.editor-toolbars { display: contents; }
+.split .code-editor { container-type: inline-size; }
+@container (max-width: 320px) {
+  .split .editor-toolbars { display: block; max-height: 40%; overflow: auto; }
+}
 .split .editor-host { flex: 1; min-height: 0; }
 .split .cm-scroller { min-height: 0; }
 .split .markdown-preview {

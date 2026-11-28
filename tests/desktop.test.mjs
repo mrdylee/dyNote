@@ -315,3 +315,14 @@ test("display math carries the original lines after frontmatter", () => {
   const html = knowledge.renderMarkdown("---\ntags: []\n---\n$$\nx^2\n$$", [], "", {sourceLines: true});
   assert.match(html, /<[^>]*data-source-lines="3:6"[^>]*>/);
 });
+
+test("embedded notes keep the parent's source line through lists, callouts and tables", () => {
+  const notes = [{ path: "B.md", content: "![[C]]" }, { path: "C.md", content: "nested" }];
+  for (const body of ["first\n![[B]]", "- [ ] first\n  ![[B]]", "> [!NOTE]\n> ![[B]]", "| title |\n| --- |\n| ![[B]] |"]) {
+    const source = "---\ntags: []\n---\n" + body;
+    const line = source.split("\n").findIndex(text => text.includes("![[B]]"));
+    const html = knowledge.renderMarkdown(source, notes, "A.md", {sourceLines: true});
+    assert.ok(html.includes(`data-embed="B.md" data-source-lines="${line}:${line + 1}"`));
+    assert.ok(html.includes('data-embed="C.md">'));
+  }
+});

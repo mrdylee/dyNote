@@ -401,6 +401,7 @@ export default function Editor({
   return <div className="code-editor" onCopy={event => {
     if (pointerSelection.current === editor.current?.state.selection) copyEditorSelection(event, editor.current);
   }}>
+    <div className="editor-toolbars">
     {journal && <div className="journal-outline-toolbar" role="toolbar" aria-label="저널 블록 작성">
       <span>Enter 새 블록 · Tab 하위 · Shift+Tab 상위 · Shift+Enter 줄바꿈</span>
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => addJournalBlock(editor.current)}>저널 블록 추가</button>
@@ -436,6 +437,7 @@ export default function Editor({
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "highlight")}>노란 형광펜</button>
       <button type="button" disabled={readOnly} onMouseDown={event => event.preventDefault()} onClick={() => applyFormat(editor.current, "clear-highlight")}>형광펜 지우기</button>
       <button type="button" title="앱 전체의 글꼴과 크기 설정" onClick={onFontSettings}>글꼴·크기</button>
+    </div>
     </div>
     <div className="editor-host" ref={host} />
     {suggestion && suggestion.path === note.path && suggestion.vaultId === vaultId && <AiSuggestion key={suggestion.id}

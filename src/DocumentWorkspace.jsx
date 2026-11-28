@@ -53,6 +53,9 @@ function DocumentPane(props) {
     const field = searchHost.current.querySelector("input[name=search]");
     field?.focus({preventScroll:true}); field?.select();
   }
+  function trackFindSide() {
+    if (mode === "split" && scope) readingPreview.current = scope === "preview";
+  }
   function closeFind() {
     if (editor.current) closeSearchPanel(editor.current);
     setPreviewOpen(false);
@@ -92,7 +95,7 @@ function DocumentPane(props) {
     props.onTabLinkInserted(key,{x:event.clientX,y:event.clientY});
   };
   return <div className="markdown-find-view">
-    <div className="document-search-host" ref={searchHost}>
+    <div className="document-search-host" ref={searchHost} onKeyDownCapture={trackFindSide} onClickCapture={trackFindSide} onInputCapture={trackFindSide}>
       {active && scope && <DocumentFind scope={scope} target={preview} editor={editor.current} editorState={editorState}
         onScope={mode==="split" ? openFind : undefined} onClose={closeFind}/>}
     </div>
