@@ -42,6 +42,7 @@ import { noteFolderRemotes, noteRemotes } from "./bridge-repositories.mjs";
 import { CodexController } from "./codex-controller.mjs";
 import { ClaudeController } from "./claude-controller.mjs";
 import { CopilotHistory } from "./copilot-history.mjs";
+import { discoverSkills } from "./ai-skills.mjs";
 import { AiExtensions } from "./ai-extensions.mjs";
 import { CopilotJournal } from "./copilot-journal.mjs";
 import { StickyNotes } from "./sticky-notes.mjs";
@@ -717,6 +718,11 @@ app
       "plugin-command": args => { checkVault(args); plugins.execute(args.id, args.command); },
       "plugin-context": args => { checkVault(args); plugins.update({ notes: args.notes, active: args.active, dailyOptions: args.dailyOptions }); },
       "ai-extensions": () => aiExtensions.snapshot(),
+      "ai-list-skills": async () => {
+        const { skillDirectories } = await aiExtensions.getExtensions();
+        const skills = await discoverSkills(skillDirectories);
+        return [...skills.values()].map(({ name, description, directory }) => ({ name, description, path: directory }));
+      },
       "ai-import-mcp": () => changeAiExtensions(async () => {
         const selected = await dialog.showOpenDialog(window, { title: "MCP 설정 JSON 파일 연결", filters: [{ name: "JSON", extensions: ["json"] }], properties: ["openFile"] });
         return selected.canceled ? aiExtensions.snapshot() : aiExtensions.addConfig(selected.filePaths[0]);

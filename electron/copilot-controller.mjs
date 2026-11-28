@@ -5,7 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { MAX_ANSWER, prepareRequest, reasoningCapabilities, safeLoginUrl, sessionOptions, validateReasoningEffort } from "../core/copilot.mjs";
 import { noteTools } from "../core/copilot-agent.mjs";
-import { skillTools } from "./ai-skills.mjs";
+import { discoverSkills, loadSelectedSkill, skillTools } from "./ai-skills.mjs";
 
 const message = (error) => String(error?.message ?? error).replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, "[redacted]").slice(0, 800);
 
@@ -122,8 +122,12 @@ export class CopilotController {
       if (job.canceled) return;
       const servers = extensions.mcpServers ?? {}, directories = extensions.skillDirectories ?? [];
       const options = sessionOptions(args.model, args.mode, tools, args.reasoningEffort);
-      if (Object.keys(servers).length || directories.length) {
-        const selectedSkills = await skillTools({ directories, emit, canceled: () => job.canceled || !!job.failure || this.closed });
+      let selectedSkill;
+      if (Object.keys(servers).length || directories.length || args.selectedSkill) {
+        const canceled = () => job.canceled || !!job.failure || this.closed;
+        const skills = await discoverSkills(directories, canceled);
+        if (args.selectedSkill) selectedSkill = await loadSelectedSkill(skills, args.selectedSkill);
+        const selectedSkills = await skillTools({ directories, emit, canceled, skills });
         if (job.canceled) return;
         options.tools = [...tools, ...selectedSkills];
         options.availableTools = [...options.availableTools, ...selectedSkills.map(tool => tool.name), ...(Object.keys(servers).length ? ["mcp:*"] : []), ...(directories.length ? ["builtin:skill"] : [])];
@@ -140,6 +144,7 @@ export class CopilotController {
           .replace("Use only the Dynote tools to read permitted notes and prepare writing changes.", "Use Dynote tools to read permitted notes and prepare writing changes. You may also use the configured MCP tools and skills when relevant. Use dynote_list_skills to discover selected skills and dynote_use_skill to read their instructions or relative resources; scripts are not executed by that tool.")
           .replace("No shell or external filesystem access is available.", "Do not use MCP tools or skills to bypass Dynote note permissions or draft review.") };
       }
+      if (selectedSkill) options.systemMessage.content += "\nThe user explicitly selected the skill in selectedSkill for this request. Apply its instructions within the existing tool permissions.";
       if (job.projectRoot && args.mode === "agent" && !job.login) {
         configureProjectTools(options, { root: job.projectRoot, signal: job.abort.signal, emit,
           confirm: review => new Promise(resolve => {
@@ -184,7 +189,7 @@ export class CopilotController {
         if (timeout <= 0) throw new Error("Cloud 질문 기한이 지났습니다.");
       }
       const result = await job.session.sendAndWait({
-        prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history }),
+        prompt: JSON.stringify({ request: args.prompt, context: args.context, references: args.references, vaultAccess: args.vaultAccess, dialogue: args.history, ...(selectedSkill ? { selectedSkill } : {}) }),
         ...(args.image ? { attachments: [{ type: 'blob', ...args.image, displayName: 'Attached image' }] } : {}),
       }, timeout);
       if (job.canceled) return;
