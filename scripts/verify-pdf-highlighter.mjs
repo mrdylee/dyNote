@@ -59,14 +59,28 @@ try {
   await first.click({trial:true});
   await last.click({trial:true});
   const firstLine = await first.boundingBox(), lastLine = await last.boundingBox();
-  await page.mouse.move(firstLine.x + firstLine.width / 2, firstLine.y + firstLine.height / 2);
+  const textPoint = locator => locator.evaluate(span => {
+    const range = document.createRange(), offset = Math.floor(span.firstChild.length / 2);
+    range.setStart(span.firstChild, offset); range.setEnd(span.firstChild, offset + 1);
+    const r = range.getBoundingClientRect();
+    return {x:r.left+r.width/2, y:r.top+r.height/2};
+  });
+  const start = await textPoint(first), end = await textPoint(last);
+  const hit = point => page.evaluate(p => ({
+    tag:document.elementFromPoint(p.x,p.y)?.outerHTML.slice(0,180),
+    caret:document.caretPositionFromPoint(p.x,p.y)?.offsetNode.textContent?.slice(0,70),
+    selected:window.getSelection()?.toString(),
+  }),point);
+  await page.mouse.move(start.x,start.y);
+  const startHit = await hit(start);
   await page.mouse.down();
-  await page.mouse.move(lastLine.x + lastLine.width / 2, lastLine.y + lastLine.height / 2, {steps:15});
+  await page.mouse.move(end.x,end.y,{steps:15});
+  const endHit = await hit(end);
   await page.mouse.up();
   try {
     await page.getByText('저장됨', {exact:true}).waitFor();
   } catch (error) {
-    console.error(await page.evaluate(() => ({
+    console.error({start,startHit,end,endHit}, await page.evaluate(() => ({
       selection: window.getSelection()?.toString(),
       status: [...document.querySelectorAll('.pdf-toolbar [role=status], .pdf-message')].map(n => n.textContent),
     })), errors);
