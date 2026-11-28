@@ -7,10 +7,10 @@ import {isolateHistory} from '@codemirror/commands';
 import Editor from './Editor.jsx';
 import PaneReadingPosition from './PaneReadingPosition.jsx';
 import {closeSearchPanel,openSearchPanel} from '@codemirror/search';
-import RenderedDocumentFind,{useDocumentFind} from './RenderedDocumentFind.jsx';
+import DocumentFind,{useDocumentFind} from './DocumentFind.jsx';
 import DiagramPreview from './DiagramPreview.jsx';
 
-function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, onBodyDrop, canMakeDocument, onMakeDocument, captureLocked, edits, limited, disabled, review, children}) {
+function Pane({note, header, docKey, vault, scopeLabel, active, mode, onFocus, onClose, onDrop, onBodyDrop, canMakeDocument, onMakeDocument, captureLocked, edits, limited, disabled, review, children}) {
   const [edge,setEdge]=useState(null);
   useEffect(()=>{const clear=()=>setEdge(null);window.addEventListener('dragend',clear);window.addEventListener('drop',clear);return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);};},[]);
   const side=e=>e.clientX < e.currentTarget.getBoundingClientRect().x + e.currentTarget.clientWidth / 2 ? 'left' : 'right';
@@ -20,10 +20,10 @@ function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active
     onDragOverCapture={e=>{if(!e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();const link=bodyDrop(e);const blocked=disabled||(link?(captureLocked||edits.working):limited);e.dataTransfer.dropEffect=blocked?'none':'copy';setEdge(blocked?null:link?'link':side(e));}}
     onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setEdge(null);}}
     onDropCapture={e=>{if(!e.dataTransfer.types.includes(DOCUMENT_DRAG))return;e.preventDefault();e.stopPropagation();setEdge(null);if(disabled)return;if(bodyDrop(e)){if(!captureLocked&&!edits.working)onBodyDrop(e);}else onDrop(e.dataTransfer.getData(DOCUMENT_DRAG),side(e));}}>
-    <div className="pane-header"><div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
+    <div className="pane-header" ref={header}><div className="pane-heading"><span className="pane-title" draggable={!disabled} onDragStart={e=>{e.dataTransfer.setData(DOCUMENT_DRAG,docKey);e.dataTransfer.effectAllowed='copy';}}>
       {scopeLabel && <small className="pane-space" title={scopeLabel}>{scopeLabel}</small>}
       <span title={note.path}>{note.path}</span>
-    </span><div className="pane-heading-actions">{canMakeDocument?.(note,vault.id)&&<button className="make-document-button" disabled={disabled||captureLocked} onClick={()=>onMakeDocument(note,vault.id)}>문서로 만들기</button>}<button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div></div>{review}<div className="document-search-host" ref={searchHost}>{renderedFind}</div></div>
+    </span><div className="pane-heading-actions">{canMakeDocument?.(note,vault.id)&&<button className="make-document-button" disabled={disabled||captureLocked} onClick={()=>onMakeDocument(note,vault.id)}>문서로 만들기</button>}<button aria-label={`${note.path} 영역 닫기`} disabled={disabled} onClick={onClose}>×</button></div></div>{review}</div>
     <div className={`document-content ${mode}`}>{children}</div>
     {edge&&<div className={`pane-drop-target ${edge}`} aria-live="polite">{edge==='link'?'링크 삽입':`${edge==='left'?'왼쪽':'오른쪽'}에 문서 열기`}</div>}
   </section>;
@@ -32,30 +32,38 @@ function Pane({note, searchHost, renderedFind, docKey, vault, scopeLabel, active
 function DocumentPane(props) {
   const {note,notes,vault,mode,active,onFocus,onContext,fonts,onFontSettings,onChange,onImportFiles,onLink,onPreviewLink,jump,disabled,pending,edits}=props;
   const searchHost=useRef(null),editor=useRef(null),preview=useRef(null),selection=useRef(null);
+  const header = useRef(null);
   const readingPreview = useRef(false);
   const trackReadingSide = event => {
     if (mode !== "split") return;
     if (preview.current?.contains(event.target)) readingPreview.current = true;
     else if (event.target.closest(".code-editor")) readingPreview.current = false;
   };
-  const [findMode,setFindMode]=useState(null);
-  const renderedOpen=active && mode===findMode;
-  useEffect(()=>{setFindMode(null);},[active,mode]);
+  const [previewOpen,setPreviewOpen] = useState(false);
+  const [editorState,setEditorState] = useState(null);
+  const scope = previewOpen ? "preview" : editorState ? "editor" : null;
+  useEffect(() => {
+    setPreviewOpen(false);
+    if (editor.current) closeSearchPanel(editor.current);
+  }, [active,mode]);
+  function openFind(side) {
+    readingPreview.current = side === "preview";
+    setPreviewOpen(side === "preview");
+    if (editor.current) (side === "preview" ? closeSearchPanel : openSearchPanel)(editor.current);
+    const field = searchHost.current.querySelector("input[name=search]");
+    field?.focus({preventScroll:true}); field?.select();
+  }
+  function closeFind() {
+    if (editor.current) closeSearchPanel(editor.current);
+    setPreviewOpen(false);
+    if (scope === "preview") preview.current?.focus({preventScroll:true});
+    else editor.current?.focus();
+  }
   useDocumentFind(searchHost,active,target=>{
-    const input=searchHost.current.querySelector('.rendered-find input[name=search]');
-    if(input && searchHost.current.contains(target)){input.focus();input.select();return;}
-    if(mode==='read'||(mode==='split' && preview.current?.contains(target))){
-      if(editor.current)closeSearchPanel(editor.current);
-      setFindMode(mode);
-      if(input){input.focus();input.select();}
-    }else if(editor.current){
-      setFindMode(null);
-      openSearchPanel(editor.current);
-    }
+    const onPreview = searchHost.current.contains(target) ? previewOpen : preview.current?.contains(target) ||
+      (!target.closest(".code-editor") && readingPreview.current);
+    openFind(mode==="read" || (mode==="split" && onPreview) ? "preview" : "editor");
   });
-  const renderedFind=renderedOpen && <RenderedDocumentFind target={preview} onClose={()=>{
-    setFindMode(null);preview.current?.focus({preventScroll:true});
-  }}/>;
   const [compare,setCompare]=useState(false);
   const context=()=>onContext(editor.current,preview.current,selection.current);
   const focus=()=>{if(!disabled){onFocus();context();}};
@@ -83,7 +91,12 @@ function DocumentPane(props) {
     }else onChange(note.path,note.content+(note.content.endsWith('\n\n')?'':note.content.endsWith('\n')?'\n':'\n\n')+text+'\n',vault.id);
     props.onTabLinkInserted(key,{x:event.clientX,y:event.clientY});
   };
-  return <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={searchHost} editor={editor} preview={preview}><Pane {...props} searchHost={searchHost} renderedFind={renderedFind} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
+  return <div className="markdown-find-view">
+    <div className="document-search-host" ref={searchHost}>
+      {active && scope && <DocumentFind scope={scope} target={preview} editor={editor.current} editorState={editorState}
+        onScope={mode==="split" ? openFind : undefined} onClose={closeFind}/>}
+    </div>
+    <PaneReadingPosition tabKey={props.docKey} positions={props.tabReadingPositions} mode={mode} readingPreview={readingPreview} content={note.content} jump={active && jump?.path === note.path ? jump : null} header={header} editor={editor} preview={preview}><Pane {...props} header={header} onBodyDrop={insertTabLink} onFocus={focus} review={pending&&<section className="copilot-live-banner" aria-label="AI 실시간 변경">
       <strong>AI · {edits.running?'작성 중':'미확정 변경'}</strong><p>노트 파일은 유지할 때 저장됩니다.</p>
       {pending.userEdited&&<p>직접 편집한 내용이 포함되어 있습니다. 유지하거나 복구본을 저장해 주세요.</p>}{pending.conflict&&<p role="alert">{pending.conflict}</p>}
       <div className="copilot-live-actions"><button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'keep')}>변경 유지</button><button disabled={edits.running||edits.working||pending.userEdited} onClick={()=>edits.resolve(note.path,'undo')}>변경 되돌리기</button>{edits.running&&<button onClick={edits.stop}>작성 중지</button>}<button onClick={()=>setCompare(!compare)}>원본·초안 비교</button>{(pending.userEdited||pending.conflict)&&<button disabled={edits.running||edits.working} onClick={()=>edits.resolve(note.path,'recover')}>복구본 저장</button>}</div>
@@ -91,11 +104,11 @@ function DocumentPane(props) {
     {pending&&compare&&<div className="copilot-live-comparison"><pre>{pending.original||'(새 문서)'}</pre><pre>{pending.aiContent}</pre></div>}
     <div className="editor-preview" onWheelCapture={trackReadingSide} onPointerDownCapture={trackReadingSide}
       onFocusCapture={trackReadingSide} onKeyDownCapture={trackReadingSide}>
-      {mode!=='read'&&<Editor searchHost={searchHost} note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
+      {mode!=='read'&&<Editor onFindState={setEditorState} note={note} notes={notes} journal={props.journalPaths?.has(note.path)} editorRef={editor} onSelection={value=>{selection.current=value;if(active)context();}} onChange={content=>onChange(note.path,content,vault.id)} pendingOriginal={pending?.original} fontSettings={fonts} onFontSettings={onFontSettings} onImportFiles={files=>onImportFiles(files,vault.id)} live={mode==='live'} vaultId={vault.id} attachments={vault.attachments} onLink={(target,kind)=>{if(!disabled){focus();onLink(target,kind,note.path,vault.id);}}} jump={active?jump:null} readOnly={disabled||props.captureLocked||edits.working}/>}
       {(mode==='read'||mode==='split')&&<DiagramPreview tabIndex={-1} previewRef={preview} html={html} onClick={event=>{event.preventDefault();if(!disabled){focus();onPreviewLink(event,note.path,preview.current,vault.id);}}}/>}
     </div>
     {mode==='read'&&<div className="document-bottom"><button onClick={()=>{focus();props.onEdit();}}>이 문서 편집</button></div>}
-  </Pane></PaneReadingPosition>;
+  </Pane></PaneReadingPosition></div>;
 }
 
 export function DocumentPanes({panes,renderPane}) {

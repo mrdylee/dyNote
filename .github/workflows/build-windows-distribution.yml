@@ -47,6 +47,7 @@ jobs:
           node scripts/verify-external-file-open.mjs
           node scripts/verify-readable-file-open.mjs
           node scripts/verify-markdown-drag-selection.mjs
+          node scripts/verify-markdown-find.mjs
           node scripts/verify-pdf-highlighter.mjs
           node scripts/verify-pdf-links.mjs
           node scripts/verify-vault-space-fixes.mjs

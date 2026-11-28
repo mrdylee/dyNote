@@ -103,6 +103,22 @@ try {
   assert.equal(await panes.count(), 3);
   checks.push('space filters preserve open panes and search resolves the result in its own vault');
 
+  await page.keyboard.press(`${modifier}+Shift+f`);
+  const searchPanel = page.locator(".workspace-find");
+  await searchPanel.getByLabel("본문 검색", {exact:true}).fill("참고 본문");
+  await searchPanel.getByText("2개 문서 · 2개 일치", {exact:true}).waitFor();
+  await filter.selectOption({label:"개인 노트"});
+  await searchPanel.getByText("1개 문서 · 1개 일치", {exact:true}).waitFor();
+  await searchPanel.getByRole("button", {name:"바꾸기 펼치기"}).click();
+  await searchPanel.getByLabel("바꿀 내용").fill("변경된 본문");
+  await searchPanel.getByRole("button", {name:"모두 바꾸기"}).click();
+  await searchPanel.getByRole("button", {name:"적용",exact:true}).click();
+  await searchPanel.getByText("바꾸기가 완료되었습니다.").waitFor();
+  assert.equal(await readFile(path.join(personal,"참고.md"),"utf8"),"# 참고\n개인 변경된 본문\n");
+  assert.equal(await readFile(path.join(team,"참고.md"),"utf8"),"# 참고\n팀 참고 본문\n");
+  await filter.selectOption({label:"전체 공간"});
+  checks.push("workspace replace respects the selected vault when both vaults contain the same path");
+
   const personalId = await personalPane.getAttribute('data-vault-id');
   const teamId = await teamPane.getAttribute('data-vault-id');
   const refused = await page.evaluate(async ({ teamId, same }) => {

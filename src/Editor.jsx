@@ -8,7 +8,6 @@ import { EditorState, Compartment, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
-  panels,
   lineNumbers,
   highlightActiveLine,
   drawSelection,
@@ -74,7 +73,7 @@ export default function Editor({
   onFontSettings,
   onSelection,
   editorRef,
-  searchHost,
+  onFindState,
   pendingOriginal,
 }) {
   const [suggestion, setSuggestion] = useState(null);
@@ -102,7 +101,7 @@ export default function Editor({
   const outlining = useRef(new Compartment());
   const pendingMarks = useRef(new Compartment());
   const latest = useRef(null);
-  latest.current = { note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
+  latest.current = { onFindState, note, notes, onImportFiles, vaultId, attachments, onLink, onSelection };
   const liveExtensions = () => livePreview({
     getContext: () => ({ path: latest.current.note.path, vaultId: latest.current.vaultId, attachments: latest.current.attachments }),
     onLink: (target, kind) => latest.current.onLink?.(target, kind),
@@ -122,8 +121,23 @@ export default function Editor({
           history(),
           drawSelection(),
           highlightActiveLine(),
-          search({ top: true }),
-          panels({ topContainer: searchHost?.current }),
+          search(onFindState ? {
+            top: true,
+            scrollToMatch: range => EditorView.scrollIntoView(range, { y: "center" }),
+            // The workspace renders the controls. Keep CodeMirror's match decorations and commands.
+            createPanel(view) {
+              const dom = document.createElement("span");
+              dom.className = "document-find-engine";
+              return { dom, top: true,
+                mount: () => latest.current.onFindState(view.state),
+                update(update) {
+                  if (update.docChanged || update.selectionSet || update.startState.readOnly !== update.state.readOnly)
+                    latest.current.onFindState(update.state);
+                },
+                destroy: () => latest.current.onFindState(null),
+              };
+            },
+          } : { top: true }),
           EditorState.phrases.of({
             Find: "문서에서 찾기", next: "다음", previous: "이전", all: "모두 선택",
             "match case": "대소문자 구분", "by word": "단어 단위", regexp: "정규식",
@@ -359,6 +373,17 @@ export default function Editor({
   }, [pendingOriginal, note.content]);
   useEffect(() => {
     if (!jump || jump.path !== note.path) return;
+    const view = editor.current;
+    if (jump.match && view) {
+      const {line,column,text} = jump.match;
+      if (line >= view.state.doc.lines) return;
+      const source = view.state.doc.line(line + 1);
+      if (column > source.length || source.text.slice(column,column+text.length)!==text) return;
+      const anchor = source.from + column;
+      view.dispatch({selection:{anchor,head:anchor+text.length},effects:EditorView.scrollIntoView(anchor,{y:"center"})});
+      view.focus();
+      return;
+    }
     let lineNumber = jump.heading?.line;
     if (lineNumber === undefined) {
       let fragment;
@@ -366,7 +391,6 @@ export default function Editor({
       const heading = note.headings?.find((h) => h.text === fragment || h.plainText === fragment || h.id === fragment || headingId(h.plainText) === fragment);
       lineNumber = heading?.line;
     }
-    const view = editor.current;
     if (view && lineNumber !== undefined) {
       const line = view.state.doc.line(Math.min(view.state.doc.lines, lineNumber + 1));
       view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 52 }) });
