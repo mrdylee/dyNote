@@ -1,8 +1,9 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { discoverSkills } from "../electron/ai-skills.mjs";
 import { CopilotController } from "../electron/copilot-controller.mjs";
 
 const request = extra => ({ requestId: "extension-probe", vaultId: "fixture-vault", model: "fixture-model", mode: "agent", prompt: "Use the configured tools", context: { kind: "document", path: "Public.md", content: "Public fixture" }, history: [], ...extra });
@@ -130,9 +131,11 @@ test("Copilot cancellation during extension loading does not start a session", a
 test("explicit skill instructions reach only the selected Agent request", async () => {
   const prompts = [];
   const f = fixture({ respond: (_options, _emit, input) => prompts.push(JSON.parse(input.prompt)) });
-  const selectedSkill = { name: "fixture-skill", path: realpathSync(path.join(skillDirectory, "fixture-skill")) };
+  const skills = await discoverSkills([skillDirectory]);
+  const selectedSkill = { name: "fixture-skill", path: skills.get("fixture-skill").directory };
   try {
     f.controller.send(request({ selectedSkill })); await f.controller.settled();
+    assert.equal(f.events.at(-1).type, "done", f.events.at(-1).message);
     f.controller.send(request()); await f.controller.settled();
     assert.equal(prompts[0]?.selectedSkill?.name, selectedSkill.name);
     assert.match(prompts[0].selectedSkill.content, /Use references.md/);
