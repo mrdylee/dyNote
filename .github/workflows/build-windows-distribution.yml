@@ -53,6 +53,7 @@ jobs:
           node scripts/verify-sidebar-file-drop.mjs
           node scripts/verify-theme-workspace.mjs
           node scripts/verify-document-tabs.mjs
+          node scripts/verify-first-use.mjs
           node scripts/verify-vault-entry.mjs
           node scripts/verify-team-repositories.mjs
           DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs

@@ -29,7 +29,7 @@ const picker=folder=>app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=asyn
 async function connect(purpose){
  await openVaultSection(page, purpose==='personal'?'개인 노트':'팀 노트');
  await row(purpose==='personal'?personal:team).getByRole('button',{name:purpose==='personal'?'동기화 설정':'Team',exact:true}).click();
- if(purpose==='personal') await page.getByLabel('Git 사용 방식').selectOption('daily');
+ if(purpose==='personal') await page.getByLabel('사용 목적').selectOption('daily');
  await page.getByRole('textbox',{name:'Git 저장소 주소',exact:true}).fill(remotes[purpose]);
  await page.getByRole('button',{name:'연결하고 백업 시작',exact:true}).click();
  await page.locator('.git-space-context').getByText(remotes[purpose],{exact:true}).waitFor();
@@ -44,7 +44,7 @@ try{
  await page.screenshot({path:'output/playwright/vault-spaces-personal.png'});
  report.checks.push('legacy space remains unclassified; explicit personal choice is saved without modifying notes');
  await openVaultSection(page,"팀 노트");await picker(nested);await page.getByRole('button',{name:'팀 공유 폴더 연결',exact:true}).click();
- await page.getByRole('alert').filter({hasText:'서로 포함'}).waitFor();
+ await page.getByRole('dialog',{name:'설정',exact:true}).getByRole('alert').filter({hasText:'서로 포함'}).waitFor();
  assert.equal(JSON.parse(await readFile(`${profile}/settings.json`,'utf8')).vaultRoot,personal);
  report.checks.push('nested personal/team folders are rejected and the original space stays selected');
  await connect('personal');

@@ -25,13 +25,14 @@ function SpaceGitInfo({ vaultId, onReadGit }) {
   </div>;
 }
 
-export default function VaultSettings({ openSpaces, gitStates, currentId, switching, teamSetup, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
+export default function VaultSettings({ entry, openSpaces, gitStates, currentId, switching, teamSetup, onImportPersonal, onReadGit, onList, onPick, onSelect, onForget, onPurpose, onOpenGit, onPickTeamRepositoryFolder, onConnectTeamRepositories }) {
   const [data, setData] = useState({ entries: [] }), [error, setError] = useState(""), [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
-  const [teamRows, setTeamRows] = useState(() => teamSetup ? [{id:0, remote:"", branch:"main", folder:"", error:""}] : []);
-  const [section, setSection] = useState(teamSetup ? "team" : null);
-  const [importing, setImporting] = useState(false);
-  const nextTeamRow = useRef(teamSetup ? 1 : 0);
+  const startTeam = !!teamSetup || entry === "guide-team";
+  const [teamRows, setTeamRows] = useState(() => startTeam ? [{id:0, remote:"", branch:"main", folder:"", error:""}] : []);
+  const [section, setSection] = useState(startTeam ? "team" : entry === "guide-import" ? "personal" : null);
+  const [importing, setImporting] = useState(entry === "guide-import");
+  const nextTeamRow = useRef(startTeam ? 1 : 0);
   useEffect(() => {
     let mounted = true;
     onList().then((value) => { if (mounted) setData(value); }).catch((e) => { if (mounted) setError(e.message); });
@@ -118,6 +119,7 @@ export default function VaultSettings({ openSpaces, gitStates, currentId, switch
       const input = Object.fromEntries(new FormData(event.currentTarget));
       void run(() => onImportPersonal({ ...input, mode: "personal-sync" }));
     }}>
+      <p>다른 PC에서 사용한 저장소 주소와 브랜치를 입력하세요. 다음 단계에서 이 PC의 빈 폴더를 선택하면 노트를 받습니다.</p>
       <label>저장소 주소<input name="remote" required placeholder="HTTPS 또는 SSH" disabled={pending}/></label>
       <label>브랜치<input name="branch" required defaultValue="main" disabled={pending}/></label>
       <label>이 기기 이름<input name="deviceName" required maxLength={80} disabled={pending}/></label>

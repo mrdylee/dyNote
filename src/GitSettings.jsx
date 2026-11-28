@@ -40,10 +40,17 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
     try { await action(); } catch (error) { setError(error.message); } finally { setPending(false); }
   };
   const busy = pending || status.phase === "saving";
-  const modeSelect = space?.purpose==="personal" && <label>Git 사용 방식<select value={form.mode || "daily"} disabled={busy}
-    onChange={e=>{setToken("");setError("");update("mode",e.target.value);}}>
-    <option value="daily">하루 한 번 백업</option><option value="personal-sync">여러 PC에서 이어 쓰기</option>
-    <option value="github-api">GitHub API로 이어 쓰기</option></select></label>;
+  const changeMode = mode => { setToken(""); setError(""); update("mode", mode); };
+  const modeSelect = space?.purpose === "personal" && <>
+    <label>사용 목적<select value={personal || apiMode ? "sync" : "daily"} disabled={busy}
+      onChange={e => changeMode(e.target.value === "daily" ? "daily" :
+        (status.config?.mode === "personal-sync" || status.suggestedMode === "personal-sync" ? "personal-sync" : "github-api"))}>
+      <option value="daily">하루 한 번 백업하기</option><option value="sync">여러 PC에서 이어 쓰기</option>
+    </select></label>
+    {(personal || apiMode) && <label>Git 사용 방식<select value={form.mode} disabled={busy} onChange={e => changeMode(e.target.value)}>
+      <option value="github-api">GitHub에 로그인해서 연결</option><option value="personal-sync">사내 Git 또는 저장소 주소로 연결</option>
+    </select></label>}
+  </>;
   if (apiMode) return <section className="settings-section">
     <h3>개인 노트 동기화</h3>{modeSelect}
     <p>GitHub에 로그인하고 노트 저장소를 선택하세요. 다른 PC에서도 일반 노트 폴더를 같은 저장소에 연결하면 이어 쓸 수 있습니다. File Storage 안의 일반 파일은 확장자와 관계없이 파일당 25 MiB까지 전송합니다.</p>
@@ -75,6 +82,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
   </section>;
   return <section className="settings-section">
     <h3>{personal ? "개인 노트 동기화" : "자동 백업"}</h3>
+    {modeSelect}
     <div className="git-space-context" aria-label="현재 공간의 Git 연결">
       <strong>{space?.purpose === "personal" ? "개인 노트" : space?.purpose === "team" ? "팀 공유 노트" : "용도 미지정"} · {space?.name ?? "현재 공간"}</strong>
       <dl><dt>노트 폴더</dt><dd>{space?.root ?? "폴더 정보를 불러오는 중…"}</dd>
@@ -88,7 +96,6 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
       <p className="muted">개인·팀 표시는 Git 접근 권한을 바꾸지 않습니다. 업로드한 문서는 연결된 저장소의 접근 권한을 따릅니다.</p>
       <button className="secondary-button" disabled={busy} onClick={onManageSpaces}>개인·팀 공간 관리</button>
     </div>
-    {modeSelect}
     {personal ? <><p>File Storage 안의 일반 파일은 확장자와 관계없이 파일당 25 MiB까지 동기화합니다.</p><label>이 기기 이름<input value={form.deviceName ?? ""} maxLength={80} placeholder="예: Cloud PC" onChange={e=>update("deviceName",e.target.value)} /></label>
       <p>{repository?.available === false ? "이 폴더의 노트를 처음 올리려면 Git 서비스에서 빈 저장소를 만든 뒤 아래에 주소를 입력하세요." : "다른 PC에서도 같은 저장소와 브랜치를 선택하면 이 폴더의 노트를 이어 쓸 수 있습니다."}</p>
       <details open={zipPaths?.length>0 && status.config?.mode!=="personal-sync"}><summary>{zipPaths===null?"기존 ZIP 확인 중":"함께 전송할 기존 ZIP "+zipPaths.length+"개"}</summary>
@@ -109,6 +116,7 @@ export default function GitSettings({ startPersonal = false, status, space, onRe
       {!personal && <p className="muted">보충 백업도 오늘의 백업으로 계산합니다. 변경이 없으면 커밋하지 않으며, 수동 백업은 추가 커밋을 만들 수 있습니다.</p>}
     </details>
     <div className="settings-actions">
+      {personal && form.remote && <p>이 PC의 {space.root} ↔ 입력한 저장소의 {form.branch} 브랜치. 기존 노트를 새 PC로 받으려면 ‘기존 저장소 가져오기’를 선택하세요.</p>}
       <button className="primary-button" disabled={busy || !form.remote || personal && (!form.deviceName?.trim() || zipPaths===null)} onClick={() => run(() => onConnect(personal?{...form,zipPaths}:form))}>{personal?"이 설정으로 동기화":status.enabled ? "백업 설정 적용" : "연결하고 백업 시작"}</button>
       <button className="secondary-button" disabled={busy || !form.remote || personal && !form.deviceName?.trim()} onClick={() => run(() => onClone(form))}>기존 저장소 가져오기</button>
       <button className="secondary-button" disabled={busy || !status.enabled || personal !== connectedPersonal} onClick={() => run(() => onSync(personal))}>{personal?"지금 동기화":"지금 백업"}</button>

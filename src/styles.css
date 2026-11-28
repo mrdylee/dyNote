@@ -2471,3 +2471,45 @@ input[aria-label="웹 뷰어 주소"] { display: block; width: 100%; border: 1px
 .find-hit mark { background:var(--accent-soft); color:var(--accent-ink); }
 .find-hit ins { color:var(--accent-ink); margin-left:3px; }
 .find-confirm { flex-wrap:wrap; padding:6px; background:var(--soft); font-size:11px; }
+
+.first-use-guide {
+  width: min(100%, 550px);
+  margin: 0 auto;
+  padding: clamp(18px, 4vw, 44px);
+  display: grid;
+  gap: 10px;
+}
+.modal .first-use-guide { padding: 8px 0; }
+.first-use-guide h2 { margin: 0 0 12px; font-size: 22px; }
+.first-use-guide > button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 15px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: left;
+}
+.first-use-guide > button:hover { background: var(--accent-soft); }
+.first-use-guide svg { width: 20px; flex-shrink: 0; color: var(--accent); }
+.first-use-guide small { display: block; margin-top: 3px; color: var(--muted); line-height: 1.5; }
+.first-use-guide summary { cursor: pointer; padding: 6px 0; }
+.first-use-guide dt { font-weight: 600; }
+.first-use-guide dd { margin: 3px 0 10px; line-height: 1.5; }
+.first-use-tip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: 10px 10px 10px 2px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.first-use-tip button { color: var(--accent-ink); text-decoration: underline; }
