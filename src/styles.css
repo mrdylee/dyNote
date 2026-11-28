@@ -941,6 +941,8 @@ kbd {
 .markdown-answer table { display: block; overflow: auto; border-collapse: collapse; }
 .markdown-answer td, .markdown-answer th { border: 1px solid var(--border); padding: 5px; }
 .copilot-progress { margin-bottom: 12px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.copilot-project-review pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; user-select: text; }
+.copilot-progress li { white-space: pre-wrap; }
 .copilot-progress ul { padding-left: 18px; line-height: 1.8; }
 .copilot-attachments { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
 .copilot-attachments > button { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 5px; background: white; padding: 5px 7px; font-size: 10px; max-width: 100%; overflow-wrap: anywhere; }

@@ -81,6 +81,8 @@ contextBridge.exposeInMainWorld(
     },
     copilotLogin: () => call("copilot-login"),
     copilotCancelLogin: () => call("copilot-cancel-login"),
+    copilotProject: args => call("copilot-project", args),
+    copilotProjectDecision: args => call("copilot-project-decision", args),
     copilotSend: (args) => call("copilot-send", args),
     copilotCancel: (args) => call("copilot-cancel", args),
     onCopilotEvent: (callback) => {

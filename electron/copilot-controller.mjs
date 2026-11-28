@@ -1,4 +1,6 @@
 import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { configureProjectTools } from "./copilot-project.mjs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { MAX_ANSWER, prepareRequest, reasoningCapabilities, safeLoginUrl, sessionOptions, validateReasoningEffort } from "../core/copilot.mjs";
@@ -73,8 +75,8 @@ export class CopilotController {
     return result;
   }
 
-  send(input) {
-    const job = this.#startJob(input);
+  send(input, projectRoot) {
+    const job = this.#startJob(input, undefined, undefined, projectRoot);
     return { requestId: job.id };
   }
 
@@ -88,12 +90,12 @@ export class CopilotController {
     return terminal.content;
   }
 
-  #startJob(input, login, deadline) {
+  #startJob(input, login, deadline, projectRoot) {
     const args = prepareRequest(input);
     if (this.closed) throw new Error("Copilot이 종료되었습니다.");
     const id = login ? "cloud:" + args.requestId : args.requestId;
     if (this.loginJob || this.jobs.has(id)) throw new Error("Copilot 작업이 진행 중입니다.");
-    const job = { id, login, deadline, canceled: false, session: null };
+    const job = { id, login, deadline, projectRoot, abort: new AbortController(), approvals: new Map(), canceled: false, session: null };
     this.jobs.set(job.id, job);
     job.promise = this.run(job, args);
     return job;
@@ -137,6 +139,16 @@ export class CopilotController {
         options.systemMessage = { ...options.systemMessage, content: options.systemMessage.content
           .replace("Use only the Dynote tools to read permitted notes and prepare writing changes.", "Use Dynote tools to read permitted notes and prepare writing changes. You may also use the configured MCP tools and skills when relevant. Use dynote_list_skills to discover selected skills and dynote_use_skill to read their instructions or relative resources; scripts are not executed by that tool.")
           .replace("No shell or external filesystem access is available.", "Do not use MCP tools or skills to bypass Dynote note permissions or draft review.") };
+      }
+      if (job.projectRoot && args.mode === "agent" && !job.login) {
+        configureProjectTools(options, { root: job.projectRoot, signal: job.abort.signal, emit,
+          confirm: review => new Promise(resolve => {
+            if (job.abort.signal.aborted) return resolve(false);
+            const approvalId = randomUUID();
+            job.approvals.set(approvalId, resolve);
+            emit("project-review", { approvalId, review });
+          }),
+        });
       }
       job.session = await client.createSession(options);
       if (job.canceled) return;
@@ -185,6 +197,7 @@ export class CopilotController {
       failed = true;
       if (!job.canceled) terminal = { type: "error", error: message(error) };
     } finally {
+      this.#endReviews(job);
       unsubscribe?.();
       if (job.session) {
         if (failed || job.canceled) await job.session.abort().catch(() => {});
@@ -197,10 +210,26 @@ export class CopilotController {
     return terminal;
   }
 
+  decideProjectAction({ requestId, approvalId, allow }) {
+    const job = this.jobs.get(requestId);
+    const approvals = job?.approvals;
+    const resolve = approvals?.get(approvalId);
+    if (!resolve) throw new Error("이미 종료된 프로젝트 작업입니다.");
+    approvals.delete(approvalId);
+    resolve(allow === true && !job.failure && !job.canceled && !this.closed);
+  }
+
+  #endReviews(job) {
+    job.abort.abort();
+    for (const resolve of job.approvals.values()) resolve(false);
+    job.approvals.clear();
+  }
+
   async cancel(requestId) {
     const jobs = requestId ? [this.jobs.get(requestId)].filter(Boolean) : [...this.jobs.values()];
     await Promise.all(jobs.filter(job => this.closed || !job.login).map(async job => {
       job.canceled = true;
+      this.#endReviews(job);
       await job.session?.abort().catch(() => {});
     }));
   }

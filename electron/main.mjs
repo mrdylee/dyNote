@@ -14,6 +14,7 @@ import {
   safeStorage,
   powerMonitor,
 } from "electron";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, realpath, readdir } from "node:fs/promises";
 import { DocumentDrafts } from "./document-drafts.mjs";
@@ -314,11 +315,11 @@ async function changeAiExtensions(action) {
   finally { aiExtensionsChanging = false; }
 }
 
-function sendAi(controller, args) {
+function sendAi(controller, args, projectRoot) {
   if (activating) throw new Error("보관함 전환을 마친 뒤 AI 요청을 보내 주세요.");
   checkVault(args, args?.workspace === true ? workspaceVault(args.vaultId) : vault);
   if (aiExtensionsChanging) throw new Error("MCP·스킬 연결을 변경 중입니다. 잠시 후 다시 보내 주세요.");
-  return controller.send(args);
+  return controller.send(args, projectRoot);
 }
 
 function retiringVault(selected, purpose) {
@@ -662,6 +663,7 @@ app
       onStatus: value => { if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-status", value); },
       onOpen: value => { if (value.created) openedVaults.get(value.vaultId)?.git.markDirty(value.vaultId); if (!window.webContents.isDestroyed()) window.webContents.send("notes:plugin-open-note", value); },
     });
+    const projects = new Map();
     const chatHistory = new CopilotHistory(path.join(app.getPath("userData"), "copilot-history"));
     const documentDrafts = new DocumentDrafts(path.join(app.getPath("userData"), "tmp", "copilot-documents"));
     const pickedTeamFolders = new Set();
@@ -670,7 +672,7 @@ app
       return readExplorerClipboard();
     });
     const scopedActions = new Set([
-      "copilot-history", "open-sticky", "create-folder", "move-across-vaults",
+      "copilot-project", "copilot-history", "open-sticky", "create-folder", "move-across-vaults",
       "capture-status", "capture-sessions", "capture-configure", "capture-reconnect", "capture-source", "capture-sync", "capture-trash", "capture-restore", "snapshot",
       "git-history", "classification-preview", "classification-apply", "composer-preview", "composer-apply", "pdf-preview", "pdf-apply",
       "git-workspace-status", "git-workspace-diff", "git-workspace-action", "git-preview", "git-restore",
@@ -802,7 +804,21 @@ app
       "open-web-viewer": (args) => openWebViewer(args?.url, window),
       "copilot-login": () => directCopilot().login(),
       "copilot-cancel-login": () => directCopilot().cancelLogin(),
-      "copilot-send": args => sendAi(directCopilot(), args),
+      "copilot-project": async (args, target) => {
+        checkVault(args, target);
+        if (args.clear) { projects.delete(target.id); return null; }
+        const picked = await dialog.showOpenDialog(window, { title: "Copilot 코드 프로젝트 선택", properties: ["openDirectory"] });
+        if (picked.canceled) return null;
+        const project = { id: randomUUID(), root: await realpath(picked.filePaths[0]) };
+        projects.set(target.id, project);
+        return project;
+      },
+      "copilot-project-decision": args => directCopilot().decideProjectAction(args),
+      "copilot-send": args => {
+        const project = args.projectId && projects.get(args.vaultId);
+        if (args.projectId && (args.mode !== "agent" || project?.id !== args.projectId)) throw new Error("코드 프로젝트를 다시 선택해 주세요.");
+        return sendAi(directCopilot(), args, project?.root);
+      },
       "copilot-cancel": (args) => directCopilot().cancel(args?.requestId),
       "capture-status": (args, vault) => { checkVault(args, vault); return copilotJournal.status(vault); },
       "capture-sessions": (args, vault) => {

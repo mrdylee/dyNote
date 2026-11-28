@@ -37,6 +37,12 @@ GitHub Copilot에 직접 연결된 패널의 질문창에 이미지를 붙여 �
 
 **⋯ → Skill · MCP 관리**에서 Skill 폴더나 MCP 설정 JSON을 등록합니다. 등록된 경로와 MCP 서버 이름을 확인하고 연결을 해제할 수 있습니다. 설정은 이 PC의 Agent 연결에 적용되며, 해제한 원본 파일은 유지됩니다.
 
+## 프로젝트 코드와 터미널
+
+로컬 Copilot 패널의 **Agent → 코드 프로젝트 선택**에서 작업 폴더를 엽니다. 파일 이름과 원하는 변경을 입력하면 Copilot이 프로젝트를 읽고 새 파일이나 수정할 코드 조각을 표시합니다. **코드 적용**을 누르면 해당 파일에 저장됩니다.
+
+빌드나 테스트를 요청하면 프로젝트 경로와 터미널 명령이 나타납니다. **명령 실행**을 누르면 현재 사용자 권한으로 실행하며, Copilot은 출력을 읽고 작업을 이어갑니다. 명령에는 프로젝트 밖에 영향을 주는 동작도 포함될 수 있으므로 실행할 명령을 확인하세요. **거절**은 해당 작업만 취소합니다. **프로젝트 해제**를 누르면 다음 요청에서 프로젝트 도구가 빠집니다. 대화 복원은 이미 적용한 코드와 실행한 명령에 영향을 주지 않습니다.
+
 ## Ask and revise
 
 - **문서 없음:** excludes the current note. Explicit attachments and optionally
@@ -88,7 +94,7 @@ For Edit mode, changed buffers still require a new proposal.
 
 Context is limited to 64 KiB, prompts to 8 KiB, retained dialogue to 32 KiB and
 answers to 128 KiB. Oversized input is rejected, not silently shortened.
-Attached notes have a combined 128 KiB limit. An Agent request allows up to
+Attached notes have a combined 128 KiB limit. The note tools in an Agent request allow up to
 24 tool calls, 256 KiB of reads and five distinct draft documents. Cumulative
 emitted draft content totals at most 256 KiB, including repeated edits.
 Model availability, quota and organization policy are controlled by GitHub.
@@ -98,7 +104,7 @@ the chosen text and dialogue are transmitted to Copilot when sent.
 ## Implementation and verification
 
 `@github/copilot-sdk` is pinned to 1.0.23 with runtime 1.0.100. Its SDK account-flow
-API is currently marked experimental. Agent sessions expose the four Dynote note tools and any explicitly registered skills and MCP servers. The selected JSON controls which tools each MCP server exposes. Ask and Edit use the supplied context. The runtime runs outside the vault with automatic configuration discovery disabled.
+API is currently marked experimental. Agent sessions expose the four Dynote note tools and any explicitly registered skills and MCP servers. The selected JSON controls which tools each MCP server exposes. Ask and Edit use the supplied context. Project-enabled Agent sessions additionally expose the SDK file and shell tools in the chosen folder. Other sessions use the private runtime workspace. Automatic configuration discovery stays disabled.
 The four tools use `skipPermission` because they only read explicitly permitted
 snapshots or stage drafts. Actual note writes still require Keep (Agent) or
 reviewed Apply (Edit), and use the vault's path, exclusive-create and revision checks.

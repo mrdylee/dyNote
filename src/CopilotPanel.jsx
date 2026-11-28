@@ -48,6 +48,8 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   const [proposals, setProposals] = useState([]);
   const [review, setReview] = useState(null);
   const [applying, setApplying] = useState(false);
+  const [project, setProject] = useState(null);
+  const [projectReviews, setProjectReviews] = useState([]);
   const [progress, setProgress] = useState([]);
   const [attachment, setAttachment] = useState(null);
   const [references, setReferences] = useState([]);
@@ -81,6 +83,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         if (request.image) setAttachment(null);
         if (request.mode === "edit") setProposals([{ id: request.requestId, kind: "edit", path: request.target.path, target: request.target, content: event.content }]);
       }
+      if (event.type === "project-review") setProjectReviews(old => [...old, event]);
       if (event.type === "tool") setProgress((old) => [...old, event.message].slice(-24));
       if (event.type === "proposal") {
         const proposal = event.proposal;
@@ -92,6 +95,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
       if (event.type === "error") setError(event.error);
       if (event.type === "canceled") setError("응답을 중지했습니다. 질문을 수정해 다시 보낼 수 있습니다.");
       if (["done", "error", "canceled"].includes(event.type)) {
+        setProjectReviews([]);
         if (request.chatId) chatHistory("finish", { chatId: request.chatId, requestId: request.requestId, status: event.type, content: event.content || request.reply || event.error }).catch(e => setError(e.message));
         if (request.mode === "agent") latest.current.liveEdits.finish(request.requestId);
         if (event.type !== "done") {
@@ -125,7 +129,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
   }, [note?.path]);
   useEffect(() => {
     if (visible && transcript.current) transcript.current.scrollTop = messages.length ? transcript.current.scrollHeight : 0;
-  }, [messages, progress, proposals, visible]);
+  }, [messages, progress, proposals, projectReviews, visible]);
   const authBusy = auth && ["starting", "waiting"].includes(auth.phase);
   useEffect(() => {
     session.setActivity("chat", !!(running || authBusy), vaultId);
@@ -205,7 +209,7 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         { id: `${requestId}-user`, requestId, role: "user", content: args.prompt, imageName: attachment?.name, complete: true, mode },
         { id: requestId, checkpoint: request.chatId ? requestId : null, role: "assistant", content: "", complete: false, mode },
       ]);
-      try { await invoke(ai.send(args)); request.sent = true; }
+      try { await invoke(ai.send(independent && mode === "agent" && project ? { ...args, projectId: project.id } : args)); request.sent = true; }
       catch (e) {
         if (pending.current !== request) return;
         setMessages(old => old.filter(message => message.id !== requestId && message.id !== `${requestId}-user`));
@@ -250,6 +254,18 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
     finally { setApplying(false); }
   };
 
+  async function selectProject(clear = false) {
+    try {
+      const selected = await invoke(api.copilotProject({ vaultId, clear }));
+      if (clear || selected) setProject(selected);
+    } catch (e) { setError(e.message); }
+  }
+  async function decideProjectAction({ requestId, approvalId }, allow) {
+    try {
+      await invoke(api.copilotProjectDecision({ requestId, approvalId, allow }));
+      setProjectReviews(old => old.filter(item => item.approvalId !== approvalId));
+    } catch (e) { setError(e.message); }
+  }
   async function showHistory() {
     try { setError(""); setHistoryList(await chatHistory("list")); }
     catch (e) { setError(e.message); }
@@ -336,8 +352,22 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
         {m.checkpoint && m.complete && <button className="text-action" disabled={running || applying || busy || m.checkpoint === lastRequestId}
           onClick={() => { setError(""); setCheckpoint({ id: m.checkpoint, lastRequestId }); }}>복원 지점</button>}
       </article>)}
-      {!!progress.length && <details className="copilot-progress" open={running}><summary>문서 작업 · {progress.length}단계{running ? " · 진행 중" : ""}</summary>
+      {!!progress.length && <details className="copilot-progress" open={running}><summary>작업 기록 · {progress.length}단계{running ? " · 진행 중" : ""}</summary>
         <ul>{progress.map((text, i) => <li key={i}>{text}</li>)}</ul></details>}
+      {projectReviews.map(item => {
+        const { review } = item;
+        return <section className="copilot-proposal copilot-project-review" key={item.approvalId}>
+          <strong>{review.kind === "shell" ? "터미널 명령 확인" : review.kind === "create" ? "코드 파일 생성" : "코드 변경 확인"}</strong>
+          <p>{review.root}</p>
+          {review.kind === "shell" ? <pre>{review.command}</pre> : <>
+            <strong>{review.path}</strong>
+            {review.kind === "edit" && <><p>바꾸기 전</p><pre>{review.before}</pre></>}
+            <p>적용할 내용</p><pre>{review.after}</pre>
+          </>}
+          <button onClick={() => decideProjectAction(item, true)}>{review.kind === "shell" ? "명령 실행" : "코드 적용"}</button>
+          <button onClick={() => decideProjectAction(item, false)}>거절</button>
+        </section>;
+      })}
       {proposals.map((proposal) => <div className="copilot-proposal" key={proposal.id}>
         <p>{proposal.path} · {proposal.kind === "create" ? "새 문서" : "수정안"}</p>
         {isStale(proposal) && <p>문서가 변경되었거나 같은 이름이 있습니다. 다시 요청해 주세요.</p>}
@@ -365,6 +395,10 @@ function ProviderPanel({ api, vaultId, session, provider, onProvider, note, note
           <input aria-label="참고 문서 검색" placeholder="문서 이름 검색" value={attachmentSearch} onChange={(e) => setAttachmentSearch(e.target.value)} />
           <div>{notes.filter((n) => n.path !== note?.path && !references.includes(n.path) && n.path.toLocaleLowerCase().includes(attachmentSearch.toLocaleLowerCase())).slice(0, 100).map((n) => <button type="button" disabled={references.length >= 5 || running} key={n.path} onClick={() => { setReferences((old) => [...old, n.path]); setAttachmentsOpen(false); }}>{n.path}</button>)}</div>
         </div>}
+        {independent && mode === "agent" && <>
+          <button type="button" disabled={running || applying || !vaultId} onClick={() => selectProject()} title={project?.root}>코드 프로젝트 {project ? "변경" : "선택"}</button>
+          {project && <><button type="button" disabled={running || applying} onClick={() => selectProject(true)}>프로젝트 해제</button><small>{project.root}</small></>}
+        </>}
         {mode === "agent" && <label className="copilot-vault-access"><input type="checkbox" checked={vaultAccess} disabled={running} onChange={(e) => setVaultAccess(e.target.checked)} />보관함 검색·읽기 허용</label>}
         {mode === "agent" && vaultAccess && <small>검색 결과와 읽은 문서가 {label}에 전송됩니다.</small>}
       </div>
