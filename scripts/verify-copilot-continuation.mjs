@@ -54,9 +54,17 @@ try {
   await panel.getByLabel("Copilot 모델").selectOption("auto");
   const drafts = async id => page.evaluate(id => JSON.parse(localStorage.getItem(`dynote.copilot.drafts.${id}`) || "[]"), id);
   const ask = async () => {
+    const previousRequests = await app.evaluate(() => globalThis.continuationRequests.length);
     await panel.getByLabel("Copilot 질문").fill("Continue the current work");
     await panel.getByRole("button", { name: "Copilot 보내기", exact: true }).click();
     await panel.getByRole("button", { name: "Copilot 응답 중지", exact: true }).waitFor();
+    await app.evaluate(async (_, previousRequests) => {
+      const until = Date.now() + 12000;
+      while (globalThis.continuationRequests.length === previousRequests) {
+        if (Date.now() >= until) throw new Error("Copilot request did not reach the test handler");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }, previousRequests);
   };
   const call = async (name, args) => app.evaluate((_, { name, args }) => globalThis.continuationTools.find(tool => tool.name === `dynote_${name}`).handler(args), { name, args });
   const edit = async (path, content) => {
@@ -84,8 +92,11 @@ try {
   const pane = page.locator('.document-pane[data-document-path="Home.md"]');
   for (const mode of ["읽기 보기", "편집 보기", "분할 보기"]) {
     await page.getByRole("button", { name: mode, exact: true }).click();
-    await pane.hover(); await page.mouse.wheel(0, 2400);
-    await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"]').scrollTop > 300);
+    const paneSelector = '.document-pane[data-document-path="Home.md"]';
+    const scrollSelector = mode === "분할 보기" ? paneSelector + " .preview-column" : paneSelector;
+    const scroller = page.locator(scrollSelector);
+    await scroller.hover(); await page.mouse.wheel(0, 2400);
+    await page.waitForFunction(selector => document.querySelector(selector).scrollTop > 300, scrollSelector);
     const position = await pane.evaluate(pane => {
       const viewport = pane.getBoundingClientRect(), heading = pane.querySelector('.pane-heading').getBoundingClientRect();
       const buttons = [...pane.querySelectorAll('.copilot-live-actions button')].map(button => {
@@ -95,7 +106,7 @@ try {
       return { top: viewport.top, bottom: viewport.bottom, headingBottom: heading.bottom, buttons };
     });
     assert.ok(position.buttons.every(button => button.top >= position.headingBottom && button.bottom <= position.bottom && button.hit), `${mode}: review controls must remain visible and clickable after wheel scrolling: ${JSON.stringify(position)}`);
-    await pane.evaluate(pane => { pane.scrollTop = 0; });
+    await scroller.evaluate(element => { element.scrollTop = 0; });
   }
   report.checks.push("Keep/Undo/Compare remain visible and clickable below the title while scrolling in read/edit/split views");
   await pane.getByRole("button", { name: "원본·초안 비교", exact: true }).click();
@@ -106,8 +117,9 @@ try {
   await transfer.dispose();
   await page.locator('.document-pane[data-document-path="Ref.md"]').waitFor();
   // The comparison panes scroll independently. Send the wheel to the document itself.
-  await pane.locator(".pane-heading").hover(); await page.mouse.wheel(0, 1800);
-  await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"]').scrollTop > 300);
+  const homePreview = pane.locator(".split .preview-column");
+  await homePreview.hover(); await page.mouse.wheel(0, 1800);
+  await page.waitForFunction(() => document.querySelector('.document-pane[data-document-path="Home.md"] .split .preview-column').scrollTop > 300);
   assert.equal(await pane.getByRole("button", { name: "변경 유지", exact: true }).evaluate(button => {
     const r = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
   }), true);
