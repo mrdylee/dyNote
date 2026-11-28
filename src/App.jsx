@@ -2624,11 +2624,10 @@ export default function App() {
           </button>
           <button
             className="search-shortcut"
-            onClick={() => openSearch(true)}
+            onClick={() => openSearch(false)}
           >
             <Search size={15} />
-            <span>본문 검색·바꾸기</span>
-            <kbd>{isMac ? "⇧⌘F" : "Ctrl+Shift+F"}</kbd>
+            <span>모든 문서 검색</span>
           </button>
           <div className="nav-section-title">
             <span>{section === "search" ? "검색 결과" : "내 문서"}</span>
@@ -2654,7 +2653,7 @@ export default function App() {
           : section === "search" ? <>
             <div className="search-kind" role="group" aria-label="검색 방식">
               <button aria-pressed={!bodySearch} onClick={()=>openSearch(false)}>문서 검색</button>
-              <button aria-pressed={bodySearch} onClick={()=>openSearch(true)}>본문 검색·바꾸기</button>
+              <button aria-pressed={bodySearch} title={isMac ? "⇧⌘F" : "Ctrl+Shift+F"} onClick={()=>openSearch(true)}>본문 검색·바꾸기</button>
             </div>
             {bodySearch ? <WorkspaceFind files={workspaceFiles} busy={busy} onOpen={openWorkspaceMatch} onReplace={replaceWorkspaceResults}/> :
             <div className="search-panel">
