@@ -612,6 +612,10 @@ app
             { role: "zoomOut" },
           ],
         },
+        {
+          label: "도움말",
+          submenu: [{ label: "처음 사용 안내", click: () => { showMainWindow(); window.webContents.send("notes:open-settings", "first-use"); } }],
+        },
       ]),
     );
     window.webContents.on("context-menu", async (_event, params) => {
@@ -869,7 +873,7 @@ app
       },
       snapshot: (args, vault) => vault ? vault.snapshot() : { id: null, name: "보관함 선택 필요", notes: [], documents: [], attachments: [], warnings: [vaultError] },
       "workspace-snapshots": () => startup.run("vault.read-workspaces", workspaceSnapshots),
-      "vaults": () => ({ entries: registry.list(), current: vault?.root ?? null, currentId: vault?.id ?? null, error: vaultError }),
+      "vaults": () => ({ isDemo: vault?.root === path.join(app.getPath("userData"), "처음 만나는 노트"), entries: registry.list(), current: vault?.root ?? null, currentId: vault?.id ?? null, error: vaultError }),
       "set-vault-purpose": async (args) => {
         await registry.setPurpose(args?.root, args?.purpose);
         const entry = [...openedVaults.values()].find(entry => entry.vault.root === args.root);

@@ -63,6 +63,7 @@ export default function GitHubRepositoryPicker({ onLogin, onCopy, onConnect, dis
       if (session.current === id) reset();
     } catch (e) { if (session.current === id) { setBusy(false); setError(e.message); } }
   }
+  const selected = repos.find(repo => String(repo.id) === choice);
   return <>
     {stage === "idle" && <button className="primary-button" disabled={disabled} onClick={start}>GitHub 로그인</button>}
     {stage === "starting" && <p role="status">GitHub 로그인 여는 중…</p>}
@@ -75,6 +76,7 @@ export default function GitHubRepositoryPicker({ onLogin, onCopy, onConnect, dis
       {repos.length > 0 ? <label>노트 저장소<select aria-label="노트 저장소" value={choice} disabled={busy || disabled} onChange={e => setChoice(e.target.value)}>
         <option value="">저장소 선택</option>{repos.map(repo => <option key={repo.id} value={repo.id}>{repo.name} · {repo.private ? "비공개" : "공개"}</option>)}
       </select></label> : !busy && !error && <p>GitHub에서 Dynote가 동기화할 노트 저장소를 허용해 주세요.</p>}
+      {selected && <p>이 PC의 노트 폴더를 {selected.name} 저장소의 {selected.branch} 브랜치와 동기화합니다.</p>}
       <div className="settings-actions">
         {repos.length > 0 && <button className="primary-button" disabled={busy || disabled || !choice} onClick={connect}>선택한 저장소 연결</button>}
         <button className="secondary-button" disabled={busy} onClick={install}>GitHub에서 저장소 허용</button>

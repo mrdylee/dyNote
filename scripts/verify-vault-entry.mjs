@@ -12,13 +12,14 @@ const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, "gitconfig"), G
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
 const remote = "https://notes.example.invalid/personal.git", bare = path.join(root, "personal.git");
 let app, page, checkedCloudSettings = false;
-async function launch(name) {
+async function launch(name, fromGuide = false) {
   const profile = path.join(root,name); await mkdir(profile);
   app = await _electron.launch({ executablePath: process.env.DYNOTE_EXECUTABLE || createRequire(import.meta.url)("electron"),
     args: process.env.DYNOTE_EXECUTABLE ? [] : ["."], env: { ...env, OPEN_NOTES_DATA: profile } });
   page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].setSize(1050,700));
+  if (fromGuide) { await button("다른 PC의 노트 가져오기").click(); return; }
   await page.getByRole("button",{name:"공간 전환·관리",exact:true}).click();
   if (!checkedCloudSettings) {
     const settings = page.getByRole("dialog", {name:"설정", exact:true});
@@ -78,14 +79,14 @@ try {
   await assert.rejects(access(path.join(other,".git")),{code:"ENOENT"});
   assert.equal(await readFile(path.join(other,"초안.md"),"utf8"),"로컬 초안\n");
   await app.close();app=null;
-  await launch("fresh-profile");
-  await button("기존 Git 저장소에서 가져오기").click();
+  await launch("fresh-profile", true);
   const form=page.getByRole("form",{name:"개인 노트 가져오기"});
   await form.getByLabel("저장소 주소").fill(remote); await form.getByLabel("이 기기 이름").fill("새 PC");
   await pick(other);await button("빈 폴더 선택하고 가져오기").click();
   await page.getByRole("alert").filter({hasText:"빈 폴더"}).waitFor();
   await pick(local);await button("빈 폴더 선택하고 가져오기").click();
   await page.getByRole("dialog",{name:"설정",exact:true}).waitFor({state:"hidden"});
+  await page.locator('.file-row[title="회의.md"]').first().waitFor();
   assert.equal(await readFile(path.join(local,"회의.md"),"utf8"),"오후 세 시\n");
   assert.equal(git(local,"config","remote.origin.url"),remote);
   const reg=JSON.parse(await readFile(path.join(root,"fresh-profile","settings.json"),"utf8"));
