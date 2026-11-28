@@ -15,9 +15,32 @@ export function spaceLabel(space) {
   return `${kind} · ${space.name}`;
 }
 
+// Only restore documents still present in the connected vaults.
+export function documentSession(saved, vaults) {
+  if (!Array.isArray(saved?.tabs) || !Array.isArray(saved.paths)) return null;
+  const available = new Set(Object.values(vaults).flatMap(vault =>
+    [...vault.notes, ...(vault.documents ?? [])].map(file => documentKey(vault.id, file.path))));
+  const tabs = [...new Set(saved.tabs.filter(key => available.has(key)))];
+  if (!tabs.length) return null;
+  const paths = [...new Set(saved.paths.filter(key => tabs.includes(key)))].slice(0, 3);
+  if (!paths.length) paths.push(tabs.at(-1));
+  const active = paths.includes(saved.active) ? saved.active : paths[0];
+  const modes = {}, widths = {};
+  for (const key of tabs) {
+    const mode = saved.modes?.[key], width = saved.widths?.[key];
+    if (['live','read','split','edit','mindmap'].includes(mode)) modes[key] = mode;
+    if (Number.isFinite(width) && width >= 180 && width <= 900) widths[key] = width;
+  }
+  return { tabs, paths, active, modes, widths, viewingDocuments: saved.viewingDocuments === true };
+}
+
 export function workspaceAction(value, action, initialMarkdownMode = () => 'live') {
   const state = value ?? {paths:[], active:null, modes:{}};
   const {path} = action;
+  if (action.type === 'restore') {
+    const {paths, active, modes} = action.session;
+    return {paths, active, modes};
+  }
   if (action.type === 'reset') return {paths:path ? [path] : [], active:path ?? null, modes:path&&/\.md$/i.test(path)?{[path]:initialMarkdownMode(path)}:{}};
   if (action.type === 'mode') return {...state, modes:{...state.modes,[path ?? state.active]:action.mode}};
   if (action.type === 'rename') {

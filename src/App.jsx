@@ -51,13 +51,14 @@ import {
 import useVaultDocuments from "./useVaultDocuments.jsx";
 import WorkspaceFind from "./WorkspaceFind.jsx";
 import DocumentWorkspace from "./DocumentWorkspace.jsx";
+import { validReadingPosition } from "./split-reading-position.mjs";
 import useDocumentWorkspace from "./useDocumentWorkspace.jsx";
 import JournalFeed from "./JournalFeed.jsx";
 import CopilotJournalEntries,{CopilotJournalHistory,CopilotJournalToolbar} from "./CopilotJournalEntries.jsx";
 import CopilotJournalSettings from "./CopilotJournalSettings.jsx";
 import ClassificationReview from "./ClassificationReview.jsx";
 import { classificationSuggestions } from "../core/journal-sections.mjs";
-import { DOCUMENT_DRAG, TAB_DRAG, documentKey, documentRef, spaceLabel } from "../core/document-workspace.mjs";
+import { DOCUMENT_DRAG, TAB_DRAG, documentKey, documentRef, documentSession, spaceLabel } from "../core/document-workspace.mjs";
 import { FILE_TREE_DRAG, protectedTreeFolders, canTrashFolder, managedCopilotPath, pathInTree, renamedTreePath, treeRenameDestination } from "../core/file-tree.mjs";
 import { journalPreferences as defaultJournalPreferences } from "../core/journal-start.mjs";
 import Graph from "./Graph.jsx";
@@ -437,14 +438,26 @@ export default function App() {
     }).catch(()=>{});
     return()=>{mounted=false;unsubscribe();};
   },[]);
-  const [startup, setStartup] = useState(() => stored("dynote.startup", "journal"));
+  const [startup, setStartup] = useState(() => stored("dynote.startup", "auto"));
   const [tabs, setTabs] = useState([]);
+  const paneSizing = useState({});
+  const [paneWidths, setPaneWidths] = paneSizing;
+  const startupSpaces = useRef(null);
+  const saveDocumentSession = useRef(null);
   const tabReadingPositions = useRef(new Map());
   useEffect(() => {
     const open = new Set(tabs);
     for (const key of tabReadingPositions.current.keys())
       if (!open.has(key)) tabReadingPositions.current.delete(key);
   }, [tabs]);
+  saveDocumentSession.current = () => {
+    if (!selectedVaultId) return;
+    const session = documentSession({ tabs, ...workspace, widths: paneWidths,
+      viewingDocuments: showingDocument && !attachment && !showingExternal }, vaultsRef.current);
+    if (session) session.positions = Object.fromEntries(session.tabs.filter(key => tabReadingPositions.current.has(key))
+      .map(key => [key, tabReadingPositions.current.get(key)]));
+    persist(`dynote.workspace.${selectedVaultId}`, session);
+  };
   const [documentDrafts, setDocumentDrafts] = useState([]);
   const draftsRef = useRef([]), restoredDrafts = useRef(new Set());
   draftsRef.current = documentDrafts;
@@ -780,7 +793,7 @@ export default function App() {
     reconcileScope(snapshot.id, paths);
     return navigation;
   }, [installVault, reconcileScope]);
-  const install = useCallback((snapshot, select = false) => {
+  const install = useCallback((snapshot, select = false, saved = null) => {
     const changedVault = select && selectedVault.current !== snapshot.id;
     const navigation = acceptSnapshot(snapshot);
     if (!snapshot.id) { setSettingsTab("vault"); setModal("settings"); }
@@ -793,9 +806,20 @@ export default function App() {
       const startPath = navigation.recent[0] ?? snapshot.notes.find(n => n.path === "시작하기.md")?.path
         ?? snapshot.notes[0]?.path ?? snapshot.documents?.[0]?.path ?? null;
       const key = documentKey(snapshot.id, startPath);
-      workspace.dispatch({ type: "reset", path: key });
-      setTabs(old => [...new Set([...(key ? [key] : []), ...old.filter(key => key.startsWith("external:") || draftsRef.current.some(draft => draftKey(draft) === key))])]);
-      setSection(stored("dynote.startup", "journal") === "journal" ? "journal" : "files");
+      const session = documentSession(saved, vaultsRef.current);
+      const startScreen = stored("dynote.startup", "auto");
+      if (session) {
+        for (const key of session.tabs) {
+          const position = saved.positions?.[key];
+          if (validReadingPosition(position)) tabReadingPositions.current.set(key, position);
+        }
+        workspace.dispatch({ type: "restore", session });
+      } else workspace.dispatch({ type: "reset", path: key });
+      setPaneWidths(session?.widths ?? {});
+      setTabs(old => [...new Set([...(session?.tabs ?? (key ? [key] : [])), ...old.filter(key =>
+        key.startsWith("external:") || draftsRef.current.some(draft => draftKey(draft) === key))])]);
+      const resumePanels = startScreen === "auto" && session?.viewingDocuments && session.paths.length > 1;
+      setSection(startScreen === "last" || resumePanels ? "files" : "journal");
     }
     if (select || currentVault.current === snapshot.id) {
       setEditorSelection(null);
@@ -870,7 +894,9 @@ export default function App() {
     const primary = data.entries.find(entry => entry.root === data.current);
     if (primary) updateVault(selectedId, old => old && ({ ...old, root: primary.root, purpose: primary.purpose }));
     setSpaces(data);
-    const entries = await invoke(api.workspaceSnapshots());
+    const cached = startupSpaces.current;
+    startupSpaces.current = null;
+    const entries = cached?.id === selectedId && !refresh ? cached.entries : await invoke(api.workspaceSnapshots());
     if (selectedId !== selectedVault.current || load !== spaceLoad.current) return data;
     const roots = new Set(entries.map(entry => entry.root));
     for (const scope of Object.values(vaultsRef.current)) {
@@ -1066,9 +1092,19 @@ export default function App() {
     }
     api.startupStage?.("renderer.snapshot-requested");
     invoke(api.snapshot())
-      .then(snapshot => {
+      .then(async snapshot => {
         api.startupStage?.("renderer.snapshot-received");
-        install(snapshot, true);
+        const saved = stored(`dynote.workspace.${snapshot.id}`, null);
+        if (Array.isArray(saved?.tabs) && saved.tabs.some(key => typeof key === "string" && documentRef(key).vaultId !== snapshot.id)) {
+          // Resolve cross-vault panes together so the first layout has its final widths.
+          const entries = await invoke(api.workspaceSnapshots()).catch(() => []);
+          for (const entry of entries) {
+            if (entry.snapshot && entry.snapshot.id !== snapshot.id)
+              acceptSnapshot(entry.snapshot, { root: entry.root, purpose: entry.purpose });
+          }
+          if (entries.length) startupSpaces.current = { id: snapshot.id, entries };
+        }
+        install(snapshot, true, saved);
       })
       .catch(error => {
         api.startupStage?.("renderer.snapshot-error");
@@ -1089,13 +1125,14 @@ export default function App() {
         if (mode === "quit") await editsRef.current.close();
         await flush(true);
         await Promise.all(draftsRef.current.map(persistDocumentDraft));
+        if (mode === "quit") saveDocumentSession.current();
         api.confirmClose(id, true);
       } catch (error) {
         setError(error.message);
         api.confirmClose(id, false);
       }
     });
-  }, [install, flush, persistDocumentDraft]);
+  }, [install, acceptSnapshot, flush, persistDocumentDraft]);
 
   captureContext.current = { busy, modal, states: captureStates, restoringVaults };
   const updateCaptureState = useCallback((id, transform) => {
@@ -3014,7 +3051,7 @@ export default function App() {
               </div>
             ) : note && mode === "mindmap" ? <MindmapEditor key={`${vault.id}:${note.path}`} note={note} onChange={change} onConvert={convertMap} onMarkdown={() => setMode("edit")} readOnly={busy || captureLocked || writingPath(vault.id, note.path) || edits.blocked()} onError={setError}/>
             : activeDocumentDraft ? null : note ? (
-              <DocumentWorkspace workspace={workspace} tabReadingPositions={tabReadingPositions.current} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
+              <DocumentWorkspace workspace={workspace} sizing={paneSizing} tabReadingPositions={tabReadingPositions.current} resolveDocument={resolveDocument} onOpen={openWorkspaceKey} onAdd={addPane}
                 onContext={(editor, element, selection)=>{editorView.current=editor;preview.current=element;setEditorSelection(old=>old===selection?old:selection);}}
                 fonts={fonts} onFontSettings={()=>{setSettingsTab("fonts");setModal("settings");}}
                 onMakeDocument={(source, id) => makeCopilotDocument({ ...source, title: captureTreeEntries.get(id)?.get(source.path)?.label ?? source.title }, id)}
@@ -3686,7 +3723,7 @@ export default function App() {
               <button key={key} aria-pressed={settingsTab === key || (key === "git" && settingsTab === "personal-sync")} disabled={busy} onClick={() => setSettingsTab(key)}>{label}</button>)}
           </nav>}
           {settingsTab === "cloud-repository" && <CloudRepositorySettings api={api} openBackup={() => setSettingsTab("git")} />}
-          {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
+          {settingsTab === "general" && <section className="settings-section"><h3>앱 시작 화면</h3><label>시작할 때 <select aria-label="시작 화면" value={startup} onChange={e=>{setStartup(e.target.value);persist("dynote.startup",e.target.value);}}><option value="auto">다중 패널 이어 보기 (없으면 오늘의 저널)</option><option value="journal">오늘의 저널</option><option value="last">마지막 문서</option></select></label><p>저널 파일 이름과 폴더는 달력과 일지 설정에서 변경할 수 있습니다.</p></section>}
           {settingsTab === "theme" && <fieldset className="theme-picker">
             <legend>색상 테마</legend>
             <div className="theme-options">

@@ -111,8 +111,9 @@ function DocumentPane(props) {
   </Pane></PaneReadingPosition></div>;
 }
 
-export function DocumentPanes({panes,renderPane}) {
-  const [widths,setWidths]=useState({});
+export function DocumentPanes({panes,renderPane,sizing}) {
+  const localSizing=useState({});
+  const [widths,setWidths]=sizing ?? localSizing;
   const drag=useRef(null);
   return <div className="document-workspace">
     {panes.map((pane,index)=><Fragment key={pane.key}>
@@ -128,12 +129,12 @@ export function DocumentPanes({panes,renderPane}) {
   </div>;
 }
 
-export default function DocumentWorkspace({workspace,resolveDocument,onOpen,onAdd,onContext,...props}) {
+export default function DocumentWorkspace({workspace,sizing,resolveDocument,onOpen,onAdd,onContext,...props}) {
   const visible=workspace.paths.flatMap(key=>{
     const doc=resolveDocument(key);
     return doc ? [{...doc,key}] : [];
   });
-  return <DocumentPanes panes={visible} renderPane={({key,...doc})=>(
+  return <DocumentPanes sizing={sizing} panes={visible} renderPane={({key,...doc})=>(
     <DocumentPane {...props} {...doc} docKey={key} mode={workspace.modes[key]??'live'} active={workspace.active===key} limited={visible.length>=3}
           onFocus={()=>{if(workspace.active!==key)onOpen(key);}} onContext={onContext}
           onClose={()=>workspace.dispatch({type:'close',path:key})} onDrop={(path,side)=>onAdd(path,side,key)}
