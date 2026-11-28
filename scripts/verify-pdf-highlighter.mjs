@@ -51,13 +51,27 @@ try {
   await openLines();
   await pen.click();
   const textLayer = page.locator('.native-pdf-text');
-  const firstLine = await textLayer.getByText('First line of the selection', {exact:true}).boundingBox();
-  const lastLine = await textLayer.getByText('Last line of the selection', {exact:true}).boundingBox();
+  const first = textLayer.getByText('First line of the selection', {exact:true});
+  const last = textLayer.getByText('Last line of the selection', {exact:true});
+  // The expanded pen toolbar can move the last line below the runner's viewport.
+  await page.getByRole('button', {name:'형광펜', exact:true, pressed:true}).waitFor();
+  await last.evaluate(span => span.scrollIntoView({block:'center', inline:'nearest'}));
+  await first.click({trial:true});
+  await last.click({trial:true});
+  const firstLine = await first.boundingBox(), lastLine = await last.boundingBox();
   await page.mouse.move(firstLine.x + firstLine.width / 2, firstLine.y + firstLine.height / 2);
   await page.mouse.down();
   await page.mouse.move(lastLine.x + lastLine.width / 2, lastLine.y + lastLine.height / 2, {steps:15});
   await page.mouse.up();
-  await page.getByText('저장됨', {exact:true}).waitFor();
+  try {
+    await page.getByText('저장됨', {exact:true}).waitFor();
+  } catch (error) {
+    console.error(await page.evaluate(() => ({
+      selection: window.getSelection()?.toString(),
+      status: [...document.querySelectorAll('.pdf-toolbar [role=status], .pdf-message')].map(n => n.textContent),
+    })), errors);
+    throw error;
+  }
   const bounds = await page.locator('.pdf-pen-stroke').evaluateAll(nodes => nodes.map(n => {
     const {left,right} = n.getBoundingClientRect();
     return {left,right};

@@ -31,7 +31,6 @@ jobs:
         shell: bash
         run: echo "number=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: npm ci
-      - run: npm test
       - run: npm run package:win
       - run: node scripts/verify-release-package.mjs win32-x64
       - name: Verify Copilot, Word previews and update controls on Windows
@@ -59,6 +58,7 @@ jobs:
           DYNOTE_PACKAGED=1 node scripts/verify-personal-sync-ui.mjs
           node --test --test-name-pattern="launching Dynote again" scripts/verify-sticky-review.mjs
           node scripts/verify-update-install.mjs
+      - run: npm test
       - run: node scripts/package-windows-distribution.mjs
       - name: Install native document editors for Windows handoff tests
         shell: pwsh
