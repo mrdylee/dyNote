@@ -73,8 +73,8 @@ export class AiExtensions {
     }
     return { mcpServers: Object.fromEntries(servers), skillDirectories: [...skillDirectories], errors };
   }
-  async getExtensions() {
-    const { errors, ...extensions } = await this.collect();
+  async getExtensions({ includeMcp = true } = {}) {
+    const { errors, ...extensions } = await this.collect(includeMcp ? this.configs : []);
     if (errors.length) throw new Error(errors.join("\n"));
     return extensions;
   }

@@ -13,6 +13,7 @@ await writeFile(path.join(vault, "Budget$2026.md"), "budget");
 await writeFile(path.join(skill, "SKILL.md"), "---\nname: sample\ndescription: fixture C#\n---\nLocal instructions.");
 await writeFile(config, JSON.stringify({ mcpServers: { fixture: { type: "http", url: "http://127.0.0.1:1" } } }));
 const errors = [];
+const misspelledRequest = "전송 실패 확인 $sampel";
 let app, page;
 async function launch() {
   app = await _electron.launch({
@@ -22,7 +23,7 @@ async function launch() {
   page = await app.firstWindow(); page.setDefaultTimeout(10000);
   page.on("pageerror", e => errors.push(e.message));
   await page.getByRole("tab", { name: "Copilot", exact: true }).waitFor();
-  await app.evaluate(({ ipcMain, dialog }, { skill, config }) => {
+  await app.evaluate(({ ipcMain, dialog }, { skill, config, misspelledRequest }) => {
     dialog.showOpenDialog = async (...args) => {
       if (globalThis.cancelPicker) { globalThis.cancelPicker = false; return { canceled: true, filePaths: [] }; }
       const options = args.at(-1);
@@ -33,7 +34,7 @@ async function launch() {
     ipcMain.removeHandler("notes:copilot-send");
     ipcMain.handle("notes:copilot-send", (event, args) => {
       globalThis.actualChat = args;
-      if (args.prompt === "전송 실패 확인") return { ok: false, error: "테스트 전송 거절" };
+      if (args.prompt === "전송 실패 확인" || args.prompt === misspelledRequest) return { ok: false, error: "테스트 전송 거절" };
       const emit = (type, fields) => event.sender.send("notes:copilot-event", { requestId: args.requestId, type, ...fields });
       if (args.mode === "agent" && args.prompt === "두 노트를 작성") {
         emit("proposal", { proposal: { id: "a", kind: "edit", path: "Home.md", content: "by agent" } });
@@ -44,7 +45,7 @@ async function launch() {
       emit("done", { content: args.prompt + " 완료" });
       return { ok: true, value: {} };
     });
-  }, { skill, config });
+  }, { skill, config, misspelledRequest });
   await page.getByRole("tab", { name: "Copilot", exact: true }).click();
   await page.getByRole("button", { name: "Copilot 연결 상태 확인" }).click();
   await page.getByLabel("Copilot 모델").selectOption("auto");
@@ -71,12 +72,20 @@ try {
   await extensions.getByText(skill, { exact: false }).first().waitFor();
   await extensions.getByRole("button", { name: "MCP JSON 추가" }).click();
   await extensions.getByText("연결된 MCP 서버 · fixture").waitFor();
+  await extensions.getByRole("button", { name: "닫기" }).click();
+  const input = page.getByLabel("Copilot 질문");
+  const validConfig = await readFile(config, "utf8");
+  await writeFile(config, "{");
+  await input.fill("$sample");
+  await page.getByRole("option", { name: /sample.*fixture/ }).click();
+  await button("sample 스킬 제거").click();
+  await writeFile(config, validConfig);
+  await menu("Skill · MCP 관리");
   await extensions.locator("li").filter({ hasText: config }).getByRole("button").click();
   assert.equal(await readFile(config, "utf8").then(s => JSON.parse(s).mcpServers.fixture.type), "http");
   assert.match(await readFile(path.join(skill, "SKILL.md"), "utf8"), /Local instructions/);
   await extensions.getByRole("button", { name: "닫기" }).click();
 
-  const input = page.getByLabel("Copilot 질문");
   await input.fill("#Budget$2026");
   await page.getByRole("option", { name: "Budget$2026.md", exact: true }).waitFor();
   await input.press("Escape");
@@ -96,7 +105,15 @@ try {
   await input.fill("#"); await input.fill("#기준"); await input.press("Enter");
   await page.locator(".attachment-chip").filter({ hasText: "기준.md" }).waitFor();
   assert.equal(await app.evaluate(() => !!globalThis.actualChat), false);
-  await input.fill("전송 실패 확인"); await input.press("Enter");
+  await input.fill(misspelledRequest);
+  const noSkills = page.getByText("검색 결과가 없습니다.");
+  await noSkills.waitFor();
+  await input.press("Enter");
+  assert.equal(await input.inputValue(), misspelledRequest);
+  assert.equal(await noSkills.isVisible(), true);
+  assert.equal(await app.evaluate(() => !!globalThis.actualChat), false);
+  await input.press("Escape"); await noSkills.waitFor({ state: "hidden" });
+  await input.press("Enter");
   await page.getByText("테스트 전송 거절", { exact: true }).waitFor();
   await button("sample 스킬 제거").waitFor();
   await input.fill("기준 확인"); await input.press("Enter");

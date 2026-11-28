@@ -52,7 +52,7 @@ export default function CopilotMentions({ prompt, setPrompt, notes, references, 
   function keyDown(event) {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if ((pickingSkill || matches.length) && event.key === "Escape") { event.preventDefault(); setToken(null); return; }
-    if (pickingSkill && skills === null && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); return; }
+    if (pickingSkill && !matches.length && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); return; }
     if (matches.length) {
       if (["ArrowUp", "ArrowDown"].includes(event.key)) {
         event.preventDefault(); setIndex((index + (event.key === "ArrowUp" ? -1 : 1) + matches.length) % matches.length); return;
